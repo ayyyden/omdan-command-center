@@ -598,7 +598,7 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                     }}
                     onClick={(e) => handlePageClick(e, pg.pageNumber, pg.width, pg.height)}
                   >
-                    <CanvasDisplay canvas={pg.canvas} />
+                    <CanvasDisplay canvas={pg.canvas} cssWidth={pg.width} cssHeight={pg.height} />
 
                     {pageFields.map((f) => {
                       const fx = f.x * pg.width
@@ -636,18 +636,23 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
   )
 }
 
-function CanvasDisplay({ canvas }: { canvas: HTMLCanvasElement }) {
+function CanvasDisplay({ canvas, cssWidth, cssHeight }: { canvas: HTMLCanvasElement; cssWidth: number; cssHeight: number }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = ref.current
     if (!el || !canvas) return
     el.innerHTML = ""
+    // Explicit px so the canvas buffer (which may be DPR× larger) is displayed
+    // at the same CSS dimensions as the overlay coordinate system.
+    canvas.style.width   = `${cssWidth}px`
+    canvas.style.height  = `${cssHeight}px`
+    canvas.style.display = "block"
     el.appendChild(canvas)
-  }, [canvas])
+  }, [canvas, cssWidth, cssHeight])
   return (
     <div
       ref={ref}
-      style={{ width: canvas.width, height: canvas.height, display: "block" }}
+      style={{ width: cssWidth, height: cssHeight }}
     />
   )
 }

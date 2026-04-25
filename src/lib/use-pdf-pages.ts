@@ -46,7 +46,7 @@ export function usePdfPages(url: string | null, containerWidth: number) {
           if (cancelled) return
           const page = await pdfDoc.getPage(i)
           const nativeViewport = page.getViewport({ scale: 1 })
-          // Render at devicePixelRatio for crisp display on retina screens
+          // Render at DPR scale for crisp display on retina screens
           const scale = (containerWidth / nativeViewport.width) * dpr
           const viewport = page.getViewport({ scale })
 
@@ -57,11 +57,17 @@ export function usePdfPages(url: string | null, containerWidth: number) {
           await page.render({ canvas, viewport }).promise
           if (cancelled) return
 
+          // CSS dimensions are derived purely from the aspect ratio — no DPR in these values.
+          // Field overlay positions and CanvasDisplay both use these CSS dimensions so
+          // the coordinate systems always match, regardless of devicePixelRatio.
+          const cssWidth  = containerWidth
+          const cssHeight = Math.round(containerWidth * nativeViewport.height / nativeViewport.width)
+
           rendered.push({
             pageNumber: i,
             canvas,
-            width:     containerWidth,                    // CSS pixels
-            height:    Math.floor(viewport.height / dpr), // CSS pixels
+            width:     cssWidth,
+            height:    cssHeight,
             pdfWidth:  nativeViewport.width,
             pdfHeight: nativeViewport.height,
           })

@@ -321,6 +321,21 @@ export function SignClient({ token, contractName, pdfUrl, fields }: Props) {
                 {pages.map((pg) => {
                   const pageFields = fields.filter((f) => f.page_number === pg.pageNumber)
                   const pdfScale = pg.width / pg.pdfWidth
+                  if (process.env.NODE_ENV === "development") {
+                    console.log(`[sign-client] page ${pg.pageNumber}`, {
+                      cssWidth: pg.width, cssHeight: pg.height,
+                      pdfScale: pdfScale.toFixed(4),
+                      dpr: typeof window !== "undefined" ? window.devicePixelRatio : "SSR",
+                      canvasBuf: `${pg.canvas.width}×${pg.canvas.height}`,
+                      fields: pageFields.map(f => ({
+                        id: f.id.slice(0, 6), type: f.field_type,
+                        cssLeft: +(f.x * pg.width).toFixed(1),
+                        cssTop:  +(f.y * pg.height).toFixed(1),
+                        cssW:    +(f.width * pg.width).toFixed(1),
+                        cssH:    +(f.height * pg.height).toFixed(1),
+                      })),
+                    })
+                  }
                   return (
                     <div
                       key={pg.pageNumber}
@@ -424,11 +439,13 @@ function FieldInput({
     const d = TEXT_FORMAT_DEFAULTS[ft] ?? TEXT_FORMAT_DEFAULTS.text
     const opts = field.options ?? {}
     return {
-      fontSize:      `${(opts.fontSize  ?? d.fontSize)  * pdfScale}px`,
+      // Clamp to 10px minimum — on small mobile screens pdfScale < 1 can produce
+      // sub-readable sizes (e.g. 10pt × 0.58 = 5.8px). 10px is the floor for legibility.
+      fontSize:      `${Math.max(10, (opts.fontSize ?? d.fontSize) * pdfScale)}px`,
       lineHeight:    opts.lineHeight ?? d.lineHeight,
       fontWeight:    opts.fontWeight ?? d.fontWeight,
-      textAlign:     (opts.textAlign  ?? d.textAlign) as React.CSSProperties["textAlign"],
-      padding:       `${(opts.padding  ?? d.padding)   * pdfScale}px`,
+      textAlign:     (opts.textAlign ?? d.textAlign) as React.CSSProperties["textAlign"],
+      padding:       `${Math.max(1, (opts.padding ?? d.padding) * pdfScale)}px`,
       fontFamily:    "Helvetica, Arial, sans-serif",
       color:         "#0d0d1a",
     }
@@ -476,13 +493,18 @@ function FieldInput({
       )
 
     case "date":
+      // Use type="text" instead of type="date": iOS Safari renders date inputs as
+      // a native spinner that hides text until tapped and mispositions the calendar
+      // icon outside the overlay bounds.
       return (
         <div style={style} title={field.label}>
           <input
-            type="date"
+            type="text"
+            inputMode="numeric"
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full h-full focus:outline-none bg-transparent border-0"
+            placeholder="MM/DD/YYYY"
+            className="w-full h-full focus:outline-none bg-transparent border-0 placeholder:text-slate-400/50"
             style={textStyle("date")}
           />
         </div>
@@ -582,11 +604,12 @@ function CanvasDisplay({ canvas, cssWidth, cssHeight }: { canvas: HTMLCanvasElem
     const el = ref.current
     if (!el) return
     el.innerHTML = ""
-    // Scale the canvas buffer to CSS pixel dimensions so retina canvases don't overflow
-    canvas.style.width  = "100%"
-    canvas.style.height = "100%"
+    // Explicit px — not "100%" — so mobile browsers never miscompute the canvas display size.
+    // The canvas buffer may be DPR× larger; these CSS values scale it down to the overlay dimensions.
+    canvas.style.width   = `${cssWidth}px`
+    canvas.style.height  = `${cssHeight}px`
     canvas.style.display = "block"
     el.appendChild(canvas)
-  }, [canvas])
+  }, [canvas, cssWidth, cssHeight])
   return <div ref={ref} style={{ width: cssWidth, height: cssHeight }} />
 }
