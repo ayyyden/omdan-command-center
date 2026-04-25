@@ -16,7 +16,9 @@
       "Bash(npm list *)",
       "Bash(mkdir -p /c/Users/Edan/Documents/omdan-command-center/src/app/sign-contract/\\\\[token\\\\])",
       "Bash(mkdir -p /c/Users/Edan/Documents/omdan-command-center/src/app/api/contracts/sign/\\\\[token\\\\])",
-      "Read(//c/Users/Edan/Documents/omdan-command-command-center/src/app/api/contracts/sign/[token]/**)"
+      "Read(//c/Users/Edan/Documents/omdan-command-command-center/src/app/api/contracts/sign/[token]/**)",
+      "Bash(git -C \"C:/Users/Edan/Documents/omdan-command-center\" check-ignore -v public/pdf.worker.min.mjs)",
+      "Bash(git -C \"C:/Users/Edan/Documents/omdan-command-center\" ls-files public/pdf.worker.min.mjs)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Edan\\Documents\\omdan-command-center",

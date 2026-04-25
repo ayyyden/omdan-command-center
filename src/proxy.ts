@@ -47,5 +47,10 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  // Exclude static assets and the pdfjs worker file so they are served directly
+  // without auth logic. The worker must be reachable by unauthenticated users
+  // (e.g. customers opening a signing link) — without this exclusion, Vercel
+  // runs the proxy before serving public/ files and redirects the worker fetch
+  // to /login, returning HTML instead of JS.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|pdf\\.worker|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 }
