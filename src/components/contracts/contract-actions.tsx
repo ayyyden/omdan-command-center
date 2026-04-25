@@ -79,7 +79,7 @@ export function ContractActions({ contract }: Props) {
 
   return (
     <>
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <FieldEditorDialog
           contractTemplateId={contract.id}
           contractName={contract.name}

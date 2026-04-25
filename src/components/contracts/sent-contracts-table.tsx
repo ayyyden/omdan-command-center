@@ -191,109 +191,133 @@ export function SentContractsTable({ sent, appUrl }: Props) {
       ) : (
         <>
           {/* Mobile card list */}
-          <div className="sm:hidden space-y-2">
+          <div className="sm:hidden space-y-3">
             {rows.map((s) => (
               <div
                 key={s.id}
-                className={`rounded-lg border bg-card p-3 flex gap-3 transition-colors ${
+                className={`rounded-lg border bg-card p-4 space-y-3 transition-colors ${
                   selected.has(s.id) ? "border-primary/50 bg-primary/5" : ""
                 }`}
               >
-                <input
-                  type="checkbox"
-                  checked={selected.has(s.id)}
-                  onChange={() => toggleRow(s.id)}
-                  className="h-4 w-4 cursor-pointer accent-primary mt-0.5 shrink-0"
-                  aria-label={`Select sent contract for ${s.contract_template?.name ?? "contract"} to ${s.recipient_email}`}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="font-semibold leading-tight truncate">
-                      {s.contract_template?.name ?? "—"}
-                    </span>
-                    {s.status === "signed" ? (
-                      <Badge className="bg-green-100 text-green-700 border border-green-200 hover:bg-green-100 shrink-0">
-                        Signed
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-100 shrink-0">
-                        Sent
-                      </Badge>
-                    )}
+                {/* Header row: checkbox + name + status */}
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(s.id)}
+                    onChange={() => toggleRow(s.id)}
+                    className="h-4 w-4 cursor-pointer accent-primary mt-0.5 shrink-0"
+                    aria-label={`Select sent contract for ${s.contract_template?.name ?? "contract"} to ${s.recipient_email}`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-semibold leading-tight">
+                        {s.contract_template?.name ?? "—"}
+                      </span>
+                      {s.status === "signed" ? (
+                        <Badge className="bg-green-100 text-green-700 border border-green-200 hover:bg-green-100 shrink-0">
+                          Signed
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-100 shrink-0">
+                          Sent
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 truncate">{s.recipient_email}</p>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5 truncate">{s.recipient_email}</p>
-                  <div className="flex items-center gap-x-2 flex-wrap mt-0.5">
-                    {s.customer && (
-                      <span className="text-xs text-muted-foreground">{s.customer.name}</span>
-                    )}
-                    {s.job && (
-                      <span className="text-xs text-muted-foreground">{s.job.title}</span>
-                    )}
-                    <span className="text-xs text-muted-foreground ml-auto">{fmtDate(s.sent_at)}</span>
+                </div>
+
+                {/* Meta: customer, job, dates */}
+                <div className="text-xs text-muted-foreground space-y-0.5 pl-7">
+                  {(s.customer || s.job) && (
+                    <div className="flex flex-wrap gap-x-3">
+                      {s.customer && (
+                        <span
+                          className="hover:text-primary cursor-pointer"
+                          onClick={() => (window.location.href = `/customers/${s.customer!.id}`)}
+                        >
+                          {s.customer.name}
+                        </span>
+                      )}
+                      {s.job && (
+                        <span
+                          className="hover:text-primary cursor-pointer"
+                          onClick={() => (window.location.href = `/jobs/${s.job!.id}`)}
+                        >
+                          {s.job.title}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-x-3">
+                    <span>Sent {fmtDate(s.sent_at)}</span>
+                    {s.signed_at && <span>Signed {fmtDate(s.signed_at)}</span>}
                   </div>
-                  <div className="flex items-center gap-0.5 mt-2">
-                    {s.status !== "signed" && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        title="Open signing link"
-                        aria-label="Open signing link"
-                        onClick={() => window.open(`${appUrl}/sign-contract/${s.signing_token}`, "_blank")}
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
-                    {s.status !== "signed" && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        title="Resend email"
-                        aria-label="Resend contract email"
-                        disabled={resending === s.id}
-                        onClick={() => handleResend(s)}
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${resending === s.id ? "animate-spin" : ""}`} />
-                      </Button>
-                    )}
-                    {s.status === "signed" && s.signed_pdf_path && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        title="View signed PDF"
-                        aria-label="View signed PDF"
-                        onClick={() => handleViewPdf(s)}
-                      >
-                        <FileText className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
-                    {s.customer && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        title="View customer"
-                        aria-label={`View customer ${s.customer.name}`}
-                        onClick={() => (window.location.href = `/customers/${s.customer!.id}`)}
-                      >
-                        <User className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
-                    {s.job && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        title="View job"
-                        aria-label={`View job ${s.job.title}`}
-                        onClick={() => (window.location.href = `/jobs/${s.job!.id}`)}
-                      >
-                        <Briefcase className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
-                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex flex-wrap gap-2 pl-7 pt-1 border-t border-border/50">
+                  {s.status !== "signed" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-9 gap-1.5 text-xs px-3"
+                      onClick={() => window.open(`${appUrl}/sign-contract/${s.signing_token}`, "_blank")}
+                      aria-label="Open signing link"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Open Link
+                    </Button>
+                  )}
+                  {s.status !== "signed" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-9 gap-1.5 text-xs px-3"
+                      disabled={resending === s.id}
+                      onClick={() => handleResend(s)}
+                      aria-label="Resend contract email"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${resending === s.id ? "animate-spin" : ""}`} />
+                      Resend
+                    </Button>
+                  )}
+                  {s.status === "signed" && s.signed_pdf_path && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-9 gap-1.5 text-xs px-3"
+                      onClick={() => handleViewPdf(s)}
+                      aria-label="View signed PDF"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      View PDF
+                    </Button>
+                  )}
+                  {s.customer && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-9 gap-1.5 text-xs px-3"
+                      onClick={() => (window.location.href = `/customers/${s.customer!.id}`)}
+                      aria-label={`View customer ${s.customer.name}`}
+                    >
+                      <User className="w-3.5 h-3.5" />
+                      Customer
+                    </Button>
+                  )}
+                  {s.job && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-9 gap-1.5 text-xs px-3"
+                      onClick={() => (window.location.href = `/jobs/${s.job!.id}`)}
+                      aria-label={`View job ${s.job.title}`}
+                    >
+                      <Briefcase className="w-3.5 h-3.5" />
+                      Job
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
