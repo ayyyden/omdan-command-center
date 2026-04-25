@@ -11,7 +11,7 @@ export default function CustomerDetailLoading() {
           <Skeleton className="h-8 w-20" />
         </div>
       </div>
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Skeleton className="h-52 rounded-lg" />
           <Skeleton className="h-52 rounded-lg" />

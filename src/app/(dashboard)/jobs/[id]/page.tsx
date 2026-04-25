@@ -189,7 +189,7 @@ export default async function JobDetailPage({ params }: PageProps) {
         }
       />
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
         {/* Command bar */}
         <Card>
           <CardContent className="py-3 px-4">

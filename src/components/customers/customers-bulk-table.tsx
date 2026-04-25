@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast"
 import { formatDate, formatPhone } from "@/lib/utils"
 import { Clock, UserPlus } from "lucide-react"
 import Link from "next/link"
+import { cn } from "@/lib/utils"
 import type { LeadStatus } from "@/types"
 
 const ACTIVE_STAGES = new Set<string>([
@@ -77,6 +78,19 @@ export function CustomersBulkTable({ customers, userId, lastContact }: Props) {
     router.refresh()
   }
 
+  const emptyState = (
+    <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+      <UserPlus className="w-8 h-8 text-muted-foreground/40" />
+      <div>
+        <p className="font-medium text-muted-foreground">No leads yet</p>
+        <p className="text-sm text-muted-foreground/60 mt-0.5">Add your first customer or lead to get started.</p>
+      </div>
+      <Link href="/customers/new" className="text-sm font-medium text-primary hover:underline">
+        Add your first lead →
+      </Link>
+    </div>
+  )
+
   return (
     <div className="space-y-3">
       <BulkBar
@@ -87,108 +101,161 @@ export function CustomersBulkTable({ customers, userId, lastContact }: Props) {
         deleting={deleting}
       />
 
-      <div className="rounded-lg border bg-card overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-10 px-3">
-                <HeaderCheckbox allSelected={allSelected} someSelected={someSelected} onChange={toggleAll} />
-              </TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Phone</TableHead>
-              <TableHead>Service</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Last Contact</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Added</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {customers.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="py-16">
-                  <div className="flex flex-col items-center justify-center gap-3 text-center">
-                    <UserPlus className="w-8 h-8 text-muted-foreground/40" />
-                    <div>
-                      <p className="font-medium text-muted-foreground">No leads yet</p>
-                      <p className="text-sm text-muted-foreground/60 mt-0.5">Add your first customer or lead to get started.</p>
-                    </div>
-                    <Link href="/customers/new" className="text-sm font-medium text-primary hover:underline">
-                      Add your first lead →
-                    </Link>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : (
-              customers.map((c) => {
-                const lc           = lastContact[c.id] ?? null
-                const lastActivity = lc ?? c.updated_at
-                const days         = daysSince(lastActivity)
-                const isStale      = ACTIVE_STAGES.has(c.status) && days >= 7
-                const isVeryStale  = ACTIVE_STAGES.has(c.status) && days >= 14
+      {customers.length === 0 ? (
+        <div className="rounded-lg border bg-card">{emptyState}</div>
+      ) : (
+        <>
+          {/* Mobile card list */}
+          <div className="sm:hidden space-y-2">
+            {customers.map((c) => {
+              const lc           = lastContact[c.id] ?? null
+              const lastActivity = lc ?? c.updated_at
+              const days         = daysSince(lastActivity)
+              const isStale      = ACTIVE_STAGES.has(c.status) && days >= 7
+              const isVeryStale  = ACTIVE_STAGES.has(c.status) && days >= 14
 
-                return (
-                  <TableRow
-                    key={c.id}
-                    className={
-                      selected.has(c.id)  ? "bg-primary/5"           :
-                      isVeryStale         ? "bg-destructive/[0.03]"   :
-                      isStale             ? "bg-warning/[0.03]"        : ""
-                    }
-                  >
-                    <TableCell className="px-3">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(c.id)}
-                        onChange={(e) => toggle(c.id, e.target.checked)}
-                        className="h-4 w-4 cursor-pointer accent-primary"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Link href={`/customers/${c.id}`} className="font-semibold hover:text-primary transition-colors">
+              return (
+                <div
+                  key={c.id}
+                  className={cn(
+                    "rounded-lg border bg-card p-3 flex gap-3",
+                    selected.has(c.id) ? "border-primary/50 bg-primary/5" :
+                    isVeryStale        ? "border-destructive/30 bg-destructive/[0.03]" :
+                    isStale            ? "border-warning/30 bg-warning/[0.03]" : ""
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(c.id)}
+                    onChange={(e) => toggle(c.id, e.target.checked)}
+                    className="h-4 w-4 cursor-pointer accent-primary mt-0.5 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <Link href={`/customers/${c.id}`} className="font-semibold hover:text-primary leading-tight">
                         {c.name}
                       </Link>
-                      {c.email && <p className="text-xs text-muted-foreground mt-0.5">{c.email}</p>}
-                    </TableCell>
-                    <TableCell className="text-sm">{c.phone ? formatPhone(c.phone) : "—"}</TableCell>
-                    <TableCell className="text-sm">{c.service_type ?? "—"}</TableCell>
-                    <TableCell className="text-sm">
-                      {c.lead_source ? (SOURCE_LABELS[c.lead_source] ?? c.lead_source) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        {isStale && (
-                          <Clock className={[
-                            "w-3.5 h-3.5 shrink-0",
-                            isVeryStale ? "text-destructive" : "text-warning",
-                          ].join(" ")} />
-                        )}
-                        <div>
-                          <p className={[
-                            "text-xs font-medium",
-                            isVeryStale ? "text-destructive" : isStale ? "text-warning" : "text-muted-foreground",
-                          ].join(" ")}>
-                            {lc ? formatDate(lc) : "—"}
-                          </p>
-                          {isStale && (
-                            <p className={["text-[10px]", isVeryStale ? "text-destructive" : "text-warning"].join(" ")}>
-                              {days}d no contact
-                            </p>
-                          )}
-                        </div>
+                      <div className="shrink-0">
+                        <InlineLeadStatus customerId={c.id} currentStatus={c.status as LeadStatus} />
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <InlineLeadStatus customerId={c.id} currentStatus={c.status as LeadStatus} />
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{formatDate(c.created_at)}</TableCell>
-                  </TableRow>
-                )
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
+                    </div>
+                    {c.email && <p className="text-xs text-muted-foreground mt-0.5 truncate">{c.email}</p>}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
+                      {c.phone && (
+                        <span className="text-xs text-muted-foreground">{formatPhone(c.phone)}</span>
+                      )}
+                      {c.service_type && (
+                        <span className="text-xs text-muted-foreground">{c.service_type}</span>
+                      )}
+                      {c.lead_source && (
+                        <span className="text-xs text-muted-foreground">
+                          {SOURCE_LABELS[c.lead_source] ?? c.lead_source}
+                        </span>
+                      )}
+                    </div>
+                    {isStale && (
+                      <div className={cn(
+                        "flex items-center gap-1 mt-1.5",
+                        isVeryStale ? "text-destructive" : "text-warning"
+                      )}>
+                        <Clock className="w-3 h-3 shrink-0" />
+                        <span className="text-xs font-medium">{days}d no contact</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden sm:block rounded-lg border bg-card overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10 px-3">
+                    <HeaderCheckbox allSelected={allSelected} someSelected={someSelected} onChange={toggleAll} />
+                  </TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Service</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Last Contact</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Added</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {customers.map((c) => {
+                  const lc           = lastContact[c.id] ?? null
+                  const lastActivity = lc ?? c.updated_at
+                  const days         = daysSince(lastActivity)
+                  const isStale      = ACTIVE_STAGES.has(c.status) && days >= 7
+                  const isVeryStale  = ACTIVE_STAGES.has(c.status) && days >= 14
+
+                  return (
+                    <TableRow
+                      key={c.id}
+                      className={
+                        selected.has(c.id)  ? "bg-primary/5"           :
+                        isVeryStale         ? "bg-destructive/[0.03]"   :
+                        isStale             ? "bg-warning/[0.03]"        : ""
+                      }
+                    >
+                      <TableCell className="px-3">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(c.id)}
+                          onChange={(e) => toggle(c.id, e.target.checked)}
+                          className="h-4 w-4 cursor-pointer accent-primary"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Link href={`/customers/${c.id}`} className="font-semibold hover:text-primary transition-colors">
+                          {c.name}
+                        </Link>
+                        {c.email && <p className="text-xs text-muted-foreground mt-0.5">{c.email}</p>}
+                      </TableCell>
+                      <TableCell className="text-sm">{c.phone ? formatPhone(c.phone) : "—"}</TableCell>
+                      <TableCell className="text-sm">{c.service_type ?? "—"}</TableCell>
+                      <TableCell className="text-sm">
+                        {c.lead_source ? (SOURCE_LABELS[c.lead_source] ?? c.lead_source) : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          {isStale && (
+                            <Clock className={[
+                              "w-3.5 h-3.5 shrink-0",
+                              isVeryStale ? "text-destructive" : "text-warning",
+                            ].join(" ")} />
+                          )}
+                          <div>
+                            <p className={[
+                              "text-xs font-medium",
+                              isVeryStale ? "text-destructive" : isStale ? "text-warning" : "text-muted-foreground",
+                            ].join(" ")}>
+                              {lc ? formatDate(lc) : "—"}
+                            </p>
+                            {isStale && (
+                              <p className={["text-[10px]", isVeryStale ? "text-destructive" : "text-warning"].join(" ")}>
+                                {days}d no contact
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <InlineLeadStatus customerId={c.id} currentStatus={c.status as LeadStatus} />
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{formatDate(c.created_at)}</TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      )}
 
       <ConfirmDeleteDialog
         open={confirmOpen}

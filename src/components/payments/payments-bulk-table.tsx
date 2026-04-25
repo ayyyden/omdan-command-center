@@ -10,6 +10,7 @@ import { ConfirmDeleteDialog } from "@/components/shared/confirm-delete-dialog"
 import { useSelection } from "@/hooks/use-selection"
 import { useToast } from "@/hooks/use-toast"
 import { formatCurrency, formatDate } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import Link from "next/link"
 
 interface PaymentRow {
@@ -61,69 +62,120 @@ export function PaymentsBulkTable({ payments, userId }: Props) {
         deleting={deleting}
       />
 
-      <div className="rounded-lg border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-10 px-3">
-                <HeaderCheckbox allSelected={allSelected} someSelected={someSelected} onChange={toggleAll} />
-              </TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Job</TableHead>
-              <TableHead>Amount</TableHead>
-              <TableHead>Method</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Notes</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {payments.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
-                  No payments yet. Record payments from a job page.
-                </TableCell>
-              </TableRow>
-            ) : (
-              payments.map((pmt) => (
-                <TableRow key={pmt.id} className={selected.has(pmt.id) ? "bg-primary/5" : ""}>
-                  <TableCell className="px-3">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(pmt.id)}
-                      onChange={(e) => toggle(pmt.id, e.target.checked)}
-                      className="h-4 w-4 cursor-pointer accent-primary"
-                    />
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {pmt.customer ? (
-                      <Link href={`/customers/${pmt.customer.id}`} className="font-medium hover:text-primary">
-                        {pmt.customer.name}
-                      </Link>
-                    ) : "—"}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {pmt.job ? (
-                      <Link href={`/jobs/${pmt.job.id}`} className="hover:text-primary">
-                        {pmt.job.title}
-                      </Link>
-                    ) : "—"}
-                  </TableCell>
-                  <TableCell className="font-bold text-success">
-                    {formatCurrency(Number(pmt.amount))}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="capitalize">
+      {payments.length === 0 ? (
+        <div className="rounded-lg border bg-card py-12 text-center text-sm text-muted-foreground">
+          No payments yet. Record payments from a job page.
+        </div>
+      ) : (
+        <>
+          {/* Mobile card list */}
+          <div className="sm:hidden space-y-2">
+            {payments.map((pmt) => (
+              <div
+                key={pmt.id}
+                className={cn(
+                  "rounded-lg border bg-card p-3 flex gap-3",
+                  selected.has(pmt.id) ? "border-primary/50 bg-primary/5" : ""
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(pmt.id)}
+                  onChange={(e) => toggle(pmt.id, e.target.checked)}
+                  className="h-4 w-4 cursor-pointer accent-primary mt-0.5 shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      {pmt.customer ? (
+                        <Link href={`/customers/${pmt.customer.id}`} className="font-semibold hover:text-primary leading-tight">
+                          {pmt.customer.name}
+                        </Link>
+                      ) : (
+                        <span className="font-semibold text-muted-foreground">—</span>
+                      )}
+                      {pmt.job && (
+                        <Link href={`/jobs/${pmt.job.id}`} className="text-xs text-muted-foreground hover:text-primary mt-0.5 block truncate">
+                          {pmt.job.title}
+                        </Link>
+                      )}
+                    </div>
+                    <span className="font-bold text-success text-sm tabular-nums shrink-0">
+                      {formatCurrency(Number(pmt.amount))}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Badge variant="outline" className="capitalize text-xs">
                       {pmt.method.replace("_", " ")}
                     </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{formatDate(pmt.date)}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{pmt.notes ?? "—"}</TableCell>
+                    <span className="text-xs text-muted-foreground">{formatDate(pmt.date)}</span>
+                    {pmt.notes && (
+                      <span className="text-xs text-muted-foreground truncate">{pmt.notes}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden sm:block rounded-lg border bg-card overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10 px-3">
+                    <HeaderCheckbox allSelected={allSelected} someSelected={someSelected} onChange={toggleAll} />
+                  </TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Job</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Method</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Notes</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              </TableHeader>
+              <TableBody>
+                {payments.map((pmt) => (
+                  <TableRow key={pmt.id} className={selected.has(pmt.id) ? "bg-primary/5" : ""}>
+                    <TableCell className="px-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(pmt.id)}
+                        onChange={(e) => toggle(pmt.id, e.target.checked)}
+                        className="h-4 w-4 cursor-pointer accent-primary"
+                      />
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {pmt.customer ? (
+                        <Link href={`/customers/${pmt.customer.id}`} className="font-medium hover:text-primary">
+                          {pmt.customer.name}
+                        </Link>
+                      ) : "—"}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {pmt.job ? (
+                        <Link href={`/jobs/${pmt.job.id}`} className="hover:text-primary">
+                          {pmt.job.title}
+                        </Link>
+                      ) : "—"}
+                    </TableCell>
+                    <TableCell className="font-bold text-success">
+                      {formatCurrency(Number(pmt.amount))}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="capitalize">
+                        {pmt.method.replace("_", " ")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{formatDate(pmt.date)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{pmt.notes ?? "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      )}
 
       <ConfirmDeleteDialog
         open={confirmOpen}

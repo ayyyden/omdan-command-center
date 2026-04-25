@@ -29,7 +29,7 @@ export default async function NewEstimatePage({ searchParams }: PageProps) {
   return (
     <div>
       <Topbar title="New Estimate" subtitle="Build a new estimate for a customer" />
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <EstimateForm
           customers={(customers ?? []) as any}
           userId={user.id}

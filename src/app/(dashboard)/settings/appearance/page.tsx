@@ -11,7 +11,7 @@ export default function AppearancePage() {
   return (
     <div>
       <Topbar title="Appearance" subtitle="Customize the look of your app" />
-      <div className="p-6 max-w-lg">
+      <div className="p-4 sm:p-6 max-w-lg">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Theme</CardTitle>

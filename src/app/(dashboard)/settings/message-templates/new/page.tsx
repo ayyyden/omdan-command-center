@@ -10,7 +10,7 @@ export default async function NewMessageTemplatePage() {
   return (
     <div>
       <Topbar title="New Template" subtitle="Create a message template" />
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <MessageTemplateForm userId={user.id} />
       </div>
     </div>

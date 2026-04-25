@@ -25,7 +25,7 @@ export default async function EditCustomerPage({ params }: PageProps) {
   return (
     <div>
       <Topbar title="Edit Customer" subtitle={customer.name} />
-      <div className="p-6 max-w-2xl">
+      <div className="p-4 sm:p-6 max-w-2xl">
         <CustomerForm customer={customer as any} userId={user.id} />
       </div>
     </div>

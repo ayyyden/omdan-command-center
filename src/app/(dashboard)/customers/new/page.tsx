@@ -10,7 +10,7 @@ export default async function NewCustomerPage() {
   return (
     <div>
       <Topbar title="Add New Lead" subtitle="Create a new lead or customer record" />
-      <div className="p-6 max-w-2xl">
+      <div className="p-4 sm:p-6 max-w-2xl">
         <CustomerForm userId={user.id} />
       </div>
     </div>

@@ -42,7 +42,7 @@ export default async function EstimatesPage({ searchParams }: PageProps) {
         }
       />
 
-      <div className="p-6 space-y-4">
+      <div className="p-4 sm:p-6 space-y-4">
         <div className="flex flex-wrap gap-2">
           {(["all", "draft", "sent", "approved", "rejected"] as const).map((s) => (
             <Link key={s} href={s === "all" ? "/estimates" : `/estimates?status=${s}`}>

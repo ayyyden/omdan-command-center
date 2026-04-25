@@ -37,7 +37,7 @@ export default function SettingsPage() {
   return (
     <div>
       <Topbar title="Settings" subtitle="Manage your account and team" />
-      <div className="p-6 max-w-2xl space-y-3">
+      <div className="p-4 sm:p-6 max-w-2xl space-y-3">
         {settingsSections.map(({ href, icon: Icon, title, description }) => (
           <Link key={href} href={href}>
             <Card className="hover:border-primary/50 transition-colors cursor-pointer">

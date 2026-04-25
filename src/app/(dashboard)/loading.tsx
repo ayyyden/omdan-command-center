@@ -12,7 +12,7 @@ export default function DashboardSegmentLoading() {
         </div>
       </div>
       {/* Content area skeleton */}
-      <div className="p-6 space-y-4">
+      <div className="p-4 sm:p-6 space-y-4">
         <Skeleton className="h-10 w-64" />
         <Skeleton className="h-[420px] w-full rounded-lg" />
       </div>

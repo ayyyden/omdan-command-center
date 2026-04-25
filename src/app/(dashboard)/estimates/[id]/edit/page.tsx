@@ -33,7 +33,7 @@ export default async function EditEstimatePage({ params }: PageProps) {
   return (
     <div>
       <Topbar title="Edit Estimate" subtitle={estimate.title} />
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <EstimateForm
           estimate={estimate as any}
           customers={(customers ?? []) as any}

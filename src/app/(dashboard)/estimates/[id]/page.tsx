@@ -121,7 +121,7 @@ export default async function EstimateDetailPage({ params }: PageProps) {
         }
       />
 
-      <div className="p-6 space-y-4 max-w-3xl">
+      <div className="p-4 sm:p-6 space-y-4 max-w-3xl">
         {/* Status callouts */}
         {estimate.status === "sent" && (
           <div className="flex items-center gap-2 p-3 rounded-lg border border-warning/40 bg-warning/5 text-warning text-sm">

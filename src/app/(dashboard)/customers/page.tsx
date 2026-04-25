@@ -98,7 +98,7 @@ export default async function CustomersPage({ searchParams }: PageProps) {
         }
       />
 
-      <div className="p-6 space-y-5">
+      <div className="p-4 sm:p-6 space-y-5">
 
         {/* ── Pipeline stage tabs ─────────────────────────────────── */}
         <div className="overflow-x-auto pb-1">

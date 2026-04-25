@@ -67,7 +67,7 @@ export default async function ContractsPage() {
         actions={<UploadContractDialog userId={user.id} />}
       />
 
-      <div className="p-6 space-y-8">
+      <div className="p-4 sm:p-6 space-y-8">
         {/* Templates table */}
         {rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -78,8 +78,8 @@ export default async function ContractsPage() {
             </p>
           </div>
         ) : (
-          <div className="rounded-lg border bg-card overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="rounded-lg border bg-card overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead>
                 <tr className="border-b bg-muted/30">
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Name</th>

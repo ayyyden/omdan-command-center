@@ -189,152 +189,264 @@ export function SentContractsTable({ sent, appUrl }: Props) {
           No {filter === "all" ? "" : filter + " "}contracts found.
         </div>
       ) : (
-        <div className="rounded-lg border bg-card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/30">
-                <th className="px-4 py-3 w-8">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    className="rounded border-border cursor-pointer"
-                    aria-label="Select all visible rows"
-                  />
-                </th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Contract</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Customer</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Job</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Recipient</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Sent</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Signed</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/50">
-              {rows.map((s) => (
-                <tr
-                  key={s.id}
-                  className={`transition-colors ${
-                    selected.has(s.id) ? "bg-muted/50" : "hover:bg-muted/30"
-                  }`}
-                >
-                  <td className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(s.id)}
-                      onChange={() => toggleRow(s.id)}
-                      className="rounded border-border cursor-pointer"
-                      aria-label={`Select sent contract for ${s.contract_template?.name ?? "contract"} to ${s.recipient_email}`}
-                    />
-                  </td>
-                  <td className="px-4 py-3 font-medium max-w-[180px]">
-                    <span className="truncate block">{s.contract_template?.name ?? "—"}</span>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                    {s.customer?.name ?? "—"}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                    {s.job?.title ?? <span className="opacity-40">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground max-w-[180px]">
-                    <span className="truncate block">{s.recipient_email}</span>
-                  </td>
-                  <td className="px-4 py-3">
+        <>
+          {/* Mobile card list */}
+          <div className="sm:hidden space-y-2">
+            {rows.map((s) => (
+              <div
+                key={s.id}
+                className={`rounded-lg border bg-card p-3 flex gap-3 transition-colors ${
+                  selected.has(s.id) ? "border-primary/50 bg-primary/5" : ""
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(s.id)}
+                  onChange={() => toggleRow(s.id)}
+                  className="h-4 w-4 cursor-pointer accent-primary mt-0.5 shrink-0"
+                  aria-label={`Select sent contract for ${s.contract_template?.name ?? "contract"} to ${s.recipient_email}`}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-semibold leading-tight truncate">
+                      {s.contract_template?.name ?? "—"}
+                    </span>
                     {s.status === "signed" ? (
-                      <Badge className="bg-green-100 text-green-700 border border-green-200 hover:bg-green-100">
+                      <Badge className="bg-green-100 text-green-700 border border-green-200 hover:bg-green-100 shrink-0">
                         Signed
                       </Badge>
                     ) : (
-                      <Badge className="bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-100">
+                      <Badge className="bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-100 shrink-0">
                         Sent
                       </Badge>
                     )}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtDate(s.sent_at)}</td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                    {s.signed_at ? (
-                      <span>{fmtDate(s.signed_at)}</span>
-                    ) : (
-                      <span className="opacity-40">—</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">{s.recipient_email}</p>
+                  <div className="flex items-center gap-x-2 flex-wrap mt-0.5">
+                    {s.customer && (
+                      <span className="text-xs text-muted-foreground">{s.customer.name}</span>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-0.5">
-                      {s.status !== "signed" && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          title="Open signing link"
-                          aria-label="Open signing link"
-                          onClick={() =>
-                            window.open(`${appUrl}/sign-contract/${s.signing_token}`, "_blank")
-                          }
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
-                      {s.status !== "signed" && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          title="Resend email"
-                          aria-label="Resend contract email"
-                          disabled={resending === s.id}
-                          onClick={() => handleResend(s)}
-                        >
-                          <RefreshCw
-                            className={`w-3.5 h-3.5 ${resending === s.id ? "animate-spin" : ""}`}
-                          />
-                        </Button>
-                      )}
-                      {s.status === "signed" && s.signed_pdf_path && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          title="View signed PDF"
-                          aria-label="View signed PDF"
-                          onClick={() => handleViewPdf(s)}
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
-                      {s.customer && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          title="View customer"
-                          aria-label={`View customer ${s.customer.name}`}
-                          onClick={() => (window.location.href = `/customers/${s.customer!.id}`)}
-                        >
-                          <User className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
-                      {s.job && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          title="View job"
-                          aria-label={`View job ${s.job.title}`}
-                          onClick={() => (window.location.href = `/jobs/${s.job!.id}`)}
-                        >
-                          <Briefcase className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  </td>
+                    {s.job && (
+                      <span className="text-xs text-muted-foreground">{s.job.title}</span>
+                    )}
+                    <span className="text-xs text-muted-foreground ml-auto">{fmtDate(s.sent_at)}</span>
+                  </div>
+                  <div className="flex items-center gap-0.5 mt-2">
+                    {s.status !== "signed" && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        title="Open signing link"
+                        aria-label="Open signing link"
+                        onClick={() => window.open(`${appUrl}/sign-contract/${s.signing_token}`, "_blank")}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                    {s.status !== "signed" && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        title="Resend email"
+                        aria-label="Resend contract email"
+                        disabled={resending === s.id}
+                        onClick={() => handleResend(s)}
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${resending === s.id ? "animate-spin" : ""}`} />
+                      </Button>
+                    )}
+                    {s.status === "signed" && s.signed_pdf_path && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        title="View signed PDF"
+                        aria-label="View signed PDF"
+                        onClick={() => handleViewPdf(s)}
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                    {s.customer && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        title="View customer"
+                        aria-label={`View customer ${s.customer.name}`}
+                        onClick={() => (window.location.href = `/customers/${s.customer!.id}`)}
+                      >
+                        <User className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                    {s.job && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        title="View job"
+                        aria-label={`View job ${s.job.title}`}
+                        onClick={() => (window.location.href = `/jobs/${s.job!.id}`)}
+                      >
+                        <Briefcase className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden sm:block rounded-lg border bg-card overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/30">
+                  <th className="px-4 py-3 w-8">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      className="rounded border-border cursor-pointer"
+                      aria-label="Select all visible rows"
+                    />
+                  </th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Contract</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Customer</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Job</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Recipient</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Sent</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Signed</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {rows.map((s) => (
+                  <tr
+                    key={s.id}
+                    className={`transition-colors ${
+                      selected.has(s.id) ? "bg-muted/50" : "hover:bg-muted/30"
+                    }`}
+                  >
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(s.id)}
+                        onChange={() => toggleRow(s.id)}
+                        className="rounded border-border cursor-pointer"
+                        aria-label={`Select sent contract for ${s.contract_template?.name ?? "contract"} to ${s.recipient_email}`}
+                      />
+                    </td>
+                    <td className="px-4 py-3 font-medium max-w-[180px]">
+                      <span className="truncate block">{s.contract_template?.name ?? "—"}</span>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                      {s.customer?.name ?? "—"}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                      {s.job?.title ?? <span className="opacity-40">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground max-w-[180px]">
+                      <span className="truncate block">{s.recipient_email}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {s.status === "signed" ? (
+                        <Badge className="bg-green-100 text-green-700 border border-green-200 hover:bg-green-100">
+                          Signed
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-100">
+                          Sent
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtDate(s.sent_at)}</td>
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                      {s.signed_at ? (
+                        <span>{fmtDate(s.signed_at)}</span>
+                      ) : (
+                        <span className="opacity-40">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-0.5">
+                        {s.status !== "signed" && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title="Open signing link"
+                            aria-label="Open signing link"
+                            onClick={() =>
+                              window.open(`${appUrl}/sign-contract/${s.signing_token}`, "_blank")
+                            }
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {s.status !== "signed" && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title="Resend email"
+                            aria-label="Resend contract email"
+                            disabled={resending === s.id}
+                            onClick={() => handleResend(s)}
+                          >
+                            <RefreshCw
+                              className={`w-3.5 h-3.5 ${resending === s.id ? "animate-spin" : ""}`}
+                            />
+                          </Button>
+                        )}
+                        {s.status === "signed" && s.signed_pdf_path && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title="View signed PDF"
+                            aria-label="View signed PDF"
+                            onClick={() => handleViewPdf(s)}
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {s.customer && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title="View customer"
+                            aria-label={`View customer ${s.customer.name}`}
+                            onClick={() => (window.location.href = `/customers/${s.customer!.id}`)}
+                          >
+                            <User className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {s.job && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title="View job"
+                            aria-label={`View job ${s.job.title}`}
+                            onClick={() => (window.location.href = `/jobs/${s.job!.id}`)}
+                          >
+                            <Briefcase className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {/* Confirmation dialog */}

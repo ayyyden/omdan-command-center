@@ -37,7 +37,7 @@ export default async function ProjectManagersPage({ searchParams }: PageProps) {
         actions={!isArchived ? <PMFormDialog userId={user.id} /> : undefined}
       />
 
-      <div className="p-6 space-y-4">
+      <div className="p-4 sm:p-6 space-y-4">
         {/* Archived toggle */}
         <div className="flex gap-2">
           <Link href="/settings/project-managers">

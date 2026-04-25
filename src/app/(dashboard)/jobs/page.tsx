@@ -43,7 +43,7 @@ export default async function JobsPage({ searchParams }: PageProps) {
     <div>
       <Topbar title="Jobs" subtitle={`${jobs?.length ?? 0} jobs${isArchived ? " · Archived" : ""}`} />
 
-      <div className="p-6 space-y-4">
+      <div className="p-4 sm:p-6 space-y-4">
         <div className="flex flex-wrap gap-2">
           <Link href="/jobs">
             <Badge variant={!status && !isArchived ? "default" : "outline"} className="cursor-pointer">All</Badge>

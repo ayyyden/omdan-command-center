@@ -38,7 +38,7 @@ export default async function JobEditPage({ params }: PageProps) {
   return (
     <div>
       <Topbar title="Edit Job" subtitle={job.title} />
-      <div className="p-6 max-w-2xl">
+      <div className="p-4 sm:p-6 max-w-2xl">
         <JobEditForm job={jobSnapshot} pms={pms ?? []} userId={user.id} />
       </div>
     </div>

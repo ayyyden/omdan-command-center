@@ -26,7 +26,7 @@ export default async function EditMessageTemplatePage({ params }: PageProps) {
   return (
     <div>
       <Topbar title="Edit Template" subtitle={(template as MessageTemplate).name} />
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <MessageTemplateForm userId={user.id} template={template as MessageTemplate} />
       </div>
     </div>

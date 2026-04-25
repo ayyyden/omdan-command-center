@@ -131,7 +131,7 @@ export default async function DashboardPage() {
     <div>
       <Topbar title="Dashboard" subtitle="Welcome back — here's your business at a glance" />
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
         {/* Stats Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {stats.map((stat) => (

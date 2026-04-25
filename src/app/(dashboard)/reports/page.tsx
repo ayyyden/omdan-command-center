@@ -136,7 +136,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
     <div>
       <Topbar title="Reports" subtitle={dateLabel} />
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
         {/* Filters */}
         <ReportsFilters
           currentFrom={from ?? ""}

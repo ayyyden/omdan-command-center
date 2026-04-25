@@ -15,6 +15,7 @@ import {
   LogOut,
   Settings,
   ScrollText,
+  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
@@ -33,7 +34,12 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: Settings },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean
+  onClose?: () => void
+}
+
+export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
 
@@ -45,50 +51,81 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex flex-col w-64 min-h-screen bg-sidebar text-sidebar-foreground border-r border-sidebar-border shrink-0">
-      {/* Brand */}
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-sidebar-border">
-        <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary shrink-0">
-          <HardHat className="w-5 h-5 text-primary-foreground" />
-        </div>
-        <div>
-          <p className="text-sm font-bold leading-tight text-sidebar-foreground">Omdan</p>
-          <p className="text-xs text-sidebar-foreground/60 leading-tight">Command Center</p>
-        </div>
-      </div>
+    <>
+      {/* Mobile backdrop overlay */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
 
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ href, label, icon: Icon }) => {
-          const active = href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href)
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                active
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-              )}
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              {label}
-            </Link>
-          )
-        })}
-      </nav>
+      <aside
+        className={cn(
+          "flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border shrink-0",
+          // Mobile: fixed overlay panel, slides in/out
+          "fixed inset-y-0 left-0 z-50 w-72 transition-transform duration-300",
+          // Desktop: static in-flow sidebar, always visible
+          "md:static md:w-64 md:min-h-screen md:translate-x-0 md:z-auto md:transition-none",
+          isOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
+        {/* Brand */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-sidebar-border">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary shrink-0">
+              <HardHat className="w-5 h-5 text-primary-foreground" />
+            </div>
+            <div>
+              <p className="text-sm font-bold leading-tight text-sidebar-foreground">Omdan</p>
+              <p className="text-xs text-sidebar-foreground/60 leading-tight">Command Center</p>
+            </div>
+          </div>
+          {/* Close button — mobile only */}
+          <button
+            className="md:hidden p-1.5 rounded-lg text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
+            onClick={onClose}
+            aria-label="Close menu"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
-      {/* Footer */}
-      <div className="px-3 py-4 border-t border-sidebar-border">
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
-        >
-          <LogOut className="w-4 h-4 shrink-0" />
-          Sign Out
-        </button>
-      </div>
-    </aside>
+        {/* Nav */}
+        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+          {navItems.map(({ href, label, icon: Icon }) => {
+            const active = href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href)
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={onClose}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  active
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                )}
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                {label}
+              </Link>
+            )
+          })}
+        </nav>
+
+        {/* Footer */}
+        <div className="px-3 py-4 border-t border-sidebar-border">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
+          >
+            <LogOut className="w-4 h-4 shrink-0" />
+            Sign Out
+          </button>
+        </div>
+      </aside>
+    </>
   )
 }

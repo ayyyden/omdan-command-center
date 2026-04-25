@@ -37,7 +37,7 @@ export default async function MessageTemplatesPage() {
         }
       />
 
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         {rows.length === 0 ? (
           <div className="rounded-lg border bg-card flex flex-col items-center justify-center py-16 gap-3">
             <p className="text-sm text-muted-foreground">No templates yet.</p>

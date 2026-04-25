@@ -10,6 +10,7 @@ import { ConfirmDeleteDialog } from "@/components/shared/confirm-delete-dialog"
 import { useSelection } from "@/hooks/use-selection"
 import { useToast } from "@/hooks/use-toast"
 import { formatCurrency, formatDate } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { Receipt } from "lucide-react"
 import Link from "next/link"
 
@@ -55,6 +56,16 @@ export function ExpensesBulkTable({ expenses, userId }: Props) {
     router.refresh()
   }
 
+  const emptyState = (
+    <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+      <Receipt className="w-8 h-8 text-muted-foreground/40" />
+      <div>
+        <p className="font-medium text-muted-foreground">No expenses found</p>
+        <p className="text-sm text-muted-foreground/60 mt-0.5">Try adjusting your filters, or add a new expense.</p>
+      </div>
+    </div>
+  )
+
   return (
     <div className="space-y-3">
       <BulkBar
@@ -65,73 +76,107 @@ export function ExpensesBulkTable({ expenses, userId }: Props) {
         deleting={deleting}
       />
 
-      <div className="rounded-lg border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-10 px-3">
-                <HeaderCheckbox allSelected={allSelected} someSelected={someSelected} onChange={toggleAll} />
-              </TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Job / Type</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
-              <TableHead>Date</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {expenses.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-16">
-                  <div className="flex flex-col items-center justify-center gap-3 text-center">
-                    <Receipt className="w-8 h-8 text-muted-foreground/40" />
-                    <div>
-                      <p className="font-medium text-muted-foreground">No expenses found</p>
-                      <p className="text-sm text-muted-foreground/60 mt-0.5">Try adjusting your filters, or add a new expense.</p>
-                    </div>
+      {expenses.length === 0 ? (
+        <div className="rounded-lg border bg-card">{emptyState}</div>
+      ) : (
+        <>
+          {/* Mobile card list */}
+          <div className="sm:hidden space-y-2">
+            {expenses.map((exp) => (
+              <div
+                key={exp.id}
+                className={cn(
+                  "rounded-lg border bg-card p-3 flex gap-3",
+                  selected.has(exp.id) ? "border-primary/50 bg-primary/5" : ""
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(exp.id)}
+                  onChange={(e) => toggle(exp.id, e.target.checked)}
+                  className="h-4 w-4 cursor-pointer accent-primary mt-0.5 shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-medium leading-tight">{exp.description}</span>
+                    <span className="font-semibold text-destructive text-sm tabular-nums shrink-0">
+                      {formatCurrency(Number(exp.amount))}
+                    </span>
                   </div>
-                </TableCell>
-              </TableRow>
-            ) : (
-              expenses.map((exp) => (
-                <TableRow key={exp.id} className={selected.has(exp.id) ? "bg-primary/5" : ""}>
-                  <TableCell className="px-3">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(exp.id)}
-                      onChange={(e) => toggle(exp.id, e.target.checked)}
-                      className="h-4 w-4 cursor-pointer accent-primary"
-                    />
-                  </TableCell>
-                  <TableCell className="font-medium">{exp.description}</TableCell>
-                  <TableCell className="text-sm">
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                    <Badge variant="secondary" className="capitalize text-xs">
+                      {CAT_LABEL(exp.category)}
+                    </Badge>
                     {exp.expense_type === "business" ? (
                       <Badge variant="outline" className="text-xs">Business</Badge>
                     ) : exp.job ? (
-                      <Link href={`/jobs/${exp.job.id}`} className="hover:text-primary">
+                      <Link href={`/jobs/${exp.job.id}`} className="text-xs text-muted-foreground hover:text-primary">
                         {exp.job.title}
                       </Link>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="capitalize">
-                      {CAT_LABEL(exp.category)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-semibold text-destructive">
-                    {formatCurrency(Number(exp.amount))}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {formatDate(exp.date)}
-                  </TableCell>
+                    ) : null}
+                    <span className="text-xs text-muted-foreground ml-auto">{formatDate(exp.date)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden sm:block rounded-lg border bg-card overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10 px-3">
+                    <HeaderCheckbox allSelected={allSelected} someSelected={someSelected} onChange={toggleAll} />
+                  </TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Job / Type</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Date</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              </TableHeader>
+              <TableBody>
+                {expenses.map((exp) => (
+                  <TableRow key={exp.id} className={selected.has(exp.id) ? "bg-primary/5" : ""}>
+                    <TableCell className="px-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(exp.id)}
+                        onChange={(e) => toggle(exp.id, e.target.checked)}
+                        className="h-4 w-4 cursor-pointer accent-primary"
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium">{exp.description}</TableCell>
+                    <TableCell className="text-sm">
+                      {exp.expense_type === "business" ? (
+                        <Badge variant="outline" className="text-xs">Business</Badge>
+                      ) : exp.job ? (
+                        <Link href={`/jobs/${exp.job.id}`} className="hover:text-primary">
+                          {exp.job.title}
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="capitalize">
+                        {CAT_LABEL(exp.category)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-destructive">
+                      {formatCurrency(Number(exp.amount))}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {formatDate(exp.date)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      )}
 
       <ConfirmDeleteDialog
         open={confirmOpen}

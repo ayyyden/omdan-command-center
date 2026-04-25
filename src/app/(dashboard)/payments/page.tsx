@@ -23,7 +23,7 @@ export default async function PaymentsPage() {
         subtitle={`${payments?.length ?? 0} payments · ${formatCurrency(total)} total received`}
       />
 
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <PaymentsBulkTable payments={(payments ?? []) as any[]} userId={user.id} />
       </div>
     </div>
