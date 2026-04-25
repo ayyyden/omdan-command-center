@@ -243,12 +243,16 @@ function DateField({
   value,
   onChange,
   containerStyle,
-  textSty,
+  iStyle,
+  visualFontPx,
+  fieldHeight,
 }: {
   value: string
   onChange: (v: string) => void
   containerStyle: React.CSSProperties
-  textSty: React.CSSProperties
+  iStyle: React.CSSProperties   // full input style with iOS transform trick — for desktop input
+  visualFontPx: number          // raw visual font size in px — for mobile span
+  fieldHeight: number           // field height in px — for icon sizing
 }) {
   const [isMobile, setIsMobile] = useState(false)
   const [showPicker, setShowPicker] = useState(false)
@@ -261,6 +265,7 @@ function DateField({
     ? new Date(value + "T00:00:00").toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })
     : ""
 
+  // Desktop: native <input type="date"> with the same transform trick as other inputs
   if (!isMobile) {
     return (
       <div style={containerStyle}>
@@ -268,11 +273,28 @@ function DateField({
           type="date"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full h-full focus:outline-none bg-transparent border-0"
-          style={{ ...textSty, width: "100%", height: "100%", minWidth: 0, boxSizing: "border-box" }}
+          className="focus:outline-none"
+          style={iStyle}
         />
       </div>
     )
+  }
+
+  // Mobile: read-only display text + tiny calendar button → DatePickerModal
+  const iconSize = Math.max(6, Math.min(12, fieldHeight * 0.55))
+  const pad = Math.max(1, visualFontPx * 0.25)
+
+  const spanStyle: React.CSSProperties = {
+    fontSize:    `${visualFontPx}px`,
+    fontWeight:  iStyle.fontWeight,
+    fontFamily:  iStyle.fontFamily,
+    lineHeight:  iStyle.lineHeight,
+    color:       "#000",
+    flex:        1,
+    minWidth:    0,
+    overflow:    "hidden",
+    whiteSpace:  "nowrap",
+    textOverflow:"ellipsis",
   }
 
   return (
@@ -284,26 +306,23 @@ function DateField({
           onClose={() => setShowPicker(false)}
         />
       )}
-      <div style={{ ...containerStyle, display: "flex", alignItems: "center" }}>
-        <span
-          style={{ ...textSty, flex: 1, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}
-        >
-          {displayValue || <span style={{ color: "rgba(148,163,184,0.7)" }}>MM/DD/YYYY</span>}
+      <div
+        style={{ ...containerStyle, display: "flex", alignItems: "center", padding: `${pad}px`, gap: "2px" }}
+        onClick={() => setShowPicker(true)}
+      >
+        <span style={spanStyle}>
+          {displayValue || <span style={{ color: "rgba(0,0,0,0.3)" }}>Date</span>}
         </span>
-        <button
-          type="button"
-          onClick={() => setShowPicker(true)}
-          className="flex-shrink-0 text-slate-400 hover:text-blue-500 transition-colors"
-          style={{ padding: "2px", lineHeight: 0 }}
-          aria-label="Pick date"
+        <svg
+          width={iconSize} height={iconSize}
+          fill="none" viewBox="0 0 24 24" stroke="#64748b" strokeWidth={2}
+          style={{ flexShrink: 0 }}
         >
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="3" y1="10" x2="21" y2="10" />
-          </svg>
-        </button>
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
       </div>
     </>
   )
@@ -555,18 +574,57 @@ function FieldInput({
   pdfScale: number
   style: React.CSSProperties
 }) {
+  // Visual-only style: exact pdfScale font size, no transform, no width/height.
+  // Use for display elements (spans, labels) that are not interactive inputs.
   function textStyle(ft: FieldType): React.CSSProperties {
     const d = TEXT_FORMAT_DEFAULTS[ft] ?? TEXT_FORMAT_DEFAULTS.text
     const opts = field.options ?? {}
     return {
-      // 16px minimum prevents iOS Safari from auto-zooming the page on input focus.
-      fontSize:      `${Math.max(16, (opts.fontSize ?? d.fontSize) * pdfScale)}px`,
-      lineHeight:    opts.lineHeight ?? d.lineHeight,
-      fontWeight:    opts.fontWeight ?? d.fontWeight,
-      textAlign:     (opts.textAlign ?? d.textAlign) as React.CSSProperties["textAlign"],
-      padding:       `${Math.max(1, (opts.padding ?? d.padding) * pdfScale)}px`,
-      fontFamily:    "Helvetica, Arial, sans-serif",
-      color:         "#0d0d1a",
+      fontSize:   `${(opts.fontSize ?? d.fontSize) * pdfScale}px`,
+      lineHeight: opts.lineHeight ?? d.lineHeight,
+      fontWeight: opts.fontWeight ?? d.fontWeight,
+      textAlign:  (opts.textAlign ?? d.textAlign) as React.CSSProperties["textAlign"],
+      padding:    `${Math.max(1, (opts.padding ?? d.padding) * pdfScale)}px`,
+      fontFamily: "Helvetica, Arial, sans-serif",
+      color:      "#000",
+    }
+  }
+
+  // Input style: correct visual font size with iOS zoom prevention.
+  // When rawFontSize < 16px, iOS would zoom the viewport on focus.
+  // Fix: set DOM font-size to 16px and apply transform: scale(rawFontSize/16) with
+  // compensated width/height so the input visually fills the field at the correct size.
+  function inputStyle(ft: FieldType): React.CSSProperties {
+    const d = TEXT_FORMAT_DEFAULTS[ft] ?? TEXT_FORMAT_DEFAULTS.text
+    const opts = field.options ?? {}
+    const rawFontSize = (opts.fontSize ?? d.fontSize) * pdfScale
+    const rawPadding  = Math.max(1, (opts.padding  ?? d.padding)  * pdfScale)
+    const base: React.CSSProperties = {
+      lineHeight:  opts.lineHeight ?? d.lineHeight,
+      fontWeight:  opts.fontWeight ?? d.fontWeight,
+      textAlign:   (opts.textAlign ?? d.textAlign) as React.CSSProperties["textAlign"],
+      fontFamily:  "Helvetica, Arial, sans-serif",
+      color:       "#000",
+      background:  "transparent",
+      border:      "none",
+      outline:     "none",
+      minWidth:    0,
+      boxSizing:   "border-box" as const,
+    }
+    if (rawFontSize >= 16) {
+      return { ...base, fontSize: `${rawFontSize}px`, padding: `${rawPadding}px`, width: "100%", height: "100%" }
+    }
+    // DOM font-size stays at 16px (no iOS zoom), element is scaled down to rawFontSize visually.
+    // Width and height are divided by scale so that after transform the element fills the container.
+    const scale = rawFontSize / 16
+    return {
+      ...base,
+      fontSize:        "16px",
+      padding:         `${rawPadding / scale}px`,
+      transform:       `scale(${scale})`,
+      transformOrigin: "top left",
+      width:           `${100 / scale}%`,
+      height:          `${100 / scale}%`,
     }
   }
 
@@ -579,13 +637,6 @@ function FieldInput({
       : {}),
   }
 
-  const inputConstraints: React.CSSProperties = {
-    width: "100%",
-    height: "100%",
-    minWidth: 0,
-    boxSizing: "border-box",
-  }
-
   switch (field.field_type) {
     case "text":
       return (
@@ -595,8 +646,8 @@ function FieldInput({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={field.label}
-            className="focus:outline-none bg-transparent border-0 placeholder:text-slate-400/60"
-            style={{ ...textStyle("text"), ...inputConstraints }}
+            className="focus:outline-none placeholder:text-black/30"
+            style={inputStyle("text")}
           />
         </div>
       )
@@ -608,8 +659,8 @@ function FieldInput({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={field.label}
-            className="focus:outline-none bg-transparent border-0 resize-none placeholder:text-slate-400/60"
-            style={{ ...textStyle("multiline"), ...inputConstraints }}
+            className="focus:outline-none resize-none placeholder:text-black/30"
+            style={inputStyle("multiline")}
           />
         </div>
       )
@@ -621,21 +672,26 @@ function FieldInput({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={field.label}
-            className="resize-none focus:outline-none bg-transparent border-0 placeholder:text-slate-400/60"
-            style={{ ...textStyle("rich_text"), ...inputConstraints, letterSpacing: "0.01em" }}
+            className="focus:outline-none resize-none placeholder:text-black/30"
+            style={{ ...inputStyle("rich_text"), letterSpacing: "0.01em" }}
           />
         </div>
       )
 
-    case "date":
+    case "date": {
+      const opts = field.options ?? {}
+      const rawFontPx = (opts.fontSize ?? TEXT_FORMAT_DEFAULTS.date.fontSize) * pdfScale
       return (
         <DateField
           value={value}
           onChange={onChange}
           containerStyle={containerStyle}
-          textSty={{ ...textStyle("date"), ...inputConstraints }}
+          iStyle={inputStyle("date")}
+          visualFontPx={rawFontPx}
+          fieldHeight={style.height as number}
         />
       )
+    }
 
     case "signature":
     case "initials": {
@@ -688,21 +744,21 @@ function FieldInput({
       )
 
     case "yes_no": {
-      const ynStyle = textStyle("yes_no")
+      const ynSty = textStyle("yes_no")
       const d = TEXT_FORMAT_DEFAULTS.yes_no
       const opts = field.options ?? {}
       const align = opts.textAlign ?? d.textAlign
-      const justifyMap = { left: "flex-start", center: "center", right: "flex-end" }
+      const justifyMap: Record<string, string> = { left: "flex-start", center: "center", right: "flex-end" }
       return (
         <div
-          style={{ ...containerStyle, display: "flex", alignItems: "center", justifyContent: justifyMap[align] ?? "center", gap: "8px", padding: ynStyle.padding }}
+          style={{ ...containerStyle, display: "flex", alignItems: "center", justifyContent: justifyMap[align] ?? "center", gap: "8px", padding: ynSty.padding }}
           title={field.label}
         >
           {["Yes", "No"].map((opt) => (
             <label
               key={opt}
               className="flex items-center gap-1 cursor-pointer"
-              style={{ fontSize: ynStyle.fontSize, fontWeight: ynStyle.fontWeight, fontFamily: ynStyle.fontFamily as string, color: ynStyle.color as string }}
+              style={{ fontSize: ynSty.fontSize, fontWeight: ynSty.fontWeight, fontFamily: ynSty.fontFamily as string, color: "#000" }}
             >
               <input
                 type="radio"
