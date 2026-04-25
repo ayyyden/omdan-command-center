@@ -39,13 +39,15 @@ export function usePdfPages(url: string | null, containerWidth: number) {
         const pdfDoc = await loadingTask.promise
         if (cancelled) return
 
+        const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 2) : 1
         const rendered: RenderedPage[] = []
 
         for (let i = 1; i <= pdfDoc.numPages; i++) {
           if (cancelled) return
           const page = await pdfDoc.getPage(i)
           const nativeViewport = page.getViewport({ scale: 1 })
-          const scale = containerWidth / nativeViewport.width
+          // Render at devicePixelRatio for crisp display on retina screens
+          const scale = (containerWidth / nativeViewport.width) * dpr
           const viewport = page.getViewport({ scale })
 
           const canvas = document.createElement("canvas")
@@ -58,8 +60,8 @@ export function usePdfPages(url: string | null, containerWidth: number) {
           rendered.push({
             pageNumber: i,
             canvas,
-            width:     canvas.width,
-            height:    canvas.height,
+            width:     containerWidth,                    // CSS pixels
+            height:    Math.floor(viewport.height / dpr), // CSS pixels
             pdfWidth:  nativeViewport.width,
             pdfHeight: nativeViewport.height,
           })
