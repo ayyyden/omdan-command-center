@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --yes)",
+      "Bash(npm install *)",
+      "Bash(npx shadcn@latest init --yes)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(powershell -Command \"Get-Item 'C:\\\\Users\\\\Edan\\\\Documents\\\\omdan-command-center\\\\.next\\\\dev\\\\static\\\\chunks\\\\src_app_globals_css_0w3-wzy._.single.css' | Select-Object LastWriteTime\")",
+      "Bash(powershell -Command \"Get-Item 'C:\\\\Users\\\\Edan\\\\Documents\\\\omdan-command-center\\\\src\\\\app\\\\globals.css' | Select-Object LastWriteTime\")",
+      "Bash(read f *)",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); print\\(data[0]['text']\\)\")",
+      "Bash(xargs grep *)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Edan\\\\Documents\\\\omdan-command-center\\\\src\\\\app\\\\api\\\\estimates\\\\[id]\\\\pdf\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Edan\\\\Documents\\\\omdan-command-center\\\\src\\\\app\\\\api\\\\estimates\\\\[id]\\\\send\")",
+      "Bash(npm list *)",
+      "Bash(mkdir -p /c/Users/Edan/Documents/omdan-command-center/src/app/sign-contract/\\\\[token\\\\])",
+      "Bash(mkdir -p /c/Users/Edan/Documents/omdan-command-center/src/app/api/contracts/sign/\\\\[token\\\\])",
+      "Read(//c/Users/Edan/Documents/omdan-command-command-center/src/app/api/contracts/sign/[token]/**)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Edan\\Documents\\omdan-command-center",
+      "C:\\Users\\Edan\\Documents\\omdan-command-center\\src\\app\\api\\contracts\\view-pdf"
+    ]
+  }
+}
