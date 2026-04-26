@@ -8,8 +8,8 @@ import { JobStatusBadge } from "@/components/shared/status-badge"
 import { InvoiceStatusBadge } from "@/components/invoices/invoice-status-badge"
 import { formatCurrency, formatDate, calcProfitMargin, getTodayLA } from "@/lib/utils"
 import {
-  Activity, AlertTriangle, CalendarDays, CheckCircle2, DollarSign, FileText,
-  FilePlus, Pencil, Receipt, TrendingUp,
+  Activity, AlertTriangle, CalendarDays, CheckCircle2, ClipboardList, DollarSign,
+  FileText, FilePlus, Pencil, Receipt, TrendingUp,
 } from "lucide-react"
 import Link from "next/link"
 import type { JobStatus, ExpenseCategory, InvoiceWithBalance } from "@/types"
@@ -23,6 +23,10 @@ import { AddExpenseDialog } from "@/components/expenses/add-expense-dialog"
 import { AddPaymentDialog } from "@/components/payments/add-payment-dialog"
 import { AddInvoiceDialog } from "@/components/invoices/add-invoice-dialog"
 import { InvoiceActions } from "@/components/invoices/invoice-actions"
+import { NewChangeOrderDialog } from "@/components/change-orders/change-order-dialog"
+import { RegenerateTokenButton } from "@/components/change-orders/regenerate-token-button"
+import { ReceiptsSection } from "@/components/receipts/receipts-section"
+import { ReviewStatusSection } from "@/components/jobs/review-status-section"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -75,7 +79,7 @@ export default async function JobDetailPage({ params }: PageProps) {
   const [{ data: job }, { data: expenses }, { data: payments }, { data: rawInvoices }, { data: activityLog }, { data: companySettings }] = await Promise.all([
     supabase
       .from("jobs")
-      .select("*, customer:customers(id, name, phone), estimate:estimates(id, title, total), project_manager:project_managers(name, color, email)")
+      .select("*, customer:customers(id, name, phone, email), estimate:estimates(id, title, total), project_manager:project_managers(name, color, email)")
       .eq("id", id)
       .eq("user_id", user.id)
       .single(),
@@ -92,9 +96,10 @@ export default async function JobDetailPage({ params }: PageProps) {
     supabase.from("company_settings").select("default_invoice_notes, company_name, phone, email, google_review_link").eq("user_id", user.id).single(),
   ])
 
-  const [{ data: jobTemplates }, { data: commLogs }] = await Promise.all([
+  const [{ data: jobTemplates }, { data: commLogs }, { data: changeOrders }] = await Promise.all([
     supabase.from("message_templates").select("id, name, type, subject, body").eq("user_id", user.id).eq("is_active", true).order("name"),
     supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("job_id", id).eq("user_id", user.id).order("created_at", { ascending: false }),
+    supabase.from("change_orders").select("id, title, description, amount, status, approved_at, rejected_at, sent_at, created_at").eq("job_id", id).eq("user_id", user.id).order("created_at", { ascending: false }),
   ])
 
   if (!job) notFound()
@@ -123,13 +128,32 @@ export default async function JobDetailPage({ params }: PageProps) {
   const totalInvoicePaid = invoicesWithBalance.reduce((sum, inv) => sum + inv.amount_paid, 0)
   const invoiceOutstanding = Math.max(0, totalInvoiced - totalInvoicePaid)
 
-  const estimateTotal  = Number((job.estimate as any)?.total ?? 0)
-  const totalExpenses  = (expenses ?? []).reduce((sum, e) => sum + Number(e.amount), 0)
-  const totalPayments  = (payments ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
-  const grossProfit    = totalPayments - totalExpenses
-  const profitMargin   = calcProfitMargin(totalPayments, totalExpenses)
-  const amountUnpaid   = Math.max(0, estimateTotal - totalPayments)
-  const isFullyPaid    = job.status === "completed" && estimateTotal > 0 && totalPayments >= estimateTotal
+  const estimateTotal      = Number((job.estimate as any)?.total ?? 0)
+  const approvedCOTotal    = (changeOrders ?? []).filter((co) => co.status === "approved").reduce((sum, co) => sum + Number(co.amount), 0)
+  const contractValue      = estimateTotal + approvedCOTotal
+  const totalExpenses      = (expenses ?? []).reduce((sum, e) => sum + Number(e.amount), 0)
+  const totalPayments      = (payments ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
+  const grossProfit        = totalPayments - totalExpenses
+  const profitMargin       = calcProfitMargin(totalPayments, totalExpenses)
+  const amountUnpaid       = Math.max(0, contractValue - totalPayments)
+  const isFullyPaid        = job.status === "completed" && contractValue > 0 && totalPayments >= contractValue
+
+  const cs = companySettings as any
+  const pm = job.project_manager as any
+  const jobTplData = {
+    customer_name:   (job.customer as any)?.name ?? "",
+    job_title:       job.title,
+    scheduled_date:  job.scheduled_date ? formatDate(job.scheduled_date) : "",
+    invoice_balance: formatCurrency(invoiceOutstanding),
+    company_name:    cs?.company_name ?? "",
+    company_phone:   cs?.phone        ?? "",
+    sender_name:     pm?.name                  || cs?.company_name || "",
+    sender_phone:    "9512920703",
+    sender_email:    pm?.email                 || cs?.email        || "",
+    review_link:     cs?.google_review_link    ?? "",
+  }
+  const tpls = jobTemplates ?? []
+  const lctx = { customerId: job.customer_id, jobId: job.id }
 
   const todayLA = getTodayLA()
   const isOverdue =
@@ -157,34 +181,11 @@ export default async function JobDetailPage({ params }: PageProps) {
               </Button>
             </Link>
             <JobActions jobId={job.id} jobTitle={job.title} isArchived={job.is_archived ?? false} />
-            {(() => {
-              const cs  = companySettings as any
-              const pm  = job.project_manager as any
-              const jobTplData = {
-                customer_name:   (job.customer as any)?.name ?? "",
-                job_title:       job.title,
-                scheduled_date:  job.scheduled_date ? formatDate(job.scheduled_date) : "",
-                invoice_balance: formatCurrency(invoiceOutstanding),
-                company_name:    cs?.company_name ?? "",
-                company_phone:   cs?.phone        ?? "",
-                sender_name:     pm?.name                  || cs?.company_name || "",
-                sender_phone:    "9512920703",
-                sender_email:    pm?.email                 || cs?.email        || "",
-                review_link:     cs?.google_review_link    ?? "",
-              }
-              const tpls = jobTemplates ?? []
-              const lctx = { customerId: job.customer_id, jobId: job.id }
-              return (
-                <>
-                  <QuickCopyButton label="Copy Job Reminder"     templateType="job_reminder"     templates={tpls} data={jobTplData} logContext={lctx} />
-                  <QuickCopyButton label="Copy Payment Reminder" templateType="payment_reminder" templates={tpls} data={jobTplData} logContext={lctx} />
-                  {job.status === "completed" && (
-                    <QuickCopyButton label="Copy Review Request" templateType="review_request" templates={tpls} data={jobTplData} logContext={lctx} />
-                  )}
-                  <UseTemplateButton templates={tpls} preferredType="job_reminder" data={jobTplData} logContext={lctx} />
-                </>
-              )
-            })()}
+            <>
+              <QuickCopyButton label="Copy Job Reminder"     templateType="job_reminder"     templates={tpls} data={jobTplData} logContext={lctx} />
+              <QuickCopyButton label="Copy Payment Reminder" templateType="payment_reminder" templates={tpls} data={jobTplData} logContext={lctx} />
+              <UseTemplateButton templates={tpls} preferredType="job_reminder" data={jobTplData} logContext={lctx} />
+            </>
           </div>
         }
       />
@@ -265,8 +266,13 @@ export default async function JobDetailPage({ params }: PageProps) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Card>
             <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground">Estimate Value</p>
-              <p className="text-lg font-bold">{formatCurrency(estimateTotal)}</p>
+              <p className="text-xs text-muted-foreground">Contract Value</p>
+              <p className="text-lg font-bold">{formatCurrency(contractValue)}</p>
+              {approvedCOTotal > 0 && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  incl. {formatCurrency(approvedCOTotal)} in change orders
+                </p>
+              )}
             </CardContent>
           </Card>
           <Card>
@@ -292,6 +298,83 @@ export default async function JobDetailPage({ params }: PageProps) {
             </CardContent>
           </Card>
         </div>
+
+        {/* Review Request */}
+        {job.status === "completed" && (
+          <ReviewStatusSection
+            jobId={job.id}
+            reviewRequestedAt={(job as any).review_requested_at ?? null}
+            reviewCompleted={(job as any).review_completed ?? false}
+            templates={tpls}
+            data={jobTplData}
+            logContext={lctx}
+            googleReviewLink={cs?.google_review_link ?? null}
+          />
+        )}
+
+        {/* Change Orders */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ClipboardList className="w-4 h-4" />
+                Change Orders ({changeOrders?.length ?? 0})
+              </CardTitle>
+              <NewChangeOrderDialog
+                jobId={job.id}
+                customerName={(job.customer as any)?.name ?? "Customer"}
+                customerEmail={(job.customer as any)?.email ?? null}
+                companyName={companySettings?.company_name ?? null}
+              />
+            </div>
+          </CardHeader>
+          <CardContent>
+            {!changeOrders || changeOrders.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No change orders yet.</p>
+            ) : (
+              <div className="divide-y divide-border/50">
+                {changeOrders.map((co) => {
+                  const statusMap: Record<string, { label: string; className: string }> = {
+                    draft:    { label: "Draft",    className: "bg-muted text-muted-foreground" },
+                    sent:     { label: "Sent",     className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+                    approved: { label: "Approved", className: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
+                    rejected: { label: "Declined", className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+                  }
+                  const cfg = statusMap[co.status] ?? statusMap.draft
+                  const date = co.approved_at ?? co.rejected_at ?? co.sent_at ?? co.created_at
+                  return (
+                    <div key={co.id} className="group flex flex-wrap items-center gap-x-4 gap-y-1.5 py-3 first:pt-0 last:pb-0">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide shrink-0 ${cfg.className}`}>
+                          {cfg.label}
+                        </span>
+                        <span className="font-medium text-sm truncate">{co.title}</span>
+                      </div>
+                      <div className="flex items-center gap-3 ml-auto shrink-0">
+                        <RegenerateTokenButton coId={co.id} status={co.status} />
+                        <span className="font-bold tabular-nums text-base">
+                          {formatCurrency(Number(co.amount))}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(date.split("T")[0])}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+                {approvedCOTotal > 0 && (
+                  <>
+                    <Separator className="my-1" />
+                    <div className="flex justify-between text-sm font-semibold pt-1 px-0.5">
+                      <span>Approved Total</span>
+                      <span className="text-success tabular-nums">{formatCurrency(approvedCOTotal)}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Invoices */}
         <Card>
@@ -572,6 +655,8 @@ export default async function JobDetailPage({ params }: PageProps) {
             )}
           </CardContent>
         </Card>
+
+        <ReceiptsSection userId={user.id} jobId={job.id} />
 
         <FileSection
           entityType="jobs"

@@ -8,6 +8,7 @@ import { customerSchema, type CustomerFormValues } from "@/lib/validations/custo
 import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
 import { Textarea } from "@/components/ui/textarea"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -120,7 +121,9 @@ export function CustomerForm({ customer, userId }: CustomerFormProps) {
             <FormField control={form.control} name="address" render={({ field }) => (
               <FormItem className="sm:col-span-2">
                 <FormLabel>Address</FormLabel>
-                <FormControl><Input placeholder="123 Main St, City, State 00000" {...field} /></FormControl>
+                <FormControl>
+                  <AddressAutocomplete placeholder="123 Main St, City, State 00000" {...field} />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )} />

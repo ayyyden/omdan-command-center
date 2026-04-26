@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client"
 import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
 import { Textarea } from "@/components/ui/textarea"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -139,7 +140,9 @@ export function CompanySettingsForm({ userId, settings }: CompanySettingsFormPro
             <FormField control={form.control} name="address" render={({ field }) => (
               <FormItem className="sm:col-span-2">
                 <FormLabel>Address</FormLabel>
-                <FormControl><Input placeholder="123 Main St, City, State 00000" {...field} /></FormControl>
+                <FormControl>
+                  <AddressAutocomplete placeholder="123 Main St, City, State 00000" {...field} />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )} />

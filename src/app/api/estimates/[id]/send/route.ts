@@ -93,11 +93,22 @@ export async function POST(
     },
   })
 
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
+  const approvalLink = `${appUrl}/approve-estimate/${estimate.approval_token}`
+
+  const emailBody = `${body}
+
+---
+Click the link below to review and approve your estimate online:
+${approvalLink}
+
+The estimate PDF is also attached to this email for your reference.`
+
   await transporter.sendMail({
     from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
     to,
     subject,
-    text:    body,
+    text:    emailBody,
     attachments: [
       {
         filename:    `estimate-${estimate.id.slice(0, 8)}.pdf`,
@@ -133,7 +144,7 @@ export async function POST(
     estimate_id: id,
     type:        "estimate_follow_up",
     subject,
-    body,
+    body:        emailBody,
     channel:     "email",
   })
 

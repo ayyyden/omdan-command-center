@@ -1,11 +1,20 @@
 "use client"
 
-import { useState } from "react"
-import { Menu, HardHat } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Menu, HardHat, Search, Bell } from "lucide-react"
 import { Sidebar } from "./sidebar"
+import { GlobalSearch } from "./global-search"
+import { NotificationBell } from "./notification-bell"
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [notifCount, setNotifCount] = useState(0)
+
+  useEffect(() => {
+    const handler = (e: Event) => setNotifCount((e as CustomEvent<number>).detail)
+    window.addEventListener("notification-count-update", handler)
+    return () => window.removeEventListener("notification-count-update", handler)
+  }, [])
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -27,10 +36,35 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </div>
             <span className="font-bold text-sm text-foreground">Omdan Command Center</span>
           </div>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent("open-notifications"))}
+              className="relative p-1.5 rounded-lg hover:bg-accent transition-colors"
+              aria-label="Notifications"
+            >
+              <Bell className="w-5 h-5" />
+              {notifCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[16px] h-4 px-0.5 text-[9px] font-bold bg-destructive text-destructive-foreground rounded-full leading-none">
+                  {notifCount > 99 ? "99+" : notifCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent("open-global-search"))}
+              className="p-1.5 rounded-lg hover:bg-accent transition-colors"
+              aria-label="Search"
+            >
+              <Search className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <main className="flex-1 overflow-y-auto">{children}</main>
       </div>
+
+      {/* Modals — rendered outside scroll container */}
+      <GlobalSearch />
+      <NotificationBell />
     </div>
   )
 }

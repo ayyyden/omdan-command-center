@@ -4,6 +4,7 @@ import { formatCurrency } from "@/lib/utils"
 import { AddExpenseDialog } from "@/components/expenses/add-expense-dialog"
 import { ExpensesFilters } from "./expenses-filters"
 import { ExpensesBulkTable } from "@/components/expenses/expenses-bulk-table"
+import { ReceiptsSection } from "@/components/receipts/receipts-section"
 
 const CAT_LABEL = (c: string) => c.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
 
@@ -66,6 +67,7 @@ export default async function ExpensesPage({ searchParams }: PageProps) {
         </div>
 
         <ExpensesBulkTable expenses={rows as any[]} userId={user.id} />
+        <ReceiptsSection userId={user.id} />
       </div>
     </div>
   )

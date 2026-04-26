@@ -16,10 +16,13 @@ import {
   Settings,
   ScrollText,
   X,
+  Search,
+  Bell,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -42,6 +45,13 @@ interface SidebarProps {
 export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const [notifCount, setNotifCount] = useState(0)
+
+  useEffect(() => {
+    const handler = (e: Event) => setNotifCount((e as CustomEvent<number>).detail)
+    window.addEventListener("notification-count-update", handler)
+    return () => window.removeEventListener("notification-count-update", handler)
+  }, [])
 
   async function handleLogout() {
     const supabase = createClient()
@@ -92,8 +102,22 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           </button>
         </div>
 
+        {/* Search trigger */}
+        <div className="px-3 pt-3 pb-1">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("open-global-search"))}
+            className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm font-medium text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors border border-sidebar-border/60 bg-sidebar-accent/20"
+          >
+            <Search className="w-3.5 h-3.5 shrink-0" />
+            <span className="flex-1 text-left text-xs">Search…</span>
+            <kbd className="hidden sm:flex items-center text-[10px] font-mono opacity-50 bg-sidebar-accent/60 px-1.5 py-0.5 rounded border border-sidebar-border/40 leading-tight">
+              ⌘K
+            </kbd>
+          </button>
+        </div>
+
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active = href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href)
             return (
@@ -116,7 +140,22 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         </nav>
 
         {/* Footer */}
-        <div className="px-3 py-4 border-t border-sidebar-border">
+        <div className="px-3 py-4 border-t border-sidebar-border space-y-0.5">
+          {/* Notifications button — dispatches event, modal rendered at root */}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("open-notifications"))}
+            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
+            aria-label={`Notifications${notifCount > 0 ? ` (${notifCount})` : ""}`}
+          >
+            <Bell className="w-4 h-4 shrink-0" />
+            Notifications
+            {notifCount > 0 && (
+              <span className="ml-auto flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold bg-destructive text-destructive-foreground rounded-full leading-none">
+                {notifCount > 99 ? "99+" : notifCount}
+              </span>
+            )}
+          </button>
+
           <button
             onClick={handleLogout}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"

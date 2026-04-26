@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils"
 import { JobProfitTable } from "@/components/reports/job-profit-table"
 import { ReportsFilters } from "@/components/reports/reports-filters"
+import { ExportSection } from "@/components/reports/export-section"
 
 interface PageProps {
   searchParams: Promise<{ from?: string; to?: string; pm?: string; status?: string }>
@@ -335,6 +336,8 @@ export default async function ReportsPage({ searchParams }: PageProps) {
             </CardContent>
           </Card>
         )}
+
+        <ExportSection from={from} to={to} pm={pm} status={status} />
       </div>
     </div>
   )

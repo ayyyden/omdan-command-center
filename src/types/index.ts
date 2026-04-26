@@ -261,6 +261,26 @@ export interface CommunicationLog {
   created_at: string
 }
 
+export type ChangeOrderStatus = "draft" | "sent" | "approved" | "rejected"
+
+export interface ChangeOrder {
+  id: string
+  user_id: string
+  job_id: string
+  customer_id: string
+  title: string
+  description: string | null
+  amount: number
+  notes: string | null
+  status: ChangeOrderStatus
+  approval_token: string
+  approved_at: string | null
+  rejected_at: string | null
+  sent_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface JobProfitSummary {
   job_id: string
   job_title: string

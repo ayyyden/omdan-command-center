@@ -24,7 +24,8 @@
     ],
     "additionalDirectories": [
       "C:\\Users\\Edan\\Documents\\omdan-command-center",
-      "C:\\Users\\Edan\\Documents\\omdan-command-center\\src\\app\\api\\contracts\\view-pdf"
+      "C:\\Users\\Edan\\Documents\\omdan-command-center\\src\\app\\api\\contracts\\view-pdf",
+      "c:\\Users\\Edan\\Documents\\omdan-command-center\\src\\app\\approve-estimate"
     ]
   }
 }

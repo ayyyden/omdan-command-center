@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Paperclip, Upload, Download, Trash2, FileText, File } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { compressImage } from "@/lib/compress-image"
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -225,12 +226,27 @@ export function FileSection({
 
   // ── Upload ──────────────────────────────────────────────────────────────────
 
-  function onFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const sel = Array.from(e.target.files ?? [])
     if (!sel.length) return
-    setUploadCategory(defaultCategory(sel[0].type))
-    setPendingFiles(sel)
     if (fileInputRef.current) fileInputRef.current.value = ""
+
+    const processed: File[] = []
+    for (const file of sel) {
+      try {
+        processed.push(await compressImage(file))
+      } catch (err) {
+        toast({
+          title: `Cannot use ${file.name}`,
+          description: (err as Error).message,
+          variant: "destructive",
+        })
+      }
+    }
+
+    if (!processed.length) return
+    setUploadCategory(defaultCategory(processed[0].type))
+    setPendingFiles(processed)
   }
 
   async function confirmUpload() {
