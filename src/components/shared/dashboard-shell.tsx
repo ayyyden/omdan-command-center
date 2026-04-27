@@ -24,7 +24,7 @@ export function DashboardShell({ children, logoUrl, companyName }: DashboardShel
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} logoUrl={logoUrl} companyName={companyName} />
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Mobile-only top strip */}

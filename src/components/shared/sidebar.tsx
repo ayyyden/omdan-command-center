@@ -40,9 +40,11 @@ const navItems = [
 interface SidebarProps {
   isOpen?: boolean
   onClose?: () => void
+  logoUrl?: string | null
+  companyName?: string | null
 }
 
-export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
+export function Sidebar({ isOpen = false, onClose, logoUrl, companyName }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [notifCount, setNotifCount] = useState(0)
@@ -84,9 +86,18 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         {/* Brand */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-sidebar-border">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary shrink-0">
-              <HardHat className="w-5 h-5 text-primary-foreground" />
-            </div>
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoUrl}
+                alt={companyName ?? "Company logo"}
+                className="w-9 h-9 rounded-lg object-contain shrink-0"
+              />
+            ) : (
+              <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary shrink-0">
+                <HardHat className="w-5 h-5 text-primary-foreground" />
+              </div>
+            )}
             <div>
               <p className="text-sm font-bold leading-tight text-sidebar-foreground">Omdan</p>
               <p className="text-xs text-sidebar-foreground/60 leading-tight">Command Center</p>
