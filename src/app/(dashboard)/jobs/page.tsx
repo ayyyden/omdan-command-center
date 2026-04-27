@@ -23,7 +23,6 @@ export default async function JobsPage({ searchParams }: PageProps) {
   await supabase
     .from("jobs")
     .update({ is_archived: true })
-    .eq("user_id", user.id)
     .eq("status", "completed")
     .eq("is_archived", false)
     .lte("completion_date", twoWeeksAgo)
@@ -31,7 +30,6 @@ export default async function JobsPage({ searchParams }: PageProps) {
   let query = supabase
     .from("jobs")
     .select("*, customer:customers(name)")
-    .eq("user_id", user.id)
     .eq("is_archived", isArchived)
     .order("scheduled_date", { ascending: false })
 

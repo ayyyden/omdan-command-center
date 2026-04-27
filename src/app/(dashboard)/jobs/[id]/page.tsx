@@ -27,6 +27,7 @@ import { NewChangeOrderDialog } from "@/components/change-orders/change-order-di
 import { RegenerateTokenButton } from "@/components/change-orders/regenerate-token-button"
 import { ReceiptsSection } from "@/components/receipts/receipts-section"
 import { ReviewStatusSection } from "@/components/jobs/review-status-section"
+import { JobTotalOverride } from "@/components/jobs/job-total-override"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -81,25 +82,23 @@ export default async function JobDetailPage({ params }: PageProps) {
       .from("jobs")
       .select("*, customer:customers(id, name, phone, email), estimate:estimates(id, title, total), project_manager:project_managers(name, color, email)")
       .eq("id", id)
-      .eq("user_id", user.id)
       .single(),
-    supabase.from("expenses").select("*").eq("job_id", id).eq("user_id", user.id).order("date", { ascending: false }),
-    supabase.from("payments").select("*, invoice:invoices(type)").eq("job_id", id).eq("user_id", user.id).order("date", { ascending: false }),
-    supabase.from("invoices").select("*, payments(amount)").eq("job_id", id).eq("user_id", user.id).order("created_at"),
+    supabase.from("expenses").select("*").eq("job_id", id).order("date", { ascending: false }),
+    supabase.from("payments").select("*, invoice:invoices(type)").eq("job_id", id).order("date", { ascending: false }),
+    supabase.from("invoices").select("*, payments(amount)").eq("job_id", id).order("created_at"),
     supabase
       .from("activity_log")
       .select("id, created_at, action, description")
       .eq("job_id", id)
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(30),
-    supabase.from("company_settings").select("default_invoice_notes, company_name, phone, email, google_review_link").eq("user_id", user.id).single(),
+    supabase.from("company_settings").select("default_invoice_notes, company_name, phone, email, google_review_link").order("updated_at", { ascending: false }).limit(1).maybeSingle(),
   ])
 
   const [{ data: jobTemplates }, { data: commLogs }, { data: changeOrders }] = await Promise.all([
-    supabase.from("message_templates").select("id, name, type, subject, body").eq("user_id", user.id).eq("is_active", true).order("name"),
-    supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("job_id", id).eq("user_id", user.id).order("created_at", { ascending: false }),
-    supabase.from("change_orders").select("id, title, description, amount, status, approved_at, rejected_at, sent_at, created_at").eq("job_id", id).eq("user_id", user.id).order("created_at", { ascending: false }),
+    supabase.from("message_templates").select("id, name, type, subject, body").eq("is_active", true).order("name"),
+    supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("job_id", id).order("created_at", { ascending: false }),
+    supabase.from("change_orders").select("id, title, description, amount, status, approved_at, rejected_at, sent_at, created_at").eq("job_id", id).order("created_at", { ascending: false }),
   ])
 
   if (!job) notFound()
@@ -130,7 +129,9 @@ export default async function JobDetailPage({ params }: PageProps) {
 
   const estimateTotal      = Number((job.estimate as any)?.total ?? 0)
   const approvedCOTotal    = (changeOrders ?? []).filter((co) => co.status === "approved").reduce((sum, co) => sum + Number(co.amount), 0)
-  const contractValue      = estimateTotal + approvedCOTotal
+  const calculatedTotal    = estimateTotal + approvedCOTotal
+  const manualTotal        = (job as any).manual_total != null ? Number((job as any).manual_total) : null
+  const contractValue      = manualTotal ?? calculatedTotal
   const totalExpenses      = (expenses ?? []).reduce((sum, e) => sum + Number(e.amount), 0)
   const totalPayments      = (payments ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
   const grossProfit        = totalPayments - totalExpenses
@@ -268,11 +269,19 @@ export default async function JobDetailPage({ params }: PageProps) {
             <CardContent className="pt-4 pb-4">
               <p className="text-xs text-muted-foreground">Contract Value</p>
               <p className="text-lg font-bold">{formatCurrency(contractValue)}</p>
-              {approvedCOTotal > 0 && (
+              {manualTotal !== null && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">manually set</p>
+              )}
+              {manualTotal === null && approvedCOTotal > 0 && (
                 <p className="text-[10px] text-muted-foreground mt-0.5">
                   incl. {formatCurrency(approvedCOTotal)} in change orders
                 </p>
               )}
+              <JobTotalOverride
+                jobId={job.id}
+                calculatedTotal={calculatedTotal}
+                manualTotal={manualTotal}
+              />
             </CardContent>
           </Card>
           <Card>

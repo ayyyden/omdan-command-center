@@ -18,12 +18,10 @@ export default async function JobEditPage({ params }: PageProps) {
       .from("jobs")
       .select("id, title, description, notes, scheduled_date, scheduled_time, project_manager_id, estimated_duration_minutes, customer_id, customer:customers(name)")
       .eq("id", id)
-      .eq("user_id", user.id)
       .single(),
     supabase
       .from("project_managers")
       .select("id, name, color")
-      .eq("user_id", user.id)
       .eq("is_active", true)
       .order("name"),
   ])

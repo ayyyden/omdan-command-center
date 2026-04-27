@@ -19,7 +19,6 @@ export async function POST(
     .from("estimates")
     .select("*, customer:customers(name, address, phone, email)")
     .eq("id", id)
-    .eq("user_id", user.id)
     .single()
 
   if (estErr || !estimate) return Response.json({ error: "Not found" }, { status: 404 })
@@ -27,8 +26,9 @@ export async function POST(
   const { data: company } = await supabase
     .from("company_settings")
     .select("company_name, phone, email, license_number, logo_url, address")
-    .eq("user_id", user.id)
-    .single()
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   // Pre-fetch logo and convert to data URL so @react-pdf/renderer can't hit a broken URL
   let logoDataUrl: string | null = null

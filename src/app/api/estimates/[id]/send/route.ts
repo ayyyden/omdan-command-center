@@ -31,7 +31,6 @@ export async function POST(
     .from("estimates")
     .select("*, customer:customers(id, name, address, phone, email)")
     .eq("id", id)
-    .eq("user_id", user.id)
     .single()
 
   if (estErr || !estimate) return Response.json({ error: "Not found" }, { status: 404 })
@@ -39,8 +38,9 @@ export async function POST(
   const { data: company } = await supabase
     .from("company_settings")
     .select("company_name, phone, email, license_number, logo_url, address")
-    .eq("user_id", user.id)
-    .single()
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   const customer = estimate.customer as { id: string; name: string; address: string | null; phone: string | null; email: string | null }
 

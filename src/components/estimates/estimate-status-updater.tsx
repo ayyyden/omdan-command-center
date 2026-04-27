@@ -109,7 +109,6 @@ export function EstimateStatusUpdater({
       .from("jobs")
       .select("id")
       .eq("estimate_id", estimateId)
-      .eq("user_id", userId)
       .maybeSingle()
 
     if (existingJob) {

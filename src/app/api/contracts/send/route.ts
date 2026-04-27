@@ -21,22 +21,20 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
 
-  // Fetch contract template (ownership check)
+  // Fetch contract template
   const { data: contract, error: ctErr } = await supabase
     .from("contract_templates")
     .select("*")
     .eq("id", contractId)
-    .eq("user_id", user.id)
     .single()
 
   if (ctErr || !contract) return Response.json({ error: "Contract not found" }, { status: 404 })
 
-  // Fetch customer (ownership check)
+  // Fetch customer
   const { data: customer, error: custErr } = await supabase
     .from("customers")
     .select("id, name")
     .eq("id", customerId)
-    .eq("user_id", user.id)
     .single()
 
   if (custErr || !customer) return Response.json({ error: "Customer not found" }, { status: 404 })
@@ -48,7 +46,6 @@ export async function POST(req: NextRequest) {
       .from("jobs")
       .select("id, title, project_manager:project_managers(name, email)")
       .eq("id", jobId)
-      .eq("user_id", user.id)
       .single()
     pmName = (job?.project_manager as any)?.name ?? null
   }
@@ -57,8 +54,9 @@ export async function POST(req: NextRequest) {
   const { data: company } = await supabase
     .from("company_settings")
     .select("company_name, email")
-    .eq("user_id", user.id)
-    .single()
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   // Download contract PDF from storage
   const { data: blob, error: dlErr } = await supabase.storage

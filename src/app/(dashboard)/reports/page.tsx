@@ -18,19 +18,18 @@ export default async function ReportsPage({ searchParams }: PageProps) {
   const { from, to, pm, status } = await searchParams
 
   // Date-filtered payments/expenses for top stats
-  let paymentsQ = supabase.from("payments").select("amount, date").eq("user_id", user.id)
+  let paymentsQ = supabase.from("payments").select("amount, date")
   if (from) paymentsQ = paymentsQ.gte("date", from)
   if (to)   paymentsQ = paymentsQ.lte("date", to)
 
-  let expensesQ = supabase.from("expenses").select("amount, date, category, expense_type").eq("user_id", user.id)
+  let expensesQ = supabase.from("expenses").select("amount, date, category, expense_type")
   if (from) expensesQ = expensesQ.gte("date", from)
   if (to)   expensesQ = expensesQ.lte("date", to)
 
   // Jobs with PM/status filters and all nested financials
   let jobsQ = supabase
     .from("jobs")
-    .select("id, title, status, estimate:estimates(total), customer:customers(name, service_type), project_manager:project_managers(id, name, color), expenses:expenses(amount), payments:payments(amount), invoices:invoices(amount)")
-    .eq("user_id", user.id)
+    .select("id, title, status, manual_total, estimate:estimates(total), customer:customers(name, service_type), project_manager:project_managers(id, name, color), expenses:expenses(amount), payments:payments(amount), invoices:invoices(amount)")
     .neq("status", "cancelled")
   if (pm && pm !== "all")         jobsQ = jobsQ.eq("project_manager_id", pm)
   if (status && status !== "all") jobsQ = jobsQ.eq("status", status)
@@ -46,9 +45,9 @@ export default async function ReportsPage({ searchParams }: PageProps) {
     paymentsQ,
     expensesQ,
     jobsQ,
-    supabase.from("project_managers").select("*").eq("user_id", user.id).eq("is_active", true).order("name"),
-    supabase.from("estimates").select("id").eq("user_id", user.id).in("status", ["sent", "approved", "rejected"]),
-    supabase.from("estimates").select("id").eq("user_id", user.id).eq("status", "approved"),
+    supabase.from("project_managers").select("*").eq("is_active", true).order("name"),
+    supabase.from("estimates").select("id").in("status", ["sent", "approved", "rejected"]),
+    supabase.from("estimates").select("id").eq("status", "approved"),
   ])
 
   // Top stats (date-filtered)
@@ -67,12 +66,13 @@ export default async function ReportsPage({ searchParams }: PageProps) {
 
   // Job profit rows
   const jobProfitData = (jobs ?? []).map((job: any) => {
-    const estTotal      = Number(job.estimate?.total ?? 0)
-    const totalPaid     = (job.payments ?? []).reduce((s: number, p: any) => s + Number(p.amount), 0)
-    const totalExp      = (job.expenses ?? []).reduce((s: number, e: any) => s + Number(e.amount), 0)
-    const invoicedTotal = (job.invoices ?? []).reduce((s: number, i: any) => s + Number(i.amount), 0)
-    const profit        = totalPaid - totalExp
-    const jobMargin     = totalPaid > 0 ? Math.round((profit / totalPaid) * 100) : 0
+    const estTotal        = Number(job.estimate?.total ?? 0)
+    const effectiveTotal  = job.manual_total != null ? Number(job.manual_total) : estTotal
+    const totalPaid       = (job.payments ?? []).reduce((s: number, p: any) => s + Number(p.amount), 0)
+    const totalExp        = (job.expenses ?? []).reduce((s: number, e: any) => s + Number(e.amount), 0)
+    const invoicedTotal   = (job.invoices ?? []).reduce((s: number, i: any) => s + Number(i.amount), 0)
+    const profit          = totalPaid - totalExp
+    const jobMargin       = totalPaid > 0 ? Math.round((profit / totalPaid) * 100) : 0
     return {
       id:            job.id,
       title:         job.title,
@@ -80,13 +80,13 @@ export default async function ReportsPage({ searchParams }: PageProps) {
       serviceType:   job.customer?.service_type as string | null,
       pm:            job.project_manager as { id: string; name: string; color: string } | null,
       status:        job.status as string,
-      estimateTotal: estTotal,
+      estimateTotal: effectiveTotal,
       totalPaid,
       totalExpenses: totalExp,
       invoicedTotal,
       grossProfit:   profit,
       margin:        jobMargin,
-      unpaid:        Math.max(0, estTotal - totalPaid),
+      unpaid:        Math.max(0, effectiveTotal - totalPaid),
     }
   }).sort((a, b) => b.grossProfit - a.grossProfit)
 

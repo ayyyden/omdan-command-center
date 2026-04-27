@@ -11,7 +11,6 @@ export default async function PaymentsPage() {
   const { data: payments } = await supabase
     .from("payments")
     .select("*, job:jobs(id, title), customer:customers(id, name)")
-    .eq("user_id", user.id)
     .order("date", { ascending: false })
 
   const total = (payments ?? []).reduce((sum, p) => sum + Number(p.amount), 0)

@@ -25,19 +25,16 @@ export default async function SchedulerPage({ searchParams }: PageProps) {
     supabase
       .from("project_managers")
       .select("id, name, color")
-      .eq("user_id", user.id)
       .eq("is_active", true)
       .order("name"),
     supabase
       .from("jobs")
       .select("id, title, scheduled_date, scheduled_time, status, project_manager_id, estimated_duration_minutes, customer_id, customer:customers(name)")
-      .eq("user_id", user.id)
       .or(`scheduled_date.eq.${viewingDate},and(scheduled_date.lt.${viewingDate},status.not.in.(completed,cancelled))`)
       .order("scheduled_time", { ascending: true, nullsFirst: false }),
     supabase
       .from("reminders")
       .select("id, title, due_date, due_time, type, completed_at, notes, duration_minutes")
-      .eq("user_id", user.id)
       .eq("due_date", viewingDate)
       .order("due_time", { ascending: true, nullsFirst: false }),
   ])

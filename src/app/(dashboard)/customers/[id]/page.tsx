@@ -25,12 +25,12 @@ export default async function CustomerDetailPage({ params }: PageProps) {
   if (!user) return null
 
   const [{ data: customer }, { data: estimates }, { data: jobs }, { data: templates }, { data: companySettings }, { data: commLogs }] = await Promise.all([
-    supabase.from("customers").select("*").eq("id", id).eq("user_id", user.id).single(),
-    supabase.from("estimates").select("*, jobs(id)").eq("customer_id", id).eq("user_id", user.id).order("created_at", { ascending: false }),
-    supabase.from("jobs").select("*").eq("customer_id", id).eq("user_id", user.id).order("created_at", { ascending: false }),
-    supabase.from("message_templates").select("id, name, type, subject, body").eq("user_id", user.id).eq("is_active", true).order("name"),
-    supabase.from("company_settings").select("company_name, phone, email, google_review_link").eq("user_id", user.id).single(),
-    supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("customer_id", id).eq("user_id", user.id).order("created_at", { ascending: false }),
+    supabase.from("customers").select("*").eq("id", id).single(),
+    supabase.from("estimates").select("*, jobs(id)").eq("customer_id", id).order("created_at", { ascending: false }),
+    supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
+    supabase.from("message_templates").select("id, name, type, subject, body").eq("is_active", true).order("name"),
+    supabase.from("company_settings").select("company_name, phone, email, google_review_link").order("updated_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("customer_id", id).order("created_at", { ascending: false }),
   ])
 
   if (!customer) notFound()

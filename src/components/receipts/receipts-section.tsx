@@ -72,7 +72,6 @@ export function ReceiptsSection({ userId, jobId }: Props) {
     let q = supabase
       .from("receipts")
       .select("*")
-      .eq("user_id", userId)
       .order("created_at", { ascending: false })
 
     if (jobId) q = q.eq("job_id", jobId)
@@ -115,7 +114,6 @@ export function ReceiptsSection({ userId, jobId }: Props) {
     supabase
       .from("jobs")
       .select("id, title")
-      .eq("user_id", userId)
       .neq("status", "cancelled")
       .order("title")
       .then(({ data }) => setJobs(data ?? []))

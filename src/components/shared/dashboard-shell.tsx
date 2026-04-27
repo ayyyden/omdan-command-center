@@ -6,7 +6,13 @@ import { Sidebar } from "./sidebar"
 import { GlobalSearch } from "./global-search"
 import { NotificationBell } from "./notification-bell"
 
-export function DashboardShell({ children }: { children: React.ReactNode }) {
+interface DashboardShellProps {
+  children: React.ReactNode
+  logoUrl?: string | null
+  companyName?: string | null
+}
+
+export function DashboardShell({ children, logoUrl, companyName }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [notifCount, setNotifCount] = useState(0)
 
@@ -30,12 +36,26 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           >
             <Menu className="w-5 h-5" />
           </button>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-7 h-7 rounded-md bg-primary shrink-0">
-              <HardHat className="w-4 h-4 text-primary-foreground" />
+
+          {/* Logo / company name */}
+          {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={logoUrl}
+              alt={companyName ?? "Company logo"}
+              className="h-7 w-auto max-w-[140px] object-contain"
+            />
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center justify-center w-7 h-7 rounded-md bg-primary shrink-0">
+                <HardHat className="w-4 h-4 text-primary-foreground" />
+              </div>
+              <span className="font-bold text-sm text-foreground">
+                {companyName ?? "Omdan Command Center"}
+              </span>
             </div>
-            <span className="font-bold text-sm text-foreground">Omdan Command Center</span>
-          </div>
+          )}
+
           <div className="ml-auto flex items-center gap-1">
             <button
               onClick={() => window.dispatchEvent(new CustomEvent("open-notifications"))}

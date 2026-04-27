@@ -18,7 +18,6 @@ export default async function EditMessageTemplatePage({ params }: PageProps) {
     .from("message_templates")
     .select("*")
     .eq("id", id)
-    .eq("user_id", user.id)
     .single()
 
   if (!template) notFound()

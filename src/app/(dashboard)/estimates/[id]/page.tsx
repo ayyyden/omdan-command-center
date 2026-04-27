@@ -32,23 +32,20 @@ export default async function EstimateDetailPage({ params }: PageProps) {
       .from("estimates")
       .select("*, customer:customers(id, name, address), revised_from:estimates!revised_from_id(id, title)")
       .eq("id", id)
-      .eq("user_id", user.id)
       .single(),
     supabase
       .from("project_managers")
       .select("*")
-      .eq("user_id", user.id)
       .eq("is_active", true)
       .order("name"),
     supabase
       .from("jobs")
       .select("id, title")
       .eq("estimate_id", id)
-      .eq("user_id", user.id)
       .maybeSingle(),
-    supabase.from("message_templates").select("id, name, type, subject, body").eq("user_id", user.id).eq("is_active", true).order("name"),
-    supabase.from("company_settings").select("company_name, phone, email, license_number, logo_url, address, google_review_link").eq("user_id", user.id).single(),
-    supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("estimate_id", id).eq("user_id", user.id).order("created_at", { ascending: false }),
+    supabase.from("message_templates").select("id, name, type, subject, body").eq("is_active", true).order("name"),
+    supabase.from("company_settings").select("company_name, phone, email, license_number, logo_url, address, google_review_link").order("updated_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("estimate_id", id).order("created_at", { ascending: false }),
   ])
 
   if (!estimate) notFound()

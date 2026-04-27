@@ -16,7 +16,6 @@ export async function POST(req: NextRequest) {
     .from("jobs")
     .select("id, customer_id")
     .eq("id", job_id)
-    .eq("user_id", user.id)
     .single()
 
   if (!job) return Response.json({ error: "Job not found" }, { status: 404 })

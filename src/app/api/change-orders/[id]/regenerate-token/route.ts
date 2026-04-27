@@ -15,7 +15,6 @@ export async function POST(
     .from("change_orders")
     .select("id")
     .eq("id", id)
-    .eq("user_id", user.id)
     .single()
 
   if (!co) return Response.json({ error: "Not found" }, { status: 404 })

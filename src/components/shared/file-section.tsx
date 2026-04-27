@@ -138,7 +138,6 @@ export function FileSection({
     const { data: ownRows } = await supabase
       .from("file_attachments")
       .select("*")
-      .eq("user_id", userId)
       .eq("entity_type", entityType)
       .eq("entity_id", entityId)
       .order("created_at", { ascending: false })
@@ -152,7 +151,6 @@ export function FileSection({
       const { data } = await supabase
         .from("file_attachments")
         .select("*")
-        .eq("user_id", userId)
         .or(orFilter)
         .order("created_at", { ascending: false })
       linkedRows = (data ?? []) as Record<string, unknown>[]

@@ -77,8 +77,9 @@ async function sendNotificationEmail({
   const { data: company } = await supabase
     .from("company_settings")
     .select("company_name")
-    .eq("user_id", est.user_id)
-    .single()
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   const customerName = (est.customer as any)?.name ?? "Customer"
   const total = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(

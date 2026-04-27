@@ -16,7 +16,6 @@ export default async function MessageTemplatesPage() {
   const { data: templates } = await supabase
     .from("message_templates")
     .select("*")
-    .eq("user_id", user.id)
     .order("type")
     .order("name")
 

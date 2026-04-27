@@ -17,7 +17,6 @@ export async function GET(
     .from("sent_contracts")
     .select("signed_pdf_path")
     .eq("id", id)
-    .eq("user_id", user.id)
     .single()
 
   if (!sent?.signed_pdf_path) return Response.json({ error: "Not found" }, { status: 404 })

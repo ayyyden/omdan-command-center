@@ -72,8 +72,9 @@ async function sendNotificationEmail({
   const { data: company } = await supabase
     .from("company_settings")
     .select("company_name")
-    .eq("user_id", co.user_id)
-    .single()
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   const customerName = (co.customer as any)?.name ?? "Customer"
   const jobTitle = (co.job as any)?.title ?? "Job"

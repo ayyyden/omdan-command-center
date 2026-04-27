@@ -32,10 +32,11 @@ type FormValues = z.infer<typeof schema>
 
 interface CompanySettingsFormProps {
   userId: string
+  settingsId: string | null
   settings: Partial<FormValues> | null
 }
 
-export function CompanySettingsForm({ userId, settings }: CompanySettingsFormProps) {
+export function CompanySettingsForm({ userId, settingsId, settings }: CompanySettingsFormProps) {
   const router = useRouter()
   const { toast } = useToast()
 
@@ -58,26 +59,23 @@ export function CompanySettingsForm({ userId, settings }: CompanySettingsFormPro
 
   async function onSubmit(values: FormValues) {
     const supabase = createClient()
-    const { error } = await supabase
-      .from("company_settings")
-      .upsert(
-        {
-          user_id:               userId,
-          company_name:          values.company_name          || null,
-          license_number:        values.license_number        || null,
-          phone:                 values.phone                 || null,
-          email:                 values.email                 || null,
-          website:               values.website               || null,
-          address:               values.address               || null,
-          logo_url:              values.logo_url              || null,
-          google_review_link:    values.google_review_link    || null,
-          default_payment_terms: values.default_payment_terms || null,
-          default_estimate_notes: values.default_estimate_notes || null,
-          default_invoice_notes: values.default_invoice_notes || null,
-          updated_at:            new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      )
+    const payload = {
+      company_name:           values.company_name           || null,
+      license_number:         values.license_number         || null,
+      phone:                  values.phone                  || null,
+      email:                  values.email                  || null,
+      website:                values.website                || null,
+      address:                values.address                || null,
+      logo_url:               values.logo_url               || null,
+      google_review_link:     values.google_review_link     || null,
+      default_payment_terms:  values.default_payment_terms  || null,
+      default_estimate_notes: values.default_estimate_notes || null,
+      default_invoice_notes:  values.default_invoice_notes  || null,
+      updated_at:             new Date().toISOString(),
+    }
+    const { error } = settingsId
+      ? await supabase.from("company_settings").update(payload).eq("id", settingsId)
+      : await supabase.from("company_settings").insert({ ...payload, user_id: userId })
 
     if (error) {
       toast({ title: "Error saving settings", description: error.message, variant: "destructive" })

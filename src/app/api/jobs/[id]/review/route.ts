@@ -14,7 +14,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from("jobs")
       .select("review_requested_at")
       .eq("id", id)
-      .eq("user_id", user.id)
       .single()
 
     if (!job) return new Response("Not found", { status: 404 })
@@ -28,7 +27,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from("jobs")
       .update({ review_requested_at: now })
       .eq("id", id)
-      .eq("user_id", user.id)
       .select("review_requested_at")
       .single()
 
@@ -41,7 +39,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from("jobs")
       .update({ review_completed: action === "complete" })
       .eq("id", id)
-      .eq("user_id", user.id)
       .select("review_completed")
       .single()
 

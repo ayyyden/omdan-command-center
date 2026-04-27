@@ -10,14 +10,15 @@ export default async function CompanySettingsPage() {
   const { data: settings } = await supabase
     .from("company_settings")
     .select("*")
-    .eq("user_id", user.id)
-    .single()
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   return (
     <div>
       <Topbar title="Company Settings" subtitle="Your business info and document defaults" />
       <div className="p-4 sm:p-6 max-w-2xl">
-        <CompanySettingsForm userId={user.id} settings={settings ?? null} />
+        <CompanySettingsForm userId={user.id} settingsId={settings?.id ?? null} settings={settings ?? null} />
       </div>
     </div>
   )

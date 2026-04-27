@@ -37,7 +37,6 @@ export async function GET(req: NextRequest) {
     let q = supabase
       .from("payments")
       .select("date, amount, method, notes, customer:customers(name), job:jobs(title), invoice:invoices(type)")
-      .eq("user_id", user.id)
       .order("date", { ascending: false })
     if (from) q = q.gte("date", from)
     if (to)   q = q.lte("date", to)
@@ -60,7 +59,6 @@ export async function GET(req: NextRequest) {
     let q = supabase
       .from("expenses")
       .select("date, expense_type, category, description, amount, notes, job:jobs(title)")
-      .eq("user_id", user.id)
       .order("date", { ascending: false })
     if (from) q = q.gte("date", from)
     if (to)   q = q.lte("date", to)
@@ -85,7 +83,6 @@ export async function GET(req: NextRequest) {
     let q = supabase
       .from("invoices")
       .select("created_at, type, status, amount, due_date, notes, customer:customers(name), job:jobs(title), payments(amount)")
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
     if (from) q = q.gte("created_at", from)
     if (to)   q = q.lte("created_at", `${to}T23:59:59`)
@@ -124,7 +121,6 @@ export async function GET(req: NextRequest) {
         invoices(amount),
         change_orders(amount, status)
       `)
-      .eq("user_id", user.id)
       .neq("status", "cancelled")
     if (pm && pm !== "all")         q = q.eq("project_manager_id", pm)
     if (status && status !== "all") q = q.eq("status", status)
@@ -162,7 +158,6 @@ export async function GET(req: NextRequest) {
     let q = supabase
       .from("receipts")
       .select("created_at, amount, note, file_path, job:jobs(title)")
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
     if (from) q = q.gte("created_at", from)
     if (to)   q = q.lte("created_at", `${to}T23:59:59`)

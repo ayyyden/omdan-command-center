@@ -23,25 +23,23 @@ export default async function ContractsPage() {
     supabase
       .from("contract_templates")
       .select("*")
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
     supabase
       .from("customers")
       .select("id, name, email")
-      .eq("user_id", user.id)
       .eq("is_archived", false)
       .order("name"),
     supabase
       .from("message_templates")
       .select("id, name, subject, body")
-      .eq("user_id", user.id)
       .eq("is_active", true)
       .order("name"),
     supabase
       .from("company_settings")
       .select("company_name, email")
-      .eq("user_id", user.id)
-      .single(),
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
     supabase
       .from("sent_contracts")
       .select(`
@@ -51,7 +49,6 @@ export default async function ContractsPage() {
         customer:customers (id, name),
         job:jobs (id, title)
       `)
-      .eq("user_id", user.id)
       .order("sent_at", { ascending: false }),
   ])
 

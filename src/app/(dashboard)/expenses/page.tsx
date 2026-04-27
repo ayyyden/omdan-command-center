@@ -21,7 +21,6 @@ export default async function ExpensesPage({ searchParams }: PageProps) {
   let q = supabase
     .from("expenses")
     .select("*, job:jobs(id, title)")
-    .eq("user_id", user.id)
     .order("date", { ascending: false })
 
   if (type === "job")      q = q.eq("expense_type", "job")

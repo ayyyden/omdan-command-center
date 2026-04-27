@@ -20,14 +20,13 @@ export default async function EstimatesPage({ searchParams }: PageProps) {
   let query = supabase
     .from("estimates")
     .select("*, customer:customers(name), jobs(id)")
-    .eq("user_id", user.id)
     .order("created_at", { ascending: false })
 
   if (status) query = query.eq("status", status)
 
   const [{ data: estimates }, { data: pms }] = await Promise.all([
     query,
-    supabase.from("project_managers").select("*").eq("user_id", user.id).eq("is_active", true).order("name"),
+    supabase.from("project_managers").select("*").eq("is_active", true).order("name"),
   ])
 
   return (

@@ -17,7 +17,6 @@ export default async function EditCustomerPage({ params }: PageProps) {
     .from("customers")
     .select("*")
     .eq("id", id)
-    .eq("user_id", user.id)
     .single()
 
   if (!customer) notFound()

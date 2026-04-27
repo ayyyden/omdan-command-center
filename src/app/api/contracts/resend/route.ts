@@ -19,7 +19,6 @@ export async function POST(req: NextRequest) {
       contract_template:contract_templates (bucket, storage_path, file_name)
     `)
     .eq("id", sentContractId)
-    .eq("user_id", user.id)
     .single()
 
   if (!sent) return Response.json({ error: "Contract record not found" }, { status: 404 })
@@ -38,8 +37,9 @@ export async function POST(req: NextRequest) {
   const { data: company } = await supabase
     .from("company_settings")
     .select("company_name")
-    .eq("user_id", user.id)
-    .single()
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     return Response.json({ error: "SMTP credentials not configured" }, { status: 500 })

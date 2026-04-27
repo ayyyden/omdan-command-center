@@ -45,7 +45,6 @@ export default async function CustomersPage({ searchParams }: PageProps) {
   let filteredQuery = supabase
     .from("customers")
     .select("*")
-    .eq("user_id", user.id)
     .eq("is_archived", isArchived)
     .order("updated_at", { ascending: false })
 
@@ -59,12 +58,11 @@ export default async function CustomersPage({ searchParams }: PageProps) {
   ] = await Promise.all([
     filteredQuery,
     // counts for pipeline tabs — only non-archived
-    supabase.from("customers").select("id, status, updated_at").eq("user_id", user.id).eq("is_archived", false),
+    supabase.from("customers").select("id, status, updated_at").eq("is_archived", false),
     // most recent communication per customer (ordered; we'll take first match per customer_id)
     supabase
       .from("communication_logs")
       .select("customer_id, created_at")
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(1000),
   ])

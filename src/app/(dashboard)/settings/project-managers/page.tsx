@@ -23,7 +23,6 @@ export default async function ProjectManagersPage({ searchParams }: PageProps) {
   const { data: pms } = await supabase
     .from("project_managers")
     .select("*")
-    .eq("user_id", user.id)
     .eq("is_archived", isArchived)
     .order("name")
 

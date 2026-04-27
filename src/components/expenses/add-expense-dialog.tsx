@@ -74,7 +74,6 @@ export function AddExpenseDialog({ jobId, userId, size = "default" }: AddExpense
     supabase
       .from("jobs")
       .select("id, title")
-      .eq("user_id", userId)
       .neq("status", "cancelled")
       .order("title")
       .then(({ data }) => setJobs(data ?? []))

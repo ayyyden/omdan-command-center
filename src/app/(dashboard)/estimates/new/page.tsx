@@ -13,14 +13,14 @@ export default async function NewEstimatePage({ searchParams }: PageProps) {
   if (!user) return null
 
   const [{ data: customers }, { data: companySettings }, { data: templates }] = await Promise.all([
-    supabase.from("customers").select("id, name, email").eq("user_id", user.id).order("name"),
+    supabase.from("customers").select("id, name, email").order("name"),
     supabase.from("company_settings")
       .select("company_name, phone, email, license_number, logo_url, address, google_review_link, default_estimate_notes")
-      .eq("user_id", user.id)
-      .single(),
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
     supabase.from("message_templates")
       .select("id, name, type, subject, body")
-      .eq("user_id", user.id)
       .eq("is_active", true)
       .eq("type", "estimate_follow_up")
       .order("name"),

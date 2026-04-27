@@ -334,8 +334,9 @@ async function handleSign(
   const { data: company } = await supabase
     .from("company_settings")
     .select("company_name, email")
-    .eq("user_id", sent.user_id)
-    .single()
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   await supabase.from("communication_logs").insert({
     user_id: sent.user_id, customer_id: sent.customer_id, job_id: sent.job_id ?? null,

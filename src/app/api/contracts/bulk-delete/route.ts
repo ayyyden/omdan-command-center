@@ -18,7 +18,6 @@ export async function POST(req: NextRequest) {
     .from("sent_contracts")
     .delete()
     .in("id", ids)
-    .eq("user_id", user.id)
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 })
