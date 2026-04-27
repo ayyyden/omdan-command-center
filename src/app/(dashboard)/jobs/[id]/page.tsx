@@ -28,6 +28,7 @@ import { RegenerateTokenButton } from "@/components/change-orders/regenerate-tok
 import { ReceiptsSection } from "@/components/receipts/receipts-section"
 import { ReviewStatusSection } from "@/components/jobs/review-status-section"
 import { JobTotalOverride } from "@/components/jobs/job-total-override"
+import { JobMobileActions } from "@/components/jobs/job-mobile-actions"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -169,25 +170,41 @@ export default async function JobDetailPage({ params }: PageProps) {
   }, {})
 
   return (
-    <div>
+    <div className="overflow-x-hidden">
       <Topbar
         title={job.title}
         subtitle={(job.customer as any)?.name}
         actions={
-          <div className="flex items-center gap-2">
-            <Link href={`/jobs/${job.id}/edit`}>
-              <Button size="sm" variant="outline" className="gap-1.5">
-                <Pencil className="w-4 h-4" />
-                Edit
-              </Button>
-            </Link>
-            <JobActions jobId={job.id} jobTitle={job.title} isArchived={job.is_archived ?? false} />
-            <>
+          <>
+            {/* Mobile: icon-only edit + consolidated more menu */}
+            <div className="flex items-center gap-1.5 sm:hidden">
+              <Link href={`/jobs/${job.id}/edit`}>
+                <Button size="sm" variant="outline" className="px-2.5" aria-label="Edit">
+                  <Pencil className="w-4 h-4" />
+                </Button>
+              </Link>
+              <JobMobileActions
+                jobId={job.id}
+                jobTitle={job.title}
+                isArchived={job.is_archived ?? false}
+                templates={tpls}
+                data={jobTplData}
+                logContext={lctx}
+              />
+            </div>
+            {/* Desktop: all actions */}
+            <div className="hidden sm:flex items-center gap-2">
+              <Link href={`/jobs/${job.id}/edit`}>
+                <Button size="sm" variant="outline" className="gap-1.5">
+                  <Pencil className="w-4 h-4" />Edit
+                </Button>
+              </Link>
+              <JobActions jobId={job.id} jobTitle={job.title} isArchived={job.is_archived ?? false} />
               <QuickCopyButton label="Copy Job Reminder"     templateType="job_reminder"     templates={tpls} data={jobTplData} logContext={lctx} />
               <QuickCopyButton label="Copy Payment Reminder" templateType="payment_reminder" templates={tpls} data={jobTplData} logContext={lctx} />
               <UseTemplateButton templates={tpls} preferredType="job_reminder" data={jobTplData} logContext={lctx} />
-            </>
-          </div>
+            </div>
+          </>
         }
       />
 
@@ -211,7 +228,7 @@ export default async function JobDetailPage({ params }: PageProps) {
                   userId={user.id}
                 />
               </div>
-              <div className="w-px h-5 bg-border shrink-0" />
+              <div className="hidden sm:block w-px h-5 bg-border shrink-0" />
               <div className="flex items-center gap-1.5">
                 <div
                   className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -221,7 +238,7 @@ export default async function JobDetailPage({ params }: PageProps) {
                   {(job.project_manager as any)?.name ?? "Unassigned"}
                 </span>
               </div>
-              <div className="w-px h-5 bg-border shrink-0" />
+              <div className="hidden sm:block w-px h-5 bg-border shrink-0" />
               <div className="flex items-center gap-1.5 text-sm">
                 <CalendarDays className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                 <span>{job.scheduled_date ? formatDate(job.scheduled_date) : "Not scheduled"}</span>
@@ -231,7 +248,7 @@ export default async function JobDetailPage({ params }: PageProps) {
               </div>
               {job.estimate_id && (
                 <>
-                  <div className="w-px h-5 bg-border shrink-0" />
+                  <div className="hidden sm:block w-px h-5 bg-border shrink-0" />
                   <Link
                     href={`/estimates/${job.estimate_id}`}
                     className="flex items-center gap-1 text-sm text-primary hover:underline"

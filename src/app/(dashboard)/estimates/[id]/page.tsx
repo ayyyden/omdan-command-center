@@ -16,6 +16,7 @@ import { QuickCopyButton } from "@/components/templates/quick-copy-button"
 import { CommunicationLogSection } from "@/components/shared/communication-log-section"
 import { FileSection } from "@/components/shared/file-section"
 import { PdfActions } from "@/components/estimates/pdf-actions"
+import { EstimateMobileActions } from "@/components/estimates/estimate-mobile-actions"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -30,7 +31,7 @@ export default async function EstimateDetailPage({ params }: PageProps) {
   const [{ data: estimate }, { data: pms }, { data: linkedJob }, { data: templates }, { data: companySettings }, { data: commLogs }] = await Promise.all([
     supabase
       .from("estimates")
-      .select("*, customer:customers(id, name, address), revised_from:estimates!revised_from_id(id, title)")
+      .select("*, customer:customers(id, name, address, email), revised_from:estimates!revised_from_id(id, title)")
       .eq("id", id)
       .single(),
     supabase
@@ -60,61 +61,82 @@ export default async function EstimateDetailPage({ params }: PageProps) {
     return acc
   }, {} as Record<string, EstimateLineItem[]>)
 
+  const cs   = companySettings as any
+  const cust = estimate.customer as any
+  const tplData = {
+    customer_name:  cust?.name             ?? "",
+    estimate_total: formatCurrency(Number(estimate.total ?? 0)),
+    company_name:   cs?.company_name       ?? "",
+    company_phone:  cs?.phone              ?? "",
+    sender_name:    cs?.company_name       ?? "",
+    sender_phone:   "9512920703",
+    sender_email:   cs?.email             ?? "",
+    review_link:    cs?.google_review_link ?? "",
+  }
+  const tpls = templates ?? []
+  const lctx = { customerId: estimate.customer_id, estimateId: estimate.id }
+
   return (
-    <div>
+    <div className="overflow-x-hidden">
       <Topbar
         title={estimate.title}
-        subtitle={(estimate.customer as any)?.name}
+        subtitle={cust?.name}
         actions={
-          <div className="flex items-center gap-2">
-            {estimate.status === "rejected" && (
-              <ReviseEstimateButton estimateId={estimate.id} userId={user.id} />
-            )}
-            <EstimateStatusUpdater
-              estimateId={estimate.id}
-              customerId={estimate.customer_id}
-              estimateTitle={estimate.title}
-              currentStatus={estimate.status}
-              projectManagers={(pms ?? []) as ProjectManager[]}
-              userId={user.id}
-              hasExistingJob={!!linkedJob}
-            />
-            <Button variant="outline" asChild>
-              <Link href={`/estimates/${estimate.id}/edit`}><Pencil className="w-4 h-4 mr-2" />Edit</Link>
-            </Button>
-            <EstimateActions estimateId={estimate.id} estimateTitle={estimate.title} />
-            {(() => {
-              const cs   = companySettings as any
-              const cust = estimate.customer as any
-              const tplData = {
-                customer_name:  cust?.name             ?? "",
-                estimate_total: formatCurrency(Number(estimate.total ?? 0)),
-                company_name:   cs?.company_name       ?? "",
-                company_phone:  cs?.phone              ?? "",
-                sender_name:    cs?.company_name       ?? "",
-                sender_phone:   "9512920703",
-                sender_email:   cs?.email              ?? "",
-                review_link:    cs?.google_review_link ?? "",
-              }
-              const tpls = templates ?? []
-              const lctx = { customerId: estimate.customer_id, estimateId: estimate.id }
-              return (
-                <>
-                  <PdfActions
-                    estimateId={estimate.id}
-                    estimateTitle={estimate.title}
-                    customerEmail={cust?.email ?? null}
-                    customerName={cust?.name ?? ""}
-                    templates={tpls}
-                    tplData={tplData}
-                  />
-                  <QuickCopyButton label="Copy Follow-up"         templateType="estimate_follow_up" templates={tpls} data={tplData} logContext={lctx} />
-                  <QuickCopyButton label="Copy Estimate Sent Msg" templateType="estimate_follow_up" templates={tpls} data={tplData} logContext={lctx} />
-                  <UseTemplateButton templates={tpls} preferredType="estimate_follow_up" data={tplData} logContext={lctx} />
-                </>
-              )
-            })()}
-          </div>
+          <>
+            {/* Mobile: status updater + consolidated more menu */}
+            <div className="flex items-center gap-1.5 sm:hidden">
+              <EstimateStatusUpdater
+                estimateId={estimate.id}
+                customerId={estimate.customer_id}
+                estimateTitle={estimate.title}
+                currentStatus={estimate.status}
+                projectManagers={(pms ?? []) as ProjectManager[]}
+                userId={user.id}
+                hasExistingJob={!!linkedJob}
+              />
+              <EstimateMobileActions
+                estimateId={estimate.id}
+                estimateTitle={estimate.title}
+                estimateStatus={estimate.status}
+                userId={user.id}
+                customerEmail={cust?.email ?? null}
+                customerName={cust?.name ?? ""}
+                templates={tpls}
+                tplData={tplData}
+                logContext={lctx}
+              />
+            </div>
+            {/* Desktop: all actions */}
+            <div className="hidden sm:flex items-center gap-2">
+              {estimate.status === "rejected" && (
+                <ReviseEstimateButton estimateId={estimate.id} userId={user.id} />
+              )}
+              <EstimateStatusUpdater
+                estimateId={estimate.id}
+                customerId={estimate.customer_id}
+                estimateTitle={estimate.title}
+                currentStatus={estimate.status}
+                projectManagers={(pms ?? []) as ProjectManager[]}
+                userId={user.id}
+                hasExistingJob={!!linkedJob}
+              />
+              <Button variant="outline" asChild>
+                <Link href={`/estimates/${estimate.id}/edit`}><Pencil className="w-4 h-4 mr-2" />Edit</Link>
+              </Button>
+              <EstimateActions estimateId={estimate.id} estimateTitle={estimate.title} />
+              <PdfActions
+                estimateId={estimate.id}
+                estimateTitle={estimate.title}
+                customerEmail={cust?.email ?? null}
+                customerName={cust?.name ?? ""}
+                templates={tpls}
+                tplData={tplData}
+              />
+              <QuickCopyButton label="Copy Follow-up"         templateType="estimate_follow_up" templates={tpls} data={tplData} logContext={lctx} />
+              <QuickCopyButton label="Copy Estimate Sent Msg" templateType="estimate_follow_up" templates={tpls} data={tplData} logContext={lctx} />
+              <UseTemplateButton templates={tpls} preferredType="estimate_follow_up" data={tplData} logContext={lctx} />
+            </div>
+          </>
         }
       />
 

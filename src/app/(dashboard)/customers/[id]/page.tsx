@@ -13,6 +13,7 @@ import { UseTemplateButton } from "@/components/templates/use-template-button"
 import { QuickCopyButton } from "@/components/templates/quick-copy-button"
 import { CommunicationLogSection } from "@/components/shared/communication-log-section"
 import { FileSection } from "@/components/shared/file-section"
+import { CustomerMobileActions } from "@/components/customers/customer-mobile-actions"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -88,41 +89,56 @@ export default async function CustomerDetailPage({ params }: PageProps) {
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
+  const cs = companySettings as any
+  const customerTplData = {
+    customer_name: customer.name,
+    company_name:  cs?.company_name        ?? "",
+    company_phone: cs?.phone               ?? "",
+    sender_name:   cs?.company_name        ?? "",
+    sender_phone:  "9512920703",
+    sender_email:  cs?.email              ?? "",
+    review_link:   cs?.google_review_link ?? "",
+  }
+  const tpls = templates ?? []
+  const lctx = { customerId: customer.id }
+
   return (
-    <div>
+    <div className="overflow-x-hidden">
       <Topbar
         title={customer.name}
         subtitle={customer.service_type ?? "Customer"}
         actions={
-          <div className="flex items-center gap-2">
-            <CustomerActions customerId={customer.id} customerName={customer.name} isArchived={customer.is_archived ?? false} />
-            {(() => {
-              const cs = companySettings as any
-              const customerTplData = {
-                customer_name: customer.name,
-                company_name:  cs?.company_name ?? "",
-                company_phone: cs?.phone        ?? "",
-                sender_name:   cs?.company_name        ?? "",
-                sender_phone:  "9512920703",
-                sender_email:  cs?.email              ?? "",
-                review_link:   cs?.google_review_link ?? "",
-              }
-              const tpls = templates ?? []
-              const lctx = { customerId: customer.id }
-              return (
-                <>
-                  <QuickCopyButton label="Copy Review Request" templateType="review_request" templates={tpls} data={customerTplData} logContext={lctx} />
-                  <UseTemplateButton templates={tpls} data={customerTplData} logContext={lctx} />
-                </>
-              )
-            })()}
-            <Button variant="outline" asChild>
-              <Link href={`/customers/${customer.id}/edit`}><Pencil className="w-4 h-4 mr-2" />Edit</Link>
-            </Button>
-            <Button asChild>
-              <Link href={`/estimates/new?customer=${customer.id}`}><Plus className="w-4 h-4 mr-2" />New Estimate</Link>
-            </Button>
-          </div>
+          <>
+            {/* Mobile: icon-only primary actions + consolidated more menu */}
+            <div className="flex items-center gap-1.5 sm:hidden">
+              <Button variant="outline" size="sm" className="px-2.5" asChild aria-label="Edit">
+                <Link href={`/customers/${customer.id}/edit`}><Pencil className="w-4 h-4" /></Link>
+              </Button>
+              <Button size="sm" className="px-2.5" asChild aria-label="New Estimate">
+                <Link href={`/estimates/new?customer=${customer.id}`}><Plus className="w-4 h-4" /></Link>
+              </Button>
+              <CustomerMobileActions
+                customerId={customer.id}
+                customerName={customer.name}
+                isArchived={customer.is_archived ?? false}
+                templates={tpls}
+                data={customerTplData}
+                logContext={lctx}
+              />
+            </div>
+            {/* Desktop: all actions */}
+            <div className="hidden sm:flex items-center gap-2">
+              <CustomerActions customerId={customer.id} customerName={customer.name} isArchived={customer.is_archived ?? false} />
+              <QuickCopyButton label="Copy Review Request" templateType="review_request" templates={tpls} data={customerTplData} logContext={lctx} />
+              <UseTemplateButton templates={tpls} data={customerTplData} logContext={lctx} />
+              <Button variant="outline" asChild>
+                <Link href={`/customers/${customer.id}/edit`}><Pencil className="w-4 h-4 mr-2" />Edit</Link>
+              </Button>
+              <Button asChild>
+                <Link href={`/estimates/new?customer=${customer.id}`}><Plus className="w-4 h-4 mr-2" />New Estimate</Link>
+              </Button>
+            </div>
+          </>
         }
       />
 
