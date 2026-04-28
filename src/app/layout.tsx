@@ -26,6 +26,11 @@ export const metadata: Metadata = {
   title: "Omdan CRM",
   description: "Business management for Omdan Development",
   applicationName: "Omdan CRM",
+  icons: {
+    icon: "/logo.png",
+    shortcut: "/logo.png",
+    apple: "/logo.png",
+  },
   appleWebApp: {
     capable: true,
     title: "Omdan CRM",
