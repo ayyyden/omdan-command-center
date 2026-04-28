@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { requirePermission } from "@/lib/auth-helpers"
 
 export async function POST(req: NextRequest) {
   const { ids } = (await req.json()) as { ids: string[] }
@@ -8,11 +8,9 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "No IDs provided" }, { status: 400 })
   }
 
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await requirePermission("contracts:delete")
+  if (session instanceof Response) return session
+  const { supabase } = session
 
   const { error } = await supabase
     .from("sent_contracts")

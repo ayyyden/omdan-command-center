@@ -3,38 +3,30 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
-  LayoutDashboard,
-  Users,
-  FileText,
-  Briefcase,
-  Calendar,
-  Receipt,
-  DollarSign,
-  BarChart3,
-  HardHat,
-  LogOut,
-  Settings,
-  ScrollText,
-  X,
-  Search,
-  Bell,
+  LayoutDashboard, Users, FileText, Briefcase, Calendar,
+  Receipt, DollarSign, BarChart3, HardHat, LogOut, Settings,
+  ScrollText, X, Search, Bell, UsersRound,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
+import type { TeamRole } from "@/lib/permissions"
+import { RoleBadge } from "@/components/team/role-badge"
+
+const ALL_ROLES: TeamRole[] = ["owner", "admin", "project_manager", "office", "field_worker", "viewer"]
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/customers", label: "CRM / Leads", icon: Users },
-  { href: "/estimates", label: "Estimates", icon: FileText },
-  { href: "/jobs", label: "Jobs", icon: Briefcase },
-  { href: "/scheduler", label: "Scheduler", icon: Calendar },
-  { href: "/expenses", label: "Expenses", icon: Receipt },
-  { href: "/payments", label: "Payments", icon: DollarSign },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
-  { href: "/contracts", label: "Contracts", icon: ScrollText },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard",  label: "Dashboard",  icon: LayoutDashboard, roles: ALL_ROLES },
+  { href: "/customers",  label: "CRM / Leads", icon: Users,           roles: ["owner", "admin"] as TeamRole[] },
+  { href: "/estimates",  label: "Estimates",   icon: FileText,        roles: ["owner", "admin", "office", "project_manager"] as TeamRole[] },
+  { href: "/jobs",       label: "Jobs",        icon: Briefcase,       roles: ALL_ROLES },
+  { href: "/scheduler",  label: "Scheduler",   icon: Calendar,        roles: ALL_ROLES },
+  { href: "/expenses",   label: "Expenses",    icon: Receipt,         roles: ["owner", "admin"] as TeamRole[] },
+  { href: "/payments",   label: "Payments",    icon: DollarSign,      roles: ["owner", "admin"] as TeamRole[] },
+  { href: "/reports",    label: "Reports",     icon: BarChart3,       roles: ["owner", "admin"] as TeamRole[] },
+  { href: "/contracts",  label: "Contracts",   icon: ScrollText,      roles: ["owner", "admin", "office"] as TeamRole[] },
+  { href: "/settings",   label: "Settings",    icon: Settings,        roles: ALL_ROLES },
 ]
 
 interface SidebarProps {
@@ -42,9 +34,11 @@ interface SidebarProps {
   onClose?: () => void
   logoUrl?: string | null
   companyName?: string | null
+  userRole?: TeamRole
+  userName?: string | null
 }
 
-export function Sidebar({ isOpen = false, onClose, logoUrl, companyName }: SidebarProps) {
+export function Sidebar({ isOpen = false, onClose, logoUrl, companyName, userRole, userName }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [notifCount, setNotifCount] = useState(0)
@@ -62,9 +56,13 @@ export function Sidebar({ isOpen = false, onClose, logoUrl, companyName }: Sideb
     router.refresh()
   }
 
+  const visibleNav = userRole
+    ? navItems.filter((item) => item.roles.includes(userRole))
+    : navItems
+
   return (
     <>
-      {/* Mobile backdrop overlay */}
+      {/* Mobile backdrop */}
       {isOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/50 md:hidden"
@@ -76,12 +74,14 @@ export function Sidebar({ isOpen = false, onClose, logoUrl, companyName }: Sideb
       <aside
         className={cn(
           "flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border shrink-0",
-          // Mobile: fixed overlay panel, slides in/out
           "fixed inset-y-0 left-0 z-50 w-72 transition-transform duration-300",
-          // Desktop: static in-flow sidebar, always visible
           "md:static md:w-64 md:min-h-screen md:translate-x-0 md:z-auto md:transition-none",
           isOpen ? "translate-x-0" : "-translate-x-full",
         )}
+        style={{
+          paddingTop: "env(safe-area-inset-top)",
+          paddingBottom: "env(safe-area-inset-bottom)",
+        }}
       >
         {/* Brand */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-sidebar-border">
@@ -103,7 +103,6 @@ export function Sidebar({ isOpen = false, onClose, logoUrl, companyName }: Sideb
               <p className="text-xs text-sidebar-foreground/60 leading-tight">Command Center</p>
             </div>
           </div>
-          {/* Close button — mobile only */}
           <button
             className="md:hidden p-1.5 rounded-lg text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
             onClick={onClose}
@@ -129,8 +128,10 @@ export function Sidebar({ isOpen = false, onClose, logoUrl, companyName }: Sideb
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
-          {navItems.map(({ href, label, icon: Icon }) => {
-            const active = href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href)
+          {visibleNav.map(({ href, label, icon: Icon }) => {
+            const active = href === "/dashboard"
+              ? pathname === "/dashboard"
+              : pathname.startsWith(href)
             return (
               <Link
                 key={href}
@@ -152,7 +153,19 @@ export function Sidebar({ isOpen = false, onClose, logoUrl, companyName }: Sideb
 
         {/* Footer */}
         <div className="px-3 py-4 border-t border-sidebar-border space-y-0.5">
-          {/* Notifications button — dispatches event, modal rendered at root */}
+          {/* User info + role */}
+          {userName && userRole && (
+            <div className="flex items-center gap-2 px-3 py-2 mb-1">
+              <div className="w-7 h-7 rounded-full bg-sidebar-accent flex items-center justify-center text-xs font-bold text-sidebar-foreground shrink-0 uppercase">
+                {userName.charAt(0)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-sidebar-foreground truncate">{userName}</p>
+              </div>
+              <RoleBadge role={userRole} />
+            </div>
+          )}
+
           <button
             onClick={() => window.dispatchEvent(new CustomEvent("open-notifications"))}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"

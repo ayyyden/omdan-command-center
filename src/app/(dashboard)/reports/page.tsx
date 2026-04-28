@@ -1,19 +1,22 @@
-import { createClient } from "@/lib/supabase/server"
 import { Topbar } from "@/components/shared/topbar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils"
 import { JobProfitTable } from "@/components/reports/job-profit-table"
 import { ReportsFilters } from "@/components/reports/reports-filters"
 import { ExportSection } from "@/components/reports/export-section"
+import { getSessionMember } from "@/lib/auth-helpers"
+import { can } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 
 interface PageProps {
   searchParams: Promise<{ from?: string; to?: string; pm?: string; status?: string }>
 }
 
 export default async function ReportsPage({ searchParams }: PageProps) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  const session = await getSessionMember()
+  if (!session) redirect("/login")
+  if (!can(session.role, "reports:view")) redirect("/access-denied")
+  const { supabase } = session
 
   const { from, to, pm, status } = await searchParams
 

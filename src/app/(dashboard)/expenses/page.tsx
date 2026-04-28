@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server"
+import { getSessionMember, hasJobScope, NO_ROWS_ID } from "@/lib/auth-helpers"
+import { can } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 import { Topbar } from "@/components/shared/topbar"
 import { formatCurrency } from "@/lib/utils"
 import { AddExpenseDialog } from "@/components/expenses/add-expense-dialog"
@@ -14,15 +16,31 @@ interface PageProps {
 
 export default async function ExpensesPage({ searchParams }: PageProps) {
   const { type, category, from, to } = await searchParams
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  const session = await getSessionMember()
+  if (!session) redirect("/login")
+  if (!can(session.role, "expenses:view")) redirect("/access-denied")
+  const { userId, role, pmId, supabase } = session
+
+  // For scoped roles, resolve job IDs assigned to this PM
+  let scopedJobIds: string[] | null = null
+  if (hasJobScope(role)) {
+    const { data: assignedJobs } = await supabase
+      .from("jobs")
+      .select("id")
+      .eq("project_manager_id", pmId ?? NO_ROWS_ID)
+    scopedJobIds = (assignedJobs ?? []).map(j => j.id)
+  }
 
   let q = supabase
     .from("expenses")
     .select("*, job:jobs(id, title)")
     .order("date", { ascending: false })
 
+  if (scopedJobIds !== null) {
+    q = scopedJobIds.length > 0
+      ? q.in("job_id", scopedJobIds)
+      : q.eq("job_id", NO_ROWS_ID)
+  }
   if (type === "job")      q = q.eq("expense_type", "job")
   if (type === "business") q = q.eq("expense_type", "business")
   if (category && category !== "all") q = q.eq("category", category)
@@ -43,7 +61,7 @@ export default async function ExpensesPage({ searchParams }: PageProps) {
       <Topbar
         title="Expenses"
         subtitle={`${rows.length} expense${rows.length !== 1 ? "s" : ""}${typeLabel} · ${formatCurrency(total)}`}
-        actions={<AddExpenseDialog userId={user.id} />}
+        actions={<AddExpenseDialog userId={userId} />}
       />
 
       <div className="p-4 sm:p-6 space-y-4">
@@ -65,8 +83,8 @@ export default async function ExpensesPage({ searchParams }: PageProps) {
           <span className="text-lg font-bold text-destructive">{formatCurrency(total)}</span>
         </div>
 
-        <ExpensesBulkTable expenses={rows as any[]} userId={user.id} />
-        <ReceiptsSection userId={user.id} />
+        <ExpensesBulkTable expenses={rows as any[]} userId={userId} />
+        <ReceiptsSection userId={userId} />
       </div>
     </div>
   )

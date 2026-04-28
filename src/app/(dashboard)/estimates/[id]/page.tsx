@@ -1,5 +1,6 @@
-import { notFound } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
+import { notFound, redirect } from "next/navigation"
+import { getSessionMember } from "@/lib/auth-helpers"
+import { can } from "@/lib/permissions"
 import { Topbar } from "@/components/shared/topbar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -24,9 +25,11 @@ interface PageProps {
 
 export default async function EstimateDetailPage({ params }: PageProps) {
   const { id } = await params
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+
+  const session = await getSessionMember()
+  if (!session) redirect("/login")
+  if (!can(session.role, "estimates:view")) redirect("/access-denied")
+  const { userId, role, pmId, supabase } = session
 
   const [{ data: estimate }, { data: pms }, { data: linkedJob }, { data: templates }, { data: companySettings }, { data: commLogs }] = await Promise.all([
     supabase
@@ -41,7 +44,7 @@ export default async function EstimateDetailPage({ params }: PageProps) {
       .order("name"),
     supabase
       .from("jobs")
-      .select("id, title")
+      .select("id, title, project_manager_id")
       .eq("estimate_id", id)
       .maybeSingle(),
     supabase.from("message_templates").select("id, name, type, subject, body").eq("is_active", true).order("name"),
@@ -50,6 +53,15 @@ export default async function EstimateDetailPage({ params }: PageProps) {
   ])
 
   if (!estimate) notFound()
+
+  // PM scope enforcement — verify this estimate belongs to the PM's job or was created by them
+  if (role === "project_manager") {
+    if (linkedJob) {
+      if ((linkedJob as any).project_manager_id !== pmId) redirect("/access-denied")
+    } else {
+      if (estimate.user_id !== userId) redirect("/access-denied")
+    }
+  }
 
   const lineItems = (estimate.line_items ?? []) as EstimateLineItem[]
   const revisedFrom = (estimate as any).revised_from as { id: string; title: string } | null
@@ -91,14 +103,14 @@ export default async function EstimateDetailPage({ params }: PageProps) {
                 estimateTitle={estimate.title}
                 currentStatus={estimate.status}
                 projectManagers={(pms ?? []) as ProjectManager[]}
-                userId={user.id}
+                userId={userId}
                 hasExistingJob={!!linkedJob}
               />
               <EstimateMobileActions
                 estimateId={estimate.id}
                 estimateTitle={estimate.title}
                 estimateStatus={estimate.status}
-                userId={user.id}
+                userId={userId}
                 customerEmail={cust?.email ?? null}
                 customerName={cust?.name ?? ""}
                 templates={tpls}
@@ -109,7 +121,7 @@ export default async function EstimateDetailPage({ params }: PageProps) {
             {/* Desktop: all actions */}
             <div className="hidden sm:flex items-center gap-2">
               {estimate.status === "rejected" && (
-                <ReviseEstimateButton estimateId={estimate.id} userId={user.id} />
+                <ReviseEstimateButton estimateId={estimate.id} userId={userId} />
               )}
               <EstimateStatusUpdater
                 estimateId={estimate.id}
@@ -117,7 +129,7 @@ export default async function EstimateDetailPage({ params }: PageProps) {
                 estimateTitle={estimate.title}
                 currentStatus={estimate.status}
                 projectManagers={(pms ?? []) as ProjectManager[]}
-                userId={user.id}
+                userId={userId}
                 hasExistingJob={!!linkedJob}
               />
               <Button variant="outline" asChild>
@@ -283,7 +295,7 @@ export default async function EstimateDetailPage({ params }: PageProps) {
           </Card>
         )}
 
-        <FileSection entityType="estimates" entityId={estimate.id} userId={user.id} />
+        <FileSection entityType="estimates" entityId={estimate.id} userId={userId} />
 
         <CommunicationLogSection logs={commLogs ?? []} />
       </div>

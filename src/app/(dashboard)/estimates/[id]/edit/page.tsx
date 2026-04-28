@@ -1,5 +1,6 @@
-import { notFound } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
+import { notFound, redirect } from "next/navigation"
+import { getSessionMember } from "@/lib/auth-helpers"
+import { can } from "@/lib/permissions"
 import { Topbar } from "@/components/shared/topbar"
 import { EstimateForm } from "@/components/estimates/estimate-form"
 
@@ -9,12 +10,15 @@ interface PageProps {
 
 export default async function EditEstimatePage({ params }: PageProps) {
   const { id } = await params
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
 
-  const [{ data: estimate }, { data: customers }, { data: companySettings }, { data: templates }] = await Promise.all([
+  const session = await getSessionMember()
+  if (!session) redirect("/login")
+  if (!can(session.role, "estimates:edit")) redirect("/access-denied")
+  const { userId, role, pmId, supabase } = session
+
+  const [{ data: estimate }, { data: linkedJob }, { data: customers }, { data: companySettings }, { data: templates }] = await Promise.all([
     supabase.from("estimates").select("*").eq("id", id).single(),
+    supabase.from("jobs").select("id, project_manager_id").eq("estimate_id", id).maybeSingle(),
     supabase.from("customers").select("id, name, email").order("name"),
     supabase.from("company_settings")
       .select("company_name, phone, email, license_number, logo_url, address, google_review_link, default_estimate_notes")
@@ -30,6 +34,15 @@ export default async function EditEstimatePage({ params }: PageProps) {
 
   if (!estimate) notFound()
 
+  // PM scope enforcement
+  if (role === "project_manager") {
+    if (linkedJob) {
+      if ((linkedJob as any).project_manager_id !== pmId) redirect("/access-denied")
+    } else {
+      if (estimate.user_id !== userId) redirect("/access-denied")
+    }
+  }
+
   return (
     <div>
       <Topbar title="Edit Estimate" subtitle={estimate.title} />
@@ -37,7 +50,7 @@ export default async function EditEstimatePage({ params }: PageProps) {
         <EstimateForm
           estimate={estimate as any}
           customers={(customers ?? []) as any}
-          userId={user.id}
+          userId={userId}
           templates={templates ?? []}
           companySettings={companySettings ?? null}
         />

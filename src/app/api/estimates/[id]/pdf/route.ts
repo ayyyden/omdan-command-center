@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { renderToBuffer } from "@react-pdf/renderer"
 import React from "react"
-import { createClient } from "@/lib/supabase/server"
+import { requirePermission, hasJobScope, NO_ROWS_ID } from "@/lib/auth-helpers"
 import { EstimatePDFDocument } from "@/lib/pdf/estimate-document"
 import type { EstimateLineItem } from "@/types"
 
@@ -10,10 +10,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await requirePermission("estimates:view")
+  if (session instanceof Response) return session
+  const { userId, role, pmId, supabase } = session
 
   const { data: estimate, error: estErr } = await supabase
     .from("estimates")
@@ -22,6 +22,19 @@ export async function POST(
     .single()
 
   if (estErr || !estimate) return Response.json({ error: "Not found" }, { status: 404 })
+
+  // PM scope enforcement
+  if (hasJobScope(role)) {
+    const { data: ownerJob } = await supabase
+      .from("jobs")
+      .select("id")
+      .eq("estimate_id", id)
+      .eq("project_manager_id", pmId ?? NO_ROWS_ID)
+      .maybeSingle()
+    if (!ownerJob && estimate.user_id !== userId) {
+      return Response.json({ error: "Forbidden" }, { status: 403 })
+    }
+  }
 
   const { data: company } = await supabase
     .from("company_settings")
@@ -104,7 +117,7 @@ export async function POST(
   const fileName = `${(estimate.title ?? "Estimate").replace(/[^a-zA-Z0-9 _-]/g, "")}.pdf`
   await supabase.from("file_attachments").upsert(
     {
-      user_id:      user.id,
+      user_id:      userId,
       bucket:       "documents",
       storage_path: storagePath,
       file_name:    fileName,

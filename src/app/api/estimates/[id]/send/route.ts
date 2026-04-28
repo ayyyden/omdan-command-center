@@ -2,7 +2,7 @@ import { NextRequest } from "next/server"
 import { renderToBuffer } from "@react-pdf/renderer"
 import nodemailer from "nodemailer"
 import React from "react"
-import { createClient } from "@/lib/supabase/server"
+import { requirePermission, hasJobScope, NO_ROWS_ID } from "@/lib/auth-helpers"
 import { EstimatePDFDocument } from "@/lib/pdf/estimate-document"
 import type { EstimateLineItem } from "@/types"
 
@@ -22,9 +22,9 @@ export async function POST(
     return Response.json({ error: "Missing required fields" }, { status: 400 })
   }
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await requirePermission("estimates:send")
+  if (session instanceof Response) return session
+  const { userId, role, pmId, supabase } = session
 
   // Fetch estimate + customer
   const { data: estimate, error: estErr } = await supabase
@@ -34,6 +34,19 @@ export async function POST(
     .single()
 
   if (estErr || !estimate) return Response.json({ error: "Not found" }, { status: 404 })
+
+  // PM scope enforcement
+  if (hasJobScope(role)) {
+    const { data: ownerJob } = await supabase
+      .from("jobs")
+      .select("id")
+      .eq("estimate_id", id)
+      .eq("project_manager_id", pmId ?? NO_ROWS_ID)
+      .maybeSingle()
+    if (!ownerJob && estimate.user_id !== userId) {
+      return Response.json({ error: "Forbidden" }, { status: 403 })
+    }
+  }
 
   const { data: company } = await supabase
     .from("company_settings")
@@ -139,7 +152,7 @@ The estimate PDF is also attached to this email for your reference.`
 
   // Log communication
   await supabase.from("communication_logs").insert({
-    user_id:     user.id,
+    user_id:     userId,
     customer_id: customer.id,
     estimate_id: id,
     type:        "estimate_follow_up",

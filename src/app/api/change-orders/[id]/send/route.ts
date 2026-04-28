@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import nodemailer from "nodemailer"
-import { createClient } from "@/lib/supabase/server"
+import { requirePermission } from "@/lib/auth-helpers"
 
 export async function POST(
   req: NextRequest,
@@ -13,9 +13,9 @@ export async function POST(
     return Response.json({ error: "Missing required fields" }, { status: 400 })
   }
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await requirePermission("change_orders:create")
+  if (session instanceof Response) return session
+  const { userId, supabase } = session
 
   const { data: co } = await supabase
     .from("change_orders")
@@ -61,7 +61,7 @@ ${approvalLink}`
 
   const customer = co.customer as { id: string; name: string; email: string | null }
   await supabase.from("communication_logs").insert({
-    user_id:     user.id,
+    user_id:     userId,
     customer_id: customer.id,
     job_id:      co.job_id,
     type:        "change_order",

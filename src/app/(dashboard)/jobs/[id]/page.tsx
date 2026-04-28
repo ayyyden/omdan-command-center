@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
 import { Topbar } from "@/components/shared/topbar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -29,6 +28,9 @@ import { ReceiptsSection } from "@/components/receipts/receipts-section"
 import { ReviewStatusSection } from "@/components/jobs/review-status-section"
 import { JobTotalOverride } from "@/components/jobs/job-total-override"
 import { JobMobileActions } from "@/components/jobs/job-mobile-actions"
+import { getSessionMember, hasJobScope } from "@/lib/auth-helpers"
+import { can } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -72,27 +74,53 @@ const ACTION_ICON: Record<string, React.ReactNode> = {
   expense_added:    <Receipt className="w-3 h-3" />,
 }
 
+// Actions that reveal financial data — hidden from non-admin in activity log
+const FINANCIAL_ACTIONS = new Set(["payment_added", "expense_added", "invoice_created"])
+
 export default async function JobDetailPage({ params }: PageProps) {
   const { id } = await params
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
 
-  const [{ data: job }, { data: expenses }, { data: payments }, { data: rawInvoices }, { data: activityLog }, { data: companySettings }] = await Promise.all([
+  const session = await getSessionMember()
+  if (!session) redirect("/login")
+  const { userId, role, pmId, supabase } = session
+
+  const isAdmin = can(role, "jobs:view_financials")
+  const canSubmitExpense = can(role, "expenses:create")
+
+  const empty = { data: [] as any[] }
+
+  // Build activity log query — exclude financial actions for non-admin
+  const activityBaseQ = supabase
+    .from("activity_log")
+    .select("id, created_at, action, description")
+    .eq("job_id", id)
+    .order("created_at", { ascending: false })
+    .limit(30)
+
+  const activityQuery = isAdmin
+    ? activityBaseQ
+    : activityBaseQ
+        .neq("action", "payment_added")
+        .neq("action", "expense_added")
+        .neq("action", "invoice_created")
+
+  const [
+    { data: job },
+    { data: expenses },
+    { data: payments },
+    { data: rawInvoices },
+    { data: activityLog },
+    { data: companySettings },
+  ] = await Promise.all([
     supabase
       .from("jobs")
       .select("*, customer:customers(id, name, phone, email), estimate:estimates(id, title, total), project_manager:project_managers(name, color, email)")
       .eq("id", id)
       .single(),
-    supabase.from("expenses").select("*").eq("job_id", id).order("date", { ascending: false }),
-    supabase.from("payments").select("*, invoice:invoices(type)").eq("job_id", id).order("date", { ascending: false }),
-    supabase.from("invoices").select("*, payments(amount)").eq("job_id", id).order("created_at"),
-    supabase
-      .from("activity_log")
-      .select("id, created_at, action, description")
-      .eq("job_id", id)
-      .order("created_at", { ascending: false })
-      .limit(30),
+    isAdmin ? supabase.from("expenses").select("*").eq("job_id", id).order("date", { ascending: false }) : empty,
+    isAdmin ? supabase.from("payments").select("*, invoice:invoices(type)").eq("job_id", id).order("date", { ascending: false }) : empty,
+    isAdmin ? supabase.from("invoices").select("*, payments(amount)").eq("job_id", id).order("created_at") : empty,
+    activityQuery,
     supabase.from("company_settings").select("default_invoice_notes, company_name, phone, email, google_review_link").order("updated_at", { ascending: false }).limit(1).maybeSingle(),
   ])
 
@@ -104,7 +132,10 @@ export default async function JobDetailPage({ params }: PageProps) {
 
   if (!job) notFound()
 
-  // Pre-compute invoice balances server-side so client components get clean data
+  // PM scope enforcement — block access to jobs not assigned to this PM
+  if (hasJobScope(role) && (job as any).project_manager_id !== pmId) redirect("/access-denied")
+
+  // Financial calculations — only meaningful for admin; others get zeros
   const invoicesWithBalance: InvoiceWithBalance[] = (rawInvoices ?? []).map((inv) => {
     const paid = ((inv.payments ?? []) as { amount: unknown }[])
       .reduce((sum, p) => sum + Number(p.amount), 0)
@@ -124,21 +155,21 @@ export default async function JobDetailPage({ params }: PageProps) {
     }
   })
 
-  const totalInvoiced    = invoicesWithBalance.reduce((sum, inv) => sum + inv.amount, 0)
-  const totalInvoicePaid = invoicesWithBalance.reduce((sum, inv) => sum + inv.amount_paid, 0)
-  const invoiceOutstanding = Math.max(0, totalInvoiced - totalInvoicePaid)
+  const totalInvoiced       = invoicesWithBalance.reduce((sum, inv) => sum + inv.amount, 0)
+  const totalInvoicePaid    = invoicesWithBalance.reduce((sum, inv) => sum + inv.amount_paid, 0)
+  const invoiceOutstanding  = Math.max(0, totalInvoiced - totalInvoicePaid)
 
-  const estimateTotal      = Number((job.estimate as any)?.total ?? 0)
-  const approvedCOTotal    = (changeOrders ?? []).filter((co) => co.status === "approved").reduce((sum, co) => sum + Number(co.amount), 0)
-  const calculatedTotal    = estimateTotal + approvedCOTotal
-  const manualTotal        = (job as any).manual_total != null ? Number((job as any).manual_total) : null
-  const contractValue      = manualTotal ?? calculatedTotal
-  const totalExpenses      = (expenses ?? []).reduce((sum, e) => sum + Number(e.amount), 0)
-  const totalPayments      = (payments ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
-  const grossProfit        = totalPayments - totalExpenses
-  const profitMargin       = calcProfitMargin(totalPayments, totalExpenses)
-  const amountUnpaid       = Math.max(0, contractValue - totalPayments)
-  const isFullyPaid        = job.status === "completed" && contractValue > 0 && totalPayments >= contractValue
+  const estimateTotal    = Number((job.estimate as any)?.total ?? 0)
+  const approvedCOTotal  = (changeOrders ?? []).filter((co) => co.status === "approved").reduce((sum, co) => sum + Number(co.amount), 0)
+  const calculatedTotal  = estimateTotal + approvedCOTotal
+  const manualTotal      = (job as any).manual_total != null ? Number((job as any).manual_total) : null
+  const contractValue    = manualTotal ?? calculatedTotal
+  const totalExpenses    = (expenses ?? []).reduce((sum, e) => sum + Number(e.amount), 0)
+  const totalPayments    = (payments ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
+  const grossProfit      = totalPayments - totalExpenses
+  const profitMargin     = calcProfitMargin(totalPayments, totalExpenses)
+  const amountUnpaid     = Math.max(0, contractValue - totalPayments)
+  const isFullyPaid      = isAdmin && job.status === "completed" && contractValue > 0 && totalPayments >= contractValue
 
   const cs = companySettings as any
   const pm = job.project_manager as any
@@ -225,7 +256,7 @@ export default async function JobDetailPage({ params }: PageProps) {
                   jobId={job.id}
                   currentStatus={job.status as JobStatus}
                   customerId={job.customer_id}
-                  userId={user.id}
+                  userId={userId}
                 />
               </div>
               <div className="hidden sm:block w-px h-5 bg-border shrink-0" />
@@ -280,50 +311,69 @@ export default async function JobDetailPage({ params }: PageProps) {
           </div>
         )}
 
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground">Contract Value</p>
-              <p className="text-lg font-bold">{formatCurrency(contractValue)}</p>
-              {manualTotal !== null && (
-                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">manually set</p>
-              )}
-              {manualTotal === null && approvedCOTotal > 0 && (
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  incl. {formatCurrency(approvedCOTotal)} in change orders
+        {/* Financial stat cards — admin only */}
+        {isAdmin && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <p className="text-xs text-muted-foreground">Contract Value</p>
+                <p className="text-lg font-bold">{formatCurrency(contractValue)}</p>
+                {manualTotal !== null && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">manually set</p>
+                )}
+                {manualTotal === null && approvedCOTotal > 0 && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    incl. {formatCurrency(approvedCOTotal)} in change orders
+                  </p>
+                )}
+                <JobTotalOverride
+                  jobId={job.id}
+                  calculatedTotal={calculatedTotal}
+                  manualTotal={manualTotal}
+                />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <p className="text-xs text-muted-foreground">Total Collected</p>
+                <p className="text-lg font-bold text-success">{formatCurrency(totalPayments)}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <p className="text-xs text-muted-foreground">Unpaid Balance</p>
+                <p className={`text-lg font-bold ${amountUnpaid > 0 ? "text-warning" : "text-success"}`}>
+                  {formatCurrency(amountUnpaid)}
                 </p>
-              )}
-              <JobTotalOverride
-                jobId={job.id}
-                calculatedTotal={calculatedTotal}
-                manualTotal={manualTotal}
-              />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground">Total Collected</p>
-              <p className="text-lg font-bold text-success">{formatCurrency(totalPayments)}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground">Unpaid Balance</p>
-              <p className={`text-lg font-bold ${amountUnpaid > 0 ? "text-warning" : "text-success"}`}>
-                {formatCurrency(amountUnpaid)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground">Gross Profit</p>
-              <p className={`text-lg font-bold ${grossProfit >= 0 ? "text-success" : "text-destructive"}`}>
-                {formatCurrency(grossProfit)}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <p className="text-xs text-muted-foreground">Gross Profit</p>
+                <p className={`text-lg font-bold ${grossProfit >= 0 ? "text-success" : "text-destructive"}`}>
+                  {formatCurrency(grossProfit)}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Contract value — PM-visible (customer-facing sold amount only) */}
+        {!isAdmin && role === "project_manager" && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-sm">
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <p className="text-xs text-muted-foreground">Job Value</p>
+                <p className="text-lg font-bold">{formatCurrency(contractValue)}</p>
+                {approvedCOTotal > 0 && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    incl. {formatCurrency(approvedCOTotal)} in change orders
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Review Request */}
         {job.status === "completed" && (
@@ -402,98 +452,100 @@ export default async function JobDetailPage({ params }: PageProps) {
           </CardContent>
         </Card>
 
-        {/* Invoices */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="w-4 h-4" />
-                Invoices ({invoicesWithBalance.length})
-              </CardTitle>
-              <AddInvoiceDialog
-                jobId={job.id}
-                customerId={job.customer_id}
-                userId={user.id}
-                estimateTotal={estimateTotal}
-                existingInvoicesTotal={totalInvoiced}
-                size="sm"
-                defaultNotes={companySettings?.default_invoice_notes ?? undefined}
-              />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {invoicesWithBalance.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No invoices yet. Create one to start billing.</p>
-            ) : (
-              <div className="divide-y divide-border/50">
-                {invoicesWithBalance.map((inv) => (
-                  <div key={inv.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
-                    {/* Type + amount + status */}
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground w-14 shrink-0">
-                        {TYPE_LABEL[inv.type]}
-                      </span>
-                      <span className="font-bold tabular-nums text-base">{formatCurrency(inv.amount)}</span>
-                      <InvoiceStatusBadge status={inv.status} />
-                    </div>
+        {/* Invoices — admin only */}
+        {isAdmin && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FileText className="w-4 h-4" />
+                  Invoices ({invoicesWithBalance.length})
+                </CardTitle>
+                <AddInvoiceDialog
+                  jobId={job.id}
+                  customerId={job.customer_id}
+                  userId={userId}
+                  estimateTotal={estimateTotal}
+                  existingInvoicesTotal={totalInvoiced}
+                  size="sm"
+                  defaultNotes={companySettings?.default_invoice_notes ?? undefined}
+                />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {invoicesWithBalance.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No invoices yet. Create one to start billing.</p>
+              ) : (
+                <div className="divide-y divide-border/50">
+                  {invoicesWithBalance.map((inv) => (
+                    <div key={inv.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
+                      {/* Type + amount + status */}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground w-14 shrink-0">
+                          {TYPE_LABEL[inv.type]}
+                        </span>
+                        <span className="font-bold tabular-nums text-base">{formatCurrency(inv.amount)}</span>
+                        <InvoiceStatusBadge status={inv.status} />
+                      </div>
 
-                    {/* Paid / remaining */}
-                    <div className="flex items-center gap-2 text-xs tabular-nums">
-                      {inv.amount_paid > 0 ? (
-                        <>
-                          <span className="text-success font-medium">{formatCurrency(inv.amount_paid)} paid</span>
-                          {inv.amount_remaining > 0 && (
-                            <><span className="text-muted-foreground">·</span>
-                            <span className="text-warning font-medium">{formatCurrency(inv.amount_remaining)} due</span></>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-muted-foreground">No payments yet</span>
-                      )}
-                      {inv.due_date && (
-                        <><span className="text-muted-foreground">·</span>
-                        <span className="text-muted-foreground">Due {formatDate(inv.due_date)}</span></>
-                      )}
-                    </div>
+                      {/* Paid / remaining */}
+                      <div className="flex items-center gap-2 text-xs tabular-nums">
+                        {inv.amount_paid > 0 ? (
+                          <>
+                            <span className="text-success font-medium">{formatCurrency(inv.amount_paid)} paid</span>
+                            {inv.amount_remaining > 0 && (
+                              <><span className="text-muted-foreground">·</span>
+                              <span className="text-warning font-medium">{formatCurrency(inv.amount_remaining)} due</span></>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">No payments yet</span>
+                        )}
+                        {inv.due_date && (
+                          <><span className="text-muted-foreground">·</span>
+                          <span className="text-muted-foreground">Due {formatDate(inv.due_date)}</span></>
+                        )}
+                      </div>
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 ml-auto shrink-0">
-                      <InvoiceActions invoice={inv} />
-                      {inv.status !== "paid" && (
-                        <AddPaymentDialog
-                          jobId={job.id}
-                          customerId={job.customer_id}
-                          userId={user.id}
-                          size="sm"
-                          invoices={invoicesWithBalance}
-                          preselectedInvoiceId={inv.id}
-                        />
-                      )}
+                      {/* Actions */}
+                      <div className="flex items-center gap-1 ml-auto shrink-0">
+                        <InvoiceActions invoice={inv} />
+                        {inv.status !== "paid" && (
+                          <AddPaymentDialog
+                            jobId={job.id}
+                            customerId={job.customer_id}
+                            userId={userId}
+                            size="sm"
+                            invoices={invoicesWithBalance}
+                            preselectedInvoiceId={inv.id}
+                          />
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
 
-                <Separator className="my-1" />
-                <div className="grid grid-cols-3 gap-4 px-2 pt-1">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Total Invoiced</p>
-                    <p className="font-semibold tabular-nums">{formatCurrency(totalInvoiced)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Total Paid</p>
-                    <p className="font-semibold tabular-nums text-success">{formatCurrency(totalInvoicePaid)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Outstanding</p>
-                    <p className={`font-semibold tabular-nums ${invoiceOutstanding > 0 ? "text-warning" : "text-success"}`}>
-                      {formatCurrency(invoiceOutstanding)}
-                    </p>
+                  <Separator className="my-1" />
+                  <div className="grid grid-cols-3 gap-4 px-2 pt-1">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Total Invoiced</p>
+                      <p className="font-semibold tabular-nums">{formatCurrency(totalInvoiced)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Total Paid</p>
+                      <p className="font-semibold tabular-nums text-success">{formatCurrency(totalInvoicePaid)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Outstanding</p>
+                      <p className={`font-semibold tabular-nums ${invoiceOutstanding > 0 ? "text-warning" : "text-success"}`}>
+                        {formatCurrency(invoiceOutstanding)}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Job Details */}
@@ -505,9 +557,14 @@ export default async function JobDetailPage({ params }: PageProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <p className="text-xs text-muted-foreground">Customer</p>
-                  <Link href={`/customers/${job.customer_id}`} className="font-medium hover:text-primary">
-                    {(job.customer as any)?.name}
-                  </Link>
+                  {/* Customer link hidden from non-admin since /customers is admin-only */}
+                  {isAdmin ? (
+                    <Link href={`/customers/${job.customer_id}`} className="font-medium hover:text-primary">
+                      {(job.customer as any)?.name}
+                    </Link>
+                  ) : (
+                    <p className="font-medium">{(job.customer as any)?.name}</p>
+                  )}
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Completed</p>
@@ -523,131 +580,151 @@ export default async function JobDetailPage({ params }: PageProps) {
             </CardContent>
           </Card>
 
-          {/* Profit Summary */}
+          {/* Profit Summary — admin only */}
+          {isAdmin && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4" />Profit Summary
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Total Received</span>
+                  <span className="font-medium text-success">{formatCurrency(totalPayments)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Total Expenses</span>
+                  <span className="font-medium text-destructive">{formatCurrency(totalExpenses)}</span>
+                </div>
+                <Separator />
+                <div className="flex justify-between text-sm font-semibold">
+                  <span>Gross Profit</span>
+                  <span className={grossProfit >= 0 ? "text-success" : "text-destructive"}>
+                    {formatCurrency(grossProfit)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Profit Margin</span>
+                  <span className="font-medium">{profitMargin}%</span>
+                </div>
+                {Object.keys(expensesByCategory).length > 0 && (
+                  <>
+                    <Separator />
+                    <p className="text-xs font-medium text-muted-foreground">By Category</p>
+                    {Object.entries(expensesByCategory).map(([cat, amt]) => (
+                      <div key={cat} className="flex justify-between text-xs">
+                        <span className="capitalize text-muted-foreground">{cat.replace(/_/g, " ")}</span>
+                        <span>{formatCurrency(amt)}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Expenses — admin sees full list; PM/FW see submit-only */}
+        {isAdmin ? (
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" />Profit Summary
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Receipt className="w-4 h-4" />Expenses ({expenses?.length ?? 0})
+                </CardTitle>
+                <AddExpenseDialog jobId={job.id} userId={userId} size="sm" />
+              </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Total Received</span>
-                <span className="font-medium text-success">{formatCurrency(totalPayments)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Total Expenses</span>
-                <span className="font-medium text-destructive">{formatCurrency(totalExpenses)}</span>
-              </div>
-              <Separator />
-              <div className="flex justify-between text-sm font-semibold">
-                <span>Gross Profit</span>
-                <span className={grossProfit >= 0 ? "text-success" : "text-destructive"}>
-                  {formatCurrency(grossProfit)}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Profit Margin</span>
-                <span className="font-medium">{profitMargin}%</span>
-              </div>
-              {Object.keys(expensesByCategory).length > 0 && (
-                <>
-                  <Separator />
-                  <p className="text-xs font-medium text-muted-foreground">By Category</p>
-                  {Object.entries(expensesByCategory).map(([cat, amt]) => (
-                    <div key={cat} className="flex justify-between text-xs">
-                      <span className="capitalize text-muted-foreground">{cat.replace(/_/g, " ")}</span>
-                      <span>{formatCurrency(amt)}</span>
+            <CardContent>
+              {!expenses || expenses.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No expenses recorded yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {expenses.map((exp) => (
+                    <div key={exp.id} className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-muted/50">
+                      <div>
+                        <p className="font-medium">{exp.description}</p>
+                        <p className="text-xs text-muted-foreground capitalize">
+                          {exp.category.replace(/_/g, " ")} · {formatDate(exp.date)}
+                        </p>
+                      </div>
+                      <span className="font-semibold text-destructive">{formatCurrency(Number(exp.amount))}</span>
                     </div>
                   ))}
-                </>
+                  <Separator />
+                  <div className="flex justify-between text-sm font-bold px-2">
+                    <span>Total</span>
+                    <span>{formatCurrency(totalExpenses)}</span>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
-        </div>
-
-        {/* Expenses */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
+        ) : canSubmitExpense ? (
+          <Card>
+            <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Receipt className="w-4 h-4" />Expenses ({expenses?.length ?? 0})
+                <Receipt className="w-4 h-4" />Submit an Expense
               </CardTitle>
-              <AddExpenseDialog jobId={job.id} userId={user.id} size="sm" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {!expenses || expenses.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No expenses recorded yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {expenses.map((exp) => (
-                  <div key={exp.id} className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-muted/50">
-                    <div>
-                      <p className="font-medium">{exp.description}</p>
-                      <p className="text-xs text-muted-foreground capitalize">
-                        {exp.category.replace(/_/g, " ")} · {formatDate(exp.date)}
-                      </p>
-                    </div>
-                    <span className="font-semibold text-destructive">{formatCurrency(Number(exp.amount))}</span>
-                  </div>
-                ))}
-                <Separator />
-                <div className="flex justify-between text-sm font-bold px-2">
-                  <span>Total</span>
-                  <span>{formatCurrency(totalExpenses)}</span>
-                </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-3">
+                Record a job-related expense or material cost.
+              </p>
+              <AddExpenseDialog jobId={job.id} userId={userId} size="sm" />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {/* Payments — admin only */}
+        {isAdmin && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <DollarSign className="w-4 h-4" />Payments ({payments?.length ?? 0})
+                </CardTitle>
+                <AddPaymentDialog
+                  jobId={job.id}
+                  customerId={job.customer_id}
+                  userId={userId}
+                  size="sm"
+                  invoices={invoicesWithBalance}
+                />
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Payments */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <DollarSign className="w-4 h-4" />Payments ({payments?.length ?? 0})
-              </CardTitle>
-              <AddPaymentDialog
-                jobId={job.id}
-                customerId={job.customer_id}
-                userId={user.id}
-                size="sm"
-                invoices={invoicesWithBalance}
-              />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {!payments || payments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No payments recorded yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {payments.map((pmt) => {
-                  const invoiceType = (pmt.invoice as any)?.type as string | undefined
-                  return (
-                    <div key={pmt.id} className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-muted/50">
-                      <div>
-                        <p className="font-medium capitalize">{pmt.method.replace(/_/g, " ")}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDate(pmt.date)}
-                          {invoiceType && ` · ${TYPE_LABEL[invoiceType] ?? invoiceType} invoice`}
-                          {pmt.notes ? ` · ${pmt.notes}` : ""}
-                        </p>
+            </CardHeader>
+            <CardContent>
+              {!payments || payments.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No payments recorded yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {payments.map((pmt) => {
+                    const invoiceType = (pmt.invoice as any)?.type as string | undefined
+                    return (
+                      <div key={pmt.id} className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-muted/50">
+                        <div>
+                          <p className="font-medium capitalize">{pmt.method.replace(/_/g, " ")}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDate(pmt.date)}
+                            {invoiceType && ` · ${TYPE_LABEL[invoiceType] ?? invoiceType} invoice`}
+                            {pmt.notes ? ` · ${pmt.notes}` : ""}
+                          </p>
+                        </div>
+                        <span className="font-semibold text-success">{formatCurrency(Number(pmt.amount))}</span>
                       </div>
-                      <span className="font-semibold text-success">{formatCurrency(Number(pmt.amount))}</span>
-                    </div>
-                  )
-                })}
-                <Separator />
-                <div className="flex justify-between text-sm font-bold px-2">
-                  <span>Total</span>
-                  <span className="text-success">{formatCurrency(totalPayments)}</span>
+                    )
+                  })}
+                  <Separator />
+                  <div className="flex justify-between text-sm font-bold px-2">
+                    <span>Total</span>
+                    <span className="text-success">{formatCurrency(totalPayments)}</span>
+                  </div>
                 </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Activity */}
         <Card>
@@ -682,12 +759,12 @@ export default async function JobDetailPage({ params }: PageProps) {
           </CardContent>
         </Card>
 
-        <ReceiptsSection userId={user.id} jobId={job.id} />
+        <ReceiptsSection userId={userId} jobId={job.id} />
 
         <FileSection
           entityType="jobs"
           entityId={job.id}
-          userId={user.id}
+          userId={userId}
           linkedEntities={
             job.estimate_id
               ? [{

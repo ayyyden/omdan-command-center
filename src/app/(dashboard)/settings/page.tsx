@@ -1,39 +1,61 @@
 import Link from "next/link"
+import { redirect } from "next/navigation"
+import { createClient } from "@/lib/supabase/server"
 import { Topbar } from "@/components/shared/topbar"
 import { Card, CardContent } from "@/components/ui/card"
-import { Users2, ChevronRight, Palette, Building2, MessageSquare } from "lucide-react"
+import { Users2, UsersRound, ChevronRight, Palette, Building2, MessageSquare } from "lucide-react"
+import { can } from "@/lib/permissions"
+import type { TeamRole } from "@/lib/permissions"
 
-const settingsSections = [
-  {
-    href: "/settings/company",
-    icon: Building2,
-    title: "Company Settings",
-    description: "Business info, license number, and document defaults for estimates and invoices.",
-  },
-  {
-    href: "/settings/message-templates",
-    icon: MessageSquare,
-    title: "Message Templates",
-    description: "Create and manage templates for customer communication with variable placeholders.",
-  },
-  {
-    href: "/settings/project-managers",
-    icon: Users2,
-    title: "Project Managers",
-    description: "Add, edit, and deactivate project managers for job scheduling.",
-  },
-  {
-    href: "/settings/appearance",
-    icon: Palette,
-    title: "Appearance",
-    description: "Switch between light and dark theme.",
-  },
-]
+export default async function SettingsPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect("/login")
 
-const appVersion = process.env.NEXT_PUBLIC_APP_VERSION
-const buildTime  = process.env.NEXT_PUBLIC_BUILD_TIME
+  const { data: member } = await supabase
+    .from("team_members")
+    .select("role")
+    .eq("user_id", user.id)
+    .single()
 
-export default function SettingsPage() {
+  const role = (member?.role ?? "viewer") as TeamRole
+
+  const settingsSections = [
+    can(role, "settings:company") && {
+      href: "/settings/company",
+      icon: Building2,
+      title: "Company Settings",
+      description: "Business info, license number, and document defaults for estimates and invoices.",
+    },
+    can(role, "settings:templates") && {
+      href: "/settings/message-templates",
+      icon: MessageSquare,
+      title: "Message Templates",
+      description: "Create and manage templates for customer communication with variable placeholders.",
+    },
+    can(role, "settings:project_managers") && {
+      href: "/settings/project-managers",
+      icon: Users2,
+      title: "Project Managers",
+      description: "Add, edit, and deactivate project managers for job scheduling.",
+    },
+    can(role, "team:view") && {
+      href: "/settings/team",
+      icon: UsersRound,
+      title: "Team & Permissions",
+      description: "Invite team members, assign roles, and control workspace access.",
+    },
+    {
+      href: "/settings/appearance",
+      icon: Palette,
+      title: "Appearance",
+      description: "Switch between light and dark theme.",
+    },
+  ].filter(Boolean) as { href: string; icon: React.ElementType; title: string; description: string }[]
+
+  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION
+  const buildTime  = process.env.NEXT_PUBLIC_BUILD_TIME
+
   return (
     <div>
       <Topbar title="Settings" subtitle="Manage your account and team" />

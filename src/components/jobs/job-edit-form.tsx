@@ -52,6 +52,7 @@ interface JobEditFormProps {
   job: JobSnapshot
   pms: PmInfo[]
   userId: string
+  canChangePm?: boolean
 }
 
 function formatTime12(t: string): string {
@@ -66,7 +67,7 @@ function nearestDuration(mins: number): number {
   return values.includes(mins) ? mins : 120
 }
 
-export function JobEditForm({ job, pms, userId }: JobEditFormProps) {
+export function JobEditForm({ job, pms, userId, canChangePm = true }: JobEditFormProps) {
   const [title, setTitle] = useState(job.title)
   const [description, setDescription] = useState(job.description ?? "")
   const [notes, setNotes] = useState(job.notes ?? "")
@@ -91,15 +92,17 @@ export function JobEditForm({ job, pms, userId }: JobEditFormProps) {
 
     const newPmId = pmId === "none" ? null : pmId
 
-    const { error } = await supabase.from("jobs").update({
+    const updatePayload: Record<string, unknown> = {
       title: title.trim(),
       description: description.trim() || null,
       notes: notes.trim() || null,
       scheduled_date: scheduledDate || null,
       scheduled_time: scheduledTime || null,
-      project_manager_id: newPmId,
       estimated_duration_minutes: durationMins,
-    }).eq("id", job.id)
+    }
+    if (canChangePm) updatePayload.project_manager_id = newPmId
+
+    const { error } = await supabase.from("jobs").update(updatePayload).eq("id", job.id)
 
     if (error) {
       toast({ title: "Error saving job", description: error.message, variant: "destructive" })
@@ -220,26 +223,28 @@ export function JobEditForm({ job, pms, userId }: JobEditFormProps) {
         </div>
 
         {/* PM + Duration */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Project Manager</Label>
-            <Select value={pmId} onValueChange={setPmId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Unassigned" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {pms.map((pm) => (
-                  <SelectItem key={pm.id} value={pm.id}>
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
-                      {pm.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className={`grid gap-4 ${canChangePm ? "grid-cols-2" : "grid-cols-1"}`}>
+          {canChangePm && (
+            <div className="space-y-1.5">
+              <Label>Project Manager</Label>
+              <Select value={pmId} onValueChange={setPmId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Unassigned" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Unassigned</SelectItem>
+                  {pms.map((pm) => (
+                    <SelectItem key={pm.id} value={pm.id}>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
+                        {pm.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label>Estimated Duration</Label>
             <Select value={String(durationMins)} onValueChange={(v) => setDurationMins(Number(v))}>

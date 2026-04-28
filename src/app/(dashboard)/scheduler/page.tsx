@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server"
+import { getSessionMember, hasJobScope, NO_ROWS_ID } from "@/lib/auth-helpers"
 import { Topbar } from "@/components/shared/topbar"
 import { SchedulerClient } from "@/components/scheduler/scheduler-client"
 
@@ -17,9 +17,17 @@ export default async function SchedulerPage({ searchParams }: PageProps) {
   const todayLA = getTodayLA()
   const viewingDate = dateParam ?? todayLA
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  const session = await getSessionMember()
+  if (!session) return null
+  const { userId, role, pmId, supabase } = session
+
+  let jobsQuery = supabase
+    .from("jobs")
+    .select("id, title, scheduled_date, scheduled_time, status, project_manager_id, estimated_duration_minutes, customer_id, customer:customers(name)")
+    .or(`scheduled_date.eq.${viewingDate},and(scheduled_date.lt.${viewingDate},status.not.in.(completed,cancelled))`)
+    .order("scheduled_time", { ascending: true, nullsFirst: false })
+
+  if (hasJobScope(role)) jobsQuery = jobsQuery.eq("project_manager_id", pmId ?? NO_ROWS_ID)
 
   const [{ data: pmsRaw }, { data: jobsRaw }, { data: remindersRaw }] = await Promise.all([
     supabase
@@ -27,11 +35,7 @@ export default async function SchedulerPage({ searchParams }: PageProps) {
       .select("id, name, color")
       .eq("is_active", true)
       .order("name"),
-    supabase
-      .from("jobs")
-      .select("id, title, scheduled_date, scheduled_time, status, project_manager_id, estimated_duration_minutes, customer_id, customer:customers(name)")
-      .or(`scheduled_date.eq.${viewingDate},and(scheduled_date.lt.${viewingDate},status.not.in.(completed,cancelled))`)
-      .order("scheduled_time", { ascending: true, nullsFirst: false }),
+    jobsQuery,
     supabase
       .from("reminders")
       .select("id, title, due_date, due_time, type, completed_at, notes, duration_minutes")
@@ -48,7 +52,7 @@ export default async function SchedulerPage({ searchParams }: PageProps) {
         reminders={(remindersRaw ?? []) as any[]}
         date={viewingDate}
         todayLA={todayLA}
-        userId={user.id}
+        userId={userId}
       />
     </div>
   )

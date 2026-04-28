@@ -1,8 +1,9 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 import { Toaster } from "@/components/ui/toaster"
 import { ThemeProvider } from "@/components/providers/theme-provider"
+import { PwaRegister } from "@/components/providers/pwa-register"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,9 +15,25 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 })
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#4F46E5",
+}
+
 export const metadata: Metadata = {
-  title: "Omdan Command Center",
+  title: "Omdan CRM",
   description: "Business management for Omdan Development",
+  applicationName: "Omdan CRM",
+  appleWebApp: {
+    capable: true,
+    title: "Omdan CRM",
+    statusBarStyle: "default",
+  },
+  formatDetection: {
+    telephone: false,
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -31,6 +48,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
         </ThemeProvider>
         <Toaster />
+        <PwaRegister />
       </body>
     </html>
   )

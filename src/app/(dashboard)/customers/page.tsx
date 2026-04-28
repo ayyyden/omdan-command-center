@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server"
+import { getSessionMember, hasJobScope, NO_ROWS_ID } from "@/lib/auth-helpers"
+import { can } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 import { Topbar } from "@/components/shared/topbar"
 import { Button } from "@/components/ui/button"
 import { CustomersBulkTable } from "@/components/customers/customers-bulk-table"
@@ -37,9 +39,20 @@ interface PageProps {
 export default async function CustomersPage({ searchParams }: PageProps) {
   const { status, q, archived } = await searchParams
   const isArchived = archived === "true"
-  const supabase   = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  const session = await getSessionMember()
+  if (!session) redirect("/login")
+  if (!can(session.role, "customers:view")) redirect("/access-denied")
+  const { userId, role, pmId, supabase } = session
+
+  // For scoped roles, resolve the set of customer IDs from their assigned jobs
+  let scopedCustomerIds: string[] | null = null
+  if (hasJobScope(role)) {
+    const { data: assignedJobs } = await supabase
+      .from("jobs")
+      .select("customer_id")
+      .eq("project_manager_id", pmId ?? NO_ROWS_ID)
+    scopedCustomerIds = (assignedJobs ?? []).map(j => j.customer_id).filter(Boolean)
+  }
 
   // Three parallel fetches
   let filteredQuery = supabase
@@ -48,6 +61,11 @@ export default async function CustomersPage({ searchParams }: PageProps) {
     .eq("is_archived", isArchived)
     .order("updated_at", { ascending: false })
 
+  if (scopedCustomerIds !== null) {
+    filteredQuery = scopedCustomerIds.length > 0
+      ? filteredQuery.in("id", scopedCustomerIds)
+      : filteredQuery.eq("id", NO_ROWS_ID)
+  }
   if (!isArchived && status) filteredQuery = filteredQuery.eq("status", status)
   if (q) filteredQuery = filteredQuery.ilike("name", `%${q}%`)
 
@@ -57,8 +75,12 @@ export default async function CustomersPage({ searchParams }: PageProps) {
     { data: recentComms },
   ] = await Promise.all([
     filteredQuery,
-    // counts for pipeline tabs — only non-archived
-    supabase.from("customers").select("id, status, updated_at").eq("is_archived", false),
+    // counts for pipeline tabs — only non-archived (also scoped)
+    scopedCustomerIds !== null
+      ? scopedCustomerIds.length > 0
+        ? supabase.from("customers").select("id, status, updated_at").eq("is_archived", false).in("id", scopedCustomerIds)
+        : supabase.from("customers").select("id, status, updated_at").eq("is_archived", false).eq("id", NO_ROWS_ID)
+      : supabase.from("customers").select("id, status, updated_at").eq("is_archived", false),
     // most recent communication per customer (ordered; we'll take first match per customer_id)
     supabase
       .from("communication_logs")
@@ -197,7 +219,7 @@ export default async function CustomersPage({ searchParams }: PageProps) {
         {/* ── Leads table ────────────────────────────────────────── */}
         <CustomersBulkTable
           customers={displayList}
-          userId={user.id}
+          userId={userId}
           lastContact={Object.fromEntries(lastContactMap)}
         />
       </div>

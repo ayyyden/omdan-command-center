@@ -1,16 +1,14 @@
 import { NextRequest } from "next/server"
 import nodemailer from "nodemailer"
-import { createClient } from "@/lib/supabase/server"
+import { requirePermission } from "@/lib/auth-helpers"
 
 export async function POST(req: NextRequest) {
   const { sentContractId } = (await req.json()) as { sentContractId: string }
   if (!sentContractId) return Response.json({ error: "Missing sentContractId" }, { status: 400 })
 
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await requirePermission("contracts:send")
+  if (session instanceof Response) return session
+  const { supabase } = session
 
   const { data: sent } = await supabase
     .from("sent_contracts")

@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server"
+import { getSessionMember, hasJobScope, NO_ROWS_ID } from "@/lib/auth-helpers"
 import { Topbar } from "@/components/shared/topbar"
 import { Badge } from "@/components/ui/badge"
 import { JobsBulkTable } from "@/components/jobs/jobs-bulk-table"
@@ -14,9 +14,9 @@ interface PageProps {
 export default async function JobsPage({ searchParams }: PageProps) {
   const { status, archived } = await searchParams
   const isArchived = archived === "true"
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  const session = await getSessionMember()
+  if (!session) return null
+  const { userId, role, pmId, supabase } = session
 
   // Lazily archive completed jobs older than 14 days
   const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
@@ -33,6 +33,7 @@ export default async function JobsPage({ searchParams }: PageProps) {
     .eq("is_archived", isArchived)
     .order("scheduled_date", { ascending: false })
 
+  if (hasJobScope(role)) query = query.eq("project_manager_id", pmId ?? NO_ROWS_ID)
   if (!isArchived && status) query = query.eq("status", status)
 
   const { data: jobs } = await query
@@ -58,7 +59,7 @@ export default async function JobsPage({ searchParams }: PageProps) {
           </Link>
         </div>
 
-        <JobsBulkTable jobs={(jobs ?? []) as any[]} userId={user.id} />
+        <JobsBulkTable jobs={(jobs ?? []) as any[]} userId={userId} />
       </div>
     </div>
   )

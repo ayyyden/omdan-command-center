@@ -1,4 +1,3 @@
-import { createClient } from "@/lib/supabase/server"
 import { Topbar } from "@/components/shared/topbar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -6,11 +5,14 @@ import { LeadStatusBadge, JobStatusBadge } from "@/components/shared/status-badg
 import { formatCurrency, formatDate, getTodayLA } from "@/lib/utils"
 import {
   Users, FileText, Briefcase, DollarSign,
-  TrendingUp, AlertCircle, AlertTriangle, Clock, CheckCircle2, CalendarDays, Bell,
+  TrendingUp, AlertCircle, AlertTriangle, Clock, CalendarDays, Bell,
 } from "lucide-react"
 import Link from "next/link"
-import type { Customer, Job, Reminder } from "@/types"
+import type { Reminder } from "@/types"
 import { ReminderRow } from "@/components/reminders/reminder-row"
+import { getSessionMember, NO_ROWS_ID } from "@/lib/auth-helpers"
+import { can } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 
 function getActivityLink(entry: {
   entity_type: string
@@ -33,23 +35,65 @@ function getReminderLink(r: { job_id: string | null; estimate_id: string | null 
   return null
 }
 
-async function getDashboardData(userId: string) {
-  const supabase = await createClient()
+async function getDashboardData(
+  supabase: Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>,
+  isAdmin: boolean,
+  canViewEstimates: boolean,
+  pmId: string | null,
+  isScopedPM: boolean,
+  userId: string,
+) {
   const todayLA = getTodayLA()
 
   const pad = (n: number) => String(n).padStart(2, "0")
   const today = new Date()
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString()
+  const monthStartDate = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-01`
 
-  // 7 days from today
   const nextWeek = new Date(today)
   nextWeek.setDate(nextWeek.getDate() + 7)
   const nextWeekStr = `${nextWeek.getFullYear()}-${pad(nextWeek.getMonth() + 1)}-${pad(nextWeek.getDate())}`
 
-  // 3 days ago (for overdue estimates)
   const threeDaysAgo = new Date(today)
   threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
   const threeDaysAgoISO = threeDaysAgo.toISOString()
+
+  const empty = Promise.resolve({ data: [] as any[] })
+  const pmSentinel = pmId ?? NO_ROWS_ID
+
+  // For PM: pre-fetch accessible estimate IDs (job-linked + self-created)
+  let pmEstimateIds: string[] | null = null
+  if (isScopedPM && canViewEstimates) {
+    const [{ data: pmJobEsts }, { data: ownEsts }] = await Promise.all([
+      supabase.from("jobs").select("estimate_id").eq("project_manager_id", pmSentinel).not("estimate_id", "is", null),
+      supabase.from("estimates").select("id").eq("user_id", userId),
+    ])
+    const fromJobs = (pmJobEsts ?? []).map((j: any) => j.estimate_id).filter(Boolean) as string[]
+    const fromOwn  = (ownEsts ?? []).map((e: any) => e.id)
+    pmEstimateIds = [...new Set([...fromJobs, ...fromOwn])]
+  }
+
+  // Build job queries — PM scope applied below via conditional chaining
+  const todayJobsQ = supabase
+    .from("jobs")
+    .select("id, title, status, scheduled_date, scheduled_time, customer:customers(name)")
+    .eq("scheduled_date", todayLA)
+    .order("scheduled_time", { nullsFirst: false })
+  const upcomingJobsQ = supabase
+    .from("jobs")
+    .select("id, title, status, scheduled_date, scheduled_time, customer:customers(name)")
+    .gt("scheduled_date", todayLA)
+    .lte("scheduled_date", nextWeekStr)
+    .in("status", ["scheduled", "in_progress"])
+    .order("scheduled_date")
+    .limit(7)
+  const overdueJobsQ = supabase
+    .from("jobs")
+    .select("id, title, status, scheduled_date, customer:customers(name)")
+    .lt("scheduled_date", todayLA)
+    .in("status", ["scheduled", "in_progress"])
+    .order("scheduled_date")
+    .limit(10)
 
   const [
     { data: newLeads },
@@ -62,21 +106,43 @@ async function getDashboardData(userId: string) {
     { data: monthPayments },
     { data: monthExpenses },
     { data: unpaidJobs },
-    { data: recentActivity },
     { data: overdueReminders },
+    { data: pmSalesJobs },
   ] = await Promise.all([
-    supabase.from("customers").select("id, name, phone, status, service_type, created_at").in("status", ["New Lead", "Contacted"]).order("created_at", { ascending: false }).limit(5),
-    supabase.from("customers").select("id, name, phone, status, service_type").eq("status", "Follow-Up Needed").limit(10),
-    supabase.from("estimates").select("id, title, total, status, created_at, customer:customers(name)").eq("status", "sent").order("created_at", { ascending: false }).limit(5),
-    supabase.from("estimates").select("id, title, total, updated_at, customer:customers(name)").eq("status", "sent").lt("updated_at", threeDaysAgoISO).order("updated_at").limit(10),
-    supabase.from("jobs").select("id, title, status, scheduled_date, scheduled_time, customer:customers(name)").eq("scheduled_date", todayLA).order("scheduled_time", { nullsFirst: false }),
-    supabase.from("jobs").select("id, title, status, scheduled_date, scheduled_time, customer:customers(name)").gt("scheduled_date", todayLA).lte("scheduled_date", nextWeekStr).in("status", ["scheduled", "in_progress"]).order("scheduled_date").limit(7),
-    supabase.from("jobs").select("id, title, status, scheduled_date, customer:customers(name)").lt("scheduled_date", todayLA).in("status", ["scheduled", "in_progress"]).order("scheduled_date").limit(10),
-    supabase.from("payments").select("amount").gte("created_at", monthStart),
-    supabase.from("expenses").select("amount").gte("created_at", monthStart),
-    supabase.from("jobs").select("id, title, customer:customers(name), estimate:estimates(total), payments:payments(amount)").neq("status", "cancelled"),
-    supabase.from("activity_log").select("id, entity_type, entity_id, job_id, action, description, created_at").order("created_at", { ascending: false }).limit(8),
+    // Leads — admin+ only
+    isAdmin ? supabase.from("customers").select("id, name, phone, status, service_type, created_at").in("status", ["New Lead", "Contacted"]).order("created_at", { ascending: false }).limit(5) : empty,
+    isAdmin ? supabase.from("customers").select("id, name, phone, status, service_type").eq("status", "Follow-Up Needed").limit(10) : empty,
+    // Estimates — roles with estimates:view only; PM scoped to their estimate IDs
+    (() => {
+      if (!canViewEstimates) return empty
+      const q = supabase.from("estimates").select("id, title, total, status, created_at, customer:customers(name)").eq("status", "sent").order("created_at", { ascending: false }).limit(5)
+      if (!isScopedPM || pmEstimateIds === null) return q
+      return pmEstimateIds.length > 0 ? q.in("id", pmEstimateIds) : empty
+    })(),
+    (() => {
+      if (!canViewEstimates) return empty
+      const q = supabase.from("estimates").select("id, title, total, updated_at, customer:customers(name)").eq("status", "sent").lt("updated_at", threeDaysAgoISO).order("updated_at").limit(10)
+      if (!isScopedPM || pmEstimateIds === null) return q
+      return pmEstimateIds.length > 0 ? q.in("id", pmEstimateIds) : empty
+    })(),
+    // Jobs — scoped to PM's assigned jobs when isScopedPM
+    isScopedPM ? todayJobsQ.eq("project_manager_id", pmSentinel) : todayJobsQ,
+    isScopedPM ? upcomingJobsQ.eq("project_manager_id", pmSentinel) : upcomingJobsQ,
+    isScopedPM ? overdueJobsQ.eq("project_manager_id", pmSentinel) : overdueJobsQ,
+    // Financials — admin+ only
+    isAdmin ? supabase.from("payments").select("amount").gte("created_at", monthStart) : empty,
+    isAdmin ? supabase.from("expenses").select("amount").gte("created_at", monthStart) : empty,
+    isAdmin ? supabase.from("jobs").select("id, estimate:estimates(total), payments:payments(amount)").neq("status", "cancelled") : empty,
     supabase.from("reminders").select("id, title, type, due_date, job_id, estimate_id, customer:customers(name)").is("completed_at", null).lt("due_date", todayLA).order("due_date").limit(8),
+    // PM sales — estimate + approved CO totals for their jobs scheduled this month
+    isScopedPM
+      ? supabase
+          .from("jobs")
+          .select("estimate:estimates(total), change_orders(amount, status)")
+          .eq("project_manager_id", pmSentinel)
+          .neq("status", "cancelled")
+          .gte("scheduled_date", monthStartDate)
+      : empty,
   ])
 
   const monthRevenue  = (monthPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
@@ -89,19 +155,27 @@ async function getDashboardData(userId: string) {
     return sum + Math.max(0, estimateTotal - paymentsTotal)
   }, 0)
 
+  const pmSalesThisMonth = (pmSalesJobs ?? []).reduce((sum, job) => {
+    const est = Number((job.estimate as any)?.total ?? 0)
+    const cos = ((job.change_orders as any[]) ?? [])
+      .filter((co: any) => co.status === "approved")
+      .reduce((s: number, co: any) => s + Number(co.amount), 0)
+    return sum + est + cos
+  }, 0)
+
   return {
-    newLeads:         newLeads         ?? [],
-    followUps:        followUps        ?? [],
-    pendingEstimates: pendingEstimates ?? [],
-    overdueEstimates: overdueEstimates ?? [],
-    todayJobs:        todayJobs        ?? [],
-    upcomingJobs:     upcomingJobs     ?? [],
-    overdueJobs:      overdueJobs      ?? [],
+    newLeads:          newLeads          ?? [],
+    followUps:         followUps         ?? [],
+    pendingEstimates:  pendingEstimates  ?? [],
+    overdueEstimates:  overdueEstimates  ?? [],
+    todayJobs:         todayJobs         ?? [],
+    upcomingJobs:      upcomingJobs      ?? [],
+    overdueJobs:       overdueJobs       ?? [],
     monthRevenue,
     monthProfit,
     unpaidTotal,
-    recentActivity:   recentActivity   ?? [],
-    overdueReminders: overdueReminders ?? [],
+    overdueReminders:  overdueReminders  ?? [],
+    pmSalesThisMonth,
   }
 }
 
@@ -114,17 +188,19 @@ function formatJobTime(t: string | null): string | null {
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  const session = await getSessionMember()
+  if (!session) redirect("/login")
+  const { userId, role, supabase, pmId } = session
 
-  const data = await getDashboardData(user.id)
+  const isAdmin = can(role, "dashboard:financials")
+  const canViewEstimates = can(role, "estimates:view")
+  const isScopedPM = role === "project_manager"
+  const data = await getDashboardData(supabase, isAdmin, canViewEstimates, pmId, isScopedPM, userId)
 
-  const stats = [
-    { label: "Revenue This Month", value: formatCurrency(data.monthRevenue),  icon: DollarSign,    iconClass: "text-success",     bgClass: "bg-success/10" },
-    { label: "Profit This Month",  value: formatCurrency(data.monthProfit),   icon: TrendingUp,    iconClass: data.monthProfit >= 0 ? "text-success" : "text-destructive", bgClass: data.monthProfit >= 0 ? "bg-success/10" : "bg-destructive/10" },
-    { label: "Unpaid Balances",    value: formatCurrency(data.unpaidTotal),   icon: AlertCircle,   iconClass: "text-warning",     bgClass: "bg-warning/10" },
-    { label: "Jobs Today",         value: String(data.todayJobs.length),      icon: Briefcase,     iconClass: "text-primary",     bgClass: "bg-primary/10" },
+  const financialStats = [
+    { label: "Revenue This Month", value: formatCurrency(data.monthRevenue),  icon: DollarSign,  iconClass: "text-success",     bgClass: "bg-success/10" },
+    { label: "Profit This Month",  value: formatCurrency(data.monthProfit),   icon: TrendingUp,  iconClass: data.monthProfit >= 0 ? "text-success" : "text-destructive", bgClass: data.monthProfit >= 0 ? "bg-success/10" : "bg-destructive/10" },
+    { label: "Unpaid Balances",    value: formatCurrency(data.unpaidTotal),   icon: AlertCircle, iconClass: "text-warning",     bgClass: "bg-warning/10" },
   ]
 
   return (
@@ -133,8 +209,8 @@ export default async function DashboardPage() {
 
       <div className="p-4 sm:p-6 space-y-6">
         {/* Stats Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {stats.map((stat) => (
+        <div className={`grid grid-cols-1 gap-4 ${isAdmin ? "sm:grid-cols-2 lg:grid-cols-4" : isScopedPM ? "sm:grid-cols-2" : "sm:grid-cols-1 max-w-xs"}`}>
+          {isAdmin && financialStats.map((stat) => (
             <Card key={stat.label}>
               <CardContent className="flex items-center gap-4 pt-6">
                 <div className={`flex items-center justify-center w-12 h-12 rounded-full ${stat.bgClass} shrink-0`}>
@@ -147,6 +223,31 @@ export default async function DashboardPage() {
               </CardContent>
             </Card>
           ))}
+          {isScopedPM && (
+            <Card>
+              <CardContent className="flex items-center gap-4 pt-6">
+                <div className="flex items-center justify-center w-12 h-12 rounded-full bg-success/10 shrink-0">
+                  <DollarSign className="w-6 h-6 text-success" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">My Sales This Month</p>
+                  <p className="text-2xl font-bold">{formatCurrency(data.pmSalesThisMonth)}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Estimate + approved COs</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          <Card>
+            <CardContent className="flex items-center gap-4 pt-6">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 shrink-0">
+                <Briefcase className="w-6 h-6 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">{isScopedPM ? "My Jobs Today" : "Jobs Today"}</p>
+                <p className="text-2xl font-bold">{data.todayJobs.length}</p>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Overdue Jobs */}
@@ -176,7 +277,7 @@ export default async function DashboardPage() {
         )}
 
         {/* Overdue Estimates */}
-        {data.overdueEstimates.length > 0 && (
+        {canViewEstimates && data.overdueEstimates.length > 0 && (
           <Card style={{ borderColor: "color-mix(in oklch, var(--warning) 40%, var(--border))", backgroundColor: "color-mix(in oklch, var(--warning) 5%, var(--card))" }}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2 text-warning">
@@ -291,68 +392,72 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* New Leads */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-primary" />
-                  New Leads Needing Action
-                </span>
-                <Link href="/customers?status=New+Lead" className="text-xs text-primary hover:underline">View all</Link>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {data.newLeads.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No new leads right now.</p>
-              ) : (
-                <div className="space-y-3">
-                  {data.newLeads.map((lead: any) => (
-                    <Link key={lead.id} href={`/customers/${lead.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors">
-                      <div>
-                        <p className="text-sm font-medium">{lead.name}</p>
-                        <p className="text-xs text-muted-foreground">{lead.service_type ?? "General"}</p>
-                      </div>
-                      <LeadStatusBadge status={lead.status} />
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {/* New Leads — admin+ only */}
+          {isAdmin && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-primary" />
+                    New Leads Needing Action
+                  </span>
+                  <Link href="/customers?status=New+Lead" className="text-xs text-primary hover:underline">View all</Link>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {data.newLeads.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No new leads right now.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {data.newLeads.map((lead: any) => (
+                      <Link key={lead.id} href={`/customers/${lead.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors">
+                        <div>
+                          <p className="text-sm font-medium">{lead.name}</p>
+                          <p className="text-xs text-muted-foreground">{lead.service_type ?? "General"}</p>
+                        </div>
+                        <LeadStatusBadge status={lead.status} />
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Follow-Ups Needed */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-warning" />
-                  Follow-Ups Needed
-                </span>
-                <Link href="/customers?status=Follow-Up+Needed" className="text-xs text-primary hover:underline">View all</Link>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {data.followUps.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No follow-ups needed.</p>
-              ) : (
-                <div className="space-y-3">
-                  {data.followUps.map((c: any) => (
-                    <Link key={c.id} href={`/customers/${c.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors">
-                      <div>
-                        <p className="text-sm font-medium">{c.name}</p>
-                        <p className="text-xs text-muted-foreground">{c.phone ?? "No phone"}</p>
-                      </div>
-                      <Badge variant="warning">Follow-Up</Badge>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {/* Follow-Ups Needed — admin+ only */}
+          {isAdmin && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-warning" />
+                    Follow-Ups Needed
+                  </span>
+                  <Link href="/customers?status=Follow-Up+Needed" className="text-xs text-primary hover:underline">View all</Link>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {data.followUps.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No follow-ups needed.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {data.followUps.map((c: any) => (
+                      <Link key={c.id} href={`/customers/${c.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors">
+                        <div>
+                          <p className="text-sm font-medium">{c.name}</p>
+                          <p className="text-xs text-muted-foreground">{c.phone ?? "No phone"}</p>
+                        </div>
+                        <Badge variant="warning">Follow-Up</Badge>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Pending Estimates */}
-          <Card>
+          {canViewEstimates && <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center justify-between">
                 <span className="flex items-center gap-2">
@@ -379,43 +484,8 @@ export default async function DashboardPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </Card>}
         </div>
-
-        {/* Recent Activity */}
-        {data.recentActivity.length > 0 && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-muted-foreground" />
-                Recent Activity
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-1">
-                {data.recentActivity.map((log: any) => {
-                  const href = getActivityLink(log)
-                  const inner = (
-                    <div className="flex items-start gap-3 text-sm py-1.5 px-2 rounded-md">
-                      <div className="w-2 h-2 rounded-full bg-primary mt-1.5 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <span className="leading-snug">{log.description}</span>
-                      </div>
-                      <span className="text-xs text-muted-foreground shrink-0 mt-0.5">{formatDate(log.created_at)}</span>
-                    </div>
-                  )
-                  return href ? (
-                    <Link key={log.id} href={href} className="block hover:bg-muted/50 rounded-md transition-colors">
-                      {inner}
-                    </Link>
-                  ) : (
-                    <div key={log.id}>{inner}</div>
-                  )
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        )}
       </div>
     </div>
   )

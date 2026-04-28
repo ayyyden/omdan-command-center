@@ -1,12 +1,25 @@
 import { NextRequest } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { requirePermission, hasJobScope } from "@/lib/auth-helpers"
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return new Response("Unauthorized", { status: 401 })
+  const session = await requirePermission("jobs:update_status")
+  if (session instanceof Response) return session
+  const { supabase, role, pmId } = session
 
   const { id } = await params
+
+  // PM scope enforcement — verify this PM owns the job before any action
+  if (hasJobScope(role)) {
+    const { data: ownership } = await supabase
+      .from("jobs")
+      .select("project_manager_id")
+      .eq("id", id)
+      .single()
+    if (!ownership || ownership.project_manager_id !== pmId) {
+      return new Response("Forbidden", { status: 403 })
+    }
+  }
+
   const { action } = await req.json() as { action: string }
 
   if (action === "request") {

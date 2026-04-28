@@ -1,4 +1,6 @@
-import { createClient } from "@/lib/supabase/server"
+import { getSessionMember, NO_ROWS_ID } from "@/lib/auth-helpers"
+import { can } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 import { Topbar } from "@/components/shared/topbar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -13,15 +15,40 @@ interface PageProps {
 
 export default async function EstimatesPage({ searchParams }: PageProps) {
   const { status } = await searchParams
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+
+  const session = await getSessionMember()
+  if (!session) redirect("/login")
+  if (!can(session.role, "estimates:view")) redirect("/access-denied")
+  const { userId, role, pmId, supabase } = session
+
+  const isScopedPM = role === "project_manager"
+
+  // For PM: resolve accessible estimate IDs via job ownership + own creation
+  let scopedEstimateIds: string[] | null = null
+  if (isScopedPM) {
+    const [{ data: pmJobs }, { data: ownEstimates }] = await Promise.all([
+      supabase
+        .from("jobs")
+        .select("estimate_id")
+        .eq("project_manager_id", pmId ?? NO_ROWS_ID)
+        .not("estimate_id", "is", null),
+      supabase.from("estimates").select("id").eq("user_id", userId),
+    ])
+    const fromJobs = (pmJobs ?? []).map((j: any) => j.estimate_id).filter(Boolean) as string[]
+    const fromOwn  = (ownEstimates ?? []).map((e: any) => e.id)
+    scopedEstimateIds = [...new Set([...fromJobs, ...fromOwn])]
+  }
 
   let query = supabase
     .from("estimates")
     .select("*, customer:customers(name), jobs(id)")
     .order("created_at", { ascending: false })
 
+  if (scopedEstimateIds !== null) {
+    query = scopedEstimateIds.length > 0
+      ? query.in("id", scopedEstimateIds)
+      : query.eq("id", NO_ROWS_ID)
+  }
   if (status) query = query.eq("status", status)
 
   const [{ data: estimates }, { data: pms }] = await Promise.all([
@@ -53,7 +80,7 @@ export default async function EstimatesPage({ searchParams }: PageProps) {
         <EstimatesBulkTable
           estimates={(estimates ?? []) as Estimate[]}
           projectManagers={(pms ?? []) as ProjectManager[]}
-          userId={user.id}
+          userId={userId}
         />
       </div>
     </div>

@@ -7,6 +7,7 @@ import {
   Send, CalendarClock, CheckCheck, XCircle, ThumbsUp, FileCheck, FileX, Star,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import type { TeamRole } from "@/lib/permissions"
 
 type NotifType =
   | "reminder_due"
@@ -64,10 +65,17 @@ function join(...parts: (string | null | undefined)[]): string {
   return parts.filter(Boolean).join(" · ")
 }
 
+interface NotificationBellProps {
+  role: TeamRole
+  pmId: string | null
+}
+
+const NO_ROWS = "00000000-0000-0000-0000-000000000000"
+
 // Pure modal — no trigger button. Rendered at root level (DashboardShell).
 // Triggered by: window.dispatchEvent(new CustomEvent("open-notifications"))
 // Broadcasts count via: window.dispatchEvent(new CustomEvent("notification-count-update", { detail: N }))
-export function NotificationBell() {
+export function NotificationBell({ role, pmId }: NotificationBellProps) {
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(true)
@@ -81,82 +89,82 @@ export function NotificationBell() {
     const threeDaysAgo  = new Date(Date.now() -  3 * 86400000).toISOString()
     const twoDaysAgo    = new Date(Date.now() -  2 * 86400000).toISOString().split("T")[0]
 
+    const isScopedPM = role === "project_manager"
+
+    // For PM: fetch job/estimate/customer IDs to scope all notification queries
+    let pmJobIds: string[] = []
+    let pmEstimateIds: string[] = []
+    let pmCustomerIds: string[] = []
+
+    if (isScopedPM && pmId) {
+      const { data: pmJobsData } = await supabase
+        .from("jobs")
+        .select("id, customer_id, estimate_id")
+        .eq("project_manager_id", pmId)
+
+      pmJobIds = (pmJobsData ?? []).map((j: any) => j.id).filter(Boolean)
+      pmEstimateIds = (pmJobsData ?? []).map((j: any) => j.estimate_id).filter(Boolean) as string[]
+      pmCustomerIds = [...new Set((pmJobsData ?? []).map((j: any) => j.customer_id).filter(Boolean))] as string[]
+    }
+
+    // Apply PM scope filter: if PM, restrict to their IDs; if not PM, pass query through unchanged
+    function scopeBy(q: any, field: string, ids: string[]): any {
+      if (!isScopedPM) return q
+      return ids.length > 0 ? q.in(field, ids) : q.eq(field, NO_ROWS)
+    }
+
     const [
       reminders, jobs, overdueEsts, signed, pending,
       approvedEsts, declinedEsts, approvedCOs, rejectedCOs, reviewNeeded, dismissals,
     ] = await Promise.all([
-      supabase
-        .from("reminders")
-        .select("id, title, due_date, customer:customers(name)")
-        .lte("due_date", today)
-        .is("completed_at", null)
-        .limit(20),
-      supabase
-        .from("jobs")
-        .select("id, title, scheduled_date, customer:customers(name)")
-        .lt("scheduled_date", today)
-        .in("status", ["scheduled", "in_progress"])
-        .limit(20),
-      supabase
-        .from("estimates")
-        .select("id, title, sent_at, customer:customers(name)")
-        .eq("status", "sent")
-        .lt("sent_at", sevenDaysAgo)
-        .limit(20),
-      supabase
-        .from("sent_contracts")
-        .select("id, signed_at, signer_name, customer:customers(name), contract_template:contract_templates(name)")
-        .eq("status", "signed")
-        .limit(20),
-      supabase
-        .from("sent_contracts")
-        .select("id, sent_at, recipient_email, customer:customers(name), contract_template:contract_templates(name)")
-        .eq("status", "sent")
-        .lt("sent_at", threeDaysAgo)
-        .limit(20),
-      supabase
-        .from("estimates")
-        .select("id, title, total, approved_at, customer:customers(name)")
-        .eq("status", "approved")
-        .gt("approved_at", thirtyDaysAgo)
-        .limit(20),
-      supabase
-        .from("estimates")
-        .select("id, title, total, declined_at, customer:customers(name)")
-        .eq("status", "rejected")
-        .gt("declined_at", thirtyDaysAgo)
-        .limit(20),
-      supabase
-        .from("change_orders")
-        .select("id, title, amount, approved_at, customer:customers(name), job:jobs(id)")
-        .eq("status", "approved")
-        .gt("approved_at", thirtyDaysAgo)
-        .limit(20),
-      supabase
-        .from("change_orders")
-        .select("id, title, amount, rejected_at, customer:customers(name), job:jobs(id)")
-        .eq("status", "rejected")
-        .gt("rejected_at", thirtyDaysAgo)
-        .limit(20),
-      supabase
-        .from("jobs")
-        .select("id, title, completion_date, customer:customers(name)")
-        .eq("status", "completed")
-        .eq("review_completed", false)
-        .is("review_requested_at", null)
-        .not("completion_date", "is", null)
-        .lt("completion_date", twoDaysAgo)
-        .limit(20),
-      supabase
-        .from("notification_dismissals")
-        .select("notification_key"),
+      scopeBy(
+        supabase.from("reminders").select("id, title, due_date, customer:customers(name)").lte("due_date", today).is("completed_at", null).limit(20),
+        "job_id", pmJobIds,
+      ),
+      scopeBy(
+        supabase.from("jobs").select("id, title, scheduled_date, customer:customers(name)").lt("scheduled_date", today).in("status", ["scheduled", "in_progress"]).limit(20),
+        "id", pmJobIds,
+      ),
+      scopeBy(
+        supabase.from("estimates").select("id, title, sent_at, customer:customers(name)").eq("status", "sent").lt("sent_at", sevenDaysAgo).limit(20),
+        "id", pmEstimateIds,
+      ),
+      scopeBy(
+        supabase.from("sent_contracts").select("id, signed_at, signer_name, customer:customers(name), contract_template:contract_templates(name)").eq("status", "signed").limit(20),
+        "customer_id", pmCustomerIds,
+      ),
+      scopeBy(
+        supabase.from("sent_contracts").select("id, sent_at, recipient_email, customer:customers(name), contract_template:contract_templates(name)").eq("status", "sent").lt("sent_at", threeDaysAgo).limit(20),
+        "customer_id", pmCustomerIds,
+      ),
+      scopeBy(
+        supabase.from("estimates").select("id, title, total, approved_at, customer:customers(name)").eq("status", "approved").gt("approved_at", thirtyDaysAgo).limit(20),
+        "id", pmEstimateIds,
+      ),
+      scopeBy(
+        supabase.from("estimates").select("id, title, total, declined_at, customer:customers(name)").eq("status", "rejected").gt("declined_at", thirtyDaysAgo).limit(20),
+        "id", pmEstimateIds,
+      ),
+      scopeBy(
+        supabase.from("change_orders").select("id, title, amount, approved_at, customer:customers(name), job:jobs(id)").eq("status", "approved").gt("approved_at", thirtyDaysAgo).limit(20),
+        "job_id", pmJobIds,
+      ),
+      scopeBy(
+        supabase.from("change_orders").select("id, title, amount, rejected_at, customer:customers(name), job:jobs(id)").eq("status", "rejected").gt("rejected_at", thirtyDaysAgo).limit(20),
+        "job_id", pmJobIds,
+      ),
+      scopeBy(
+        supabase.from("jobs").select("id, title, completion_date, customer:customers(name)").eq("status", "completed").eq("review_completed", false).is("review_requested_at", null).not("completion_date", "is", null).lt("completion_date", twoDaysAgo).limit(20),
+        "id", pmJobIds,
+      ),
+      supabase.from("notification_dismissals").select("notification_key"),
     ])
 
     const dismissed = new Set((dismissals.data ?? []).map((d) => d.notification_key))
 
     const all: Notification[] = [
       // Approved change orders — highest priority
-      ...(approvedCOs.data ?? []).map((co) => ({
+      ...(approvedCOs.data ?? []).map((co: any) => ({
         key: `change_order_approved_${co.id}`,
         type: "change_order_approved" as const,
         title: (co.customer as any)?.name ?? "Customer",
@@ -164,7 +172,7 @@ export function NotificationBell() {
         href: `/jobs/${(co.job as any)?.id ?? ""}`,
       })),
       // Declined change orders
-      ...(rejectedCOs.data ?? []).map((co) => ({
+      ...(rejectedCOs.data ?? []).map((co: any) => ({
         key: `change_order_rejected_${co.id}`,
         type: "change_order_rejected" as const,
         title: (co.customer as any)?.name ?? "Customer",
@@ -172,7 +180,7 @@ export function NotificationBell() {
         href: `/jobs/${(co.job as any)?.id ?? ""}`,
       })),
       // Completed jobs needing a review request (2+ days since completion)
-      ...(reviewNeeded.data ?? []).map((j) => ({
+      ...(reviewNeeded.data ?? []).map((j: any) => ({
         key: `review_needed_${j.id}`,
         type: "review_needed" as const,
         title: j.title,
@@ -183,7 +191,7 @@ export function NotificationBell() {
         href: `/jobs/${j.id}`,
       })),
       // Approved estimates — highest priority (actionable good news)
-      ...(approvedEsts.data ?? []).map((e) => ({
+      ...(approvedEsts.data ?? []).map((e: any) => ({
         key: `estimate_approved_${e.id}`,
         type: "estimate_approved" as const,
         title: (e.customer as any)?.name ?? "Customer",
@@ -191,7 +199,7 @@ export function NotificationBell() {
         href: `/estimates/${e.id}`,
       })),
       // Declined estimates
-      ...(declinedEsts.data ?? []).map((e) => ({
+      ...(declinedEsts.data ?? []).map((e: any) => ({
         key: `estimate_declined_${e.id}`,
         type: "estimate_declined" as const,
         title: (e.customer as any)?.name ?? "Customer",
@@ -199,7 +207,7 @@ export function NotificationBell() {
         href: `/estimates/${e.id}`,
       })),
       // Reminders due
-      ...(reminders.data ?? []).map((r) => ({
+      ...(reminders.data ?? []).map((r: any) => ({
         key: `reminder_due_${r.id}`,
         type: "reminder_due" as const,
         title: r.title,
@@ -207,7 +215,7 @@ export function NotificationBell() {
         href: "/scheduler",
       })),
       // Overdue jobs
-      ...(jobs.data ?? []).map((j) => ({
+      ...(jobs.data ?? []).map((j: any) => ({
         key: `overdue_job_${j.id}`,
         type: "overdue_job" as const,
         title: j.title,
@@ -215,7 +223,7 @@ export function NotificationBell() {
         href: `/jobs/${j.id}`,
       })),
       // Estimates sent 7+ days ago without response
-      ...(overdueEsts.data ?? []).map((e) => ({
+      ...(overdueEsts.data ?? []).map((e: any) => ({
         key: `overdue_estimate_${e.id}`,
         type: "overdue_estimate" as const,
         title: e.title,
@@ -223,7 +231,7 @@ export function NotificationBell() {
         href: `/estimates/${e.id}`,
       })),
       // Signed contracts
-      ...(signed.data ?? []).map((c) => ({
+      ...(signed.data ?? []).map((c: any) => ({
         key: `contract_signed_${c.id}`,
         type: "contract_signed" as const,
         title: (c.contract_template as any)?.name ?? "Contract",
@@ -231,7 +239,7 @@ export function NotificationBell() {
         href: "/contracts",
       })),
       // Contracts pending signature 3+ days
-      ...(pending.data ?? []).map((c) => ({
+      ...(pending.data ?? []).map((c: any) => ({
         key: `pending_contract_${c.id}`,
         type: "pending_contract" as const,
         title: (c.contract_template as any)?.name ?? "Contract",
@@ -242,7 +250,7 @@ export function NotificationBell() {
 
     setNotifications(all)
     setLoading(false)
-  }, [])
+  }, [role, pmId])
 
   useEffect(() => { fetchNotifications() }, [fetchNotifications])
 

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { requirePermission } from "@/lib/auth-helpers"
 
 function toCSV(rows: Record<string, unknown>[]): string {
   if (rows.length === 0) return "No data"
@@ -17,9 +17,9 @@ function toCSV(rows: Record<string, unknown>[]): string {
 }
 
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return new Response("Unauthorized", { status: 401 })
+  const session = await requirePermission("reports:export")
+  if (session instanceof Response) return session
+  const { supabase } = session
 
   const sp     = req.nextUrl.searchParams
   const type   = sp.get("type") ?? ""

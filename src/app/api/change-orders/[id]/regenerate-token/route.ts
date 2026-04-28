@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { requirePermission } from "@/lib/auth-helpers"
 
 export async function POST(
   _req: NextRequest,
@@ -7,9 +7,9 @@ export async function POST(
 ) {
   const { id } = await params
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await requirePermission("change_orders:delete")
+  if (session instanceof Response) return session
+  const { supabase } = session
 
   const { data: co } = await supabase
     .from("change_orders")

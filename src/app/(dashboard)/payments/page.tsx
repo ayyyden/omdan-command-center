@@ -1,12 +1,15 @@
-import { createClient } from "@/lib/supabase/server"
 import { Topbar } from "@/components/shared/topbar"
 import { formatCurrency } from "@/lib/utils"
 import { PaymentsBulkTable } from "@/components/payments/payments-bulk-table"
+import { getSessionMember } from "@/lib/auth-helpers"
+import { can } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 
 export default async function PaymentsPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  const session = await getSessionMember()
+  if (!session) redirect("/login")
+  if (!can(session.role, "payments:view")) redirect("/access-denied")
+  const { userId, supabase } = session
 
   const { data: payments } = await supabase
     .from("payments")
@@ -23,7 +26,7 @@ export default async function PaymentsPage() {
       />
 
       <div className="p-4 sm:p-6">
-        <PaymentsBulkTable payments={(payments ?? []) as any[]} userId={user.id} />
+        <PaymentsBulkTable payments={(payments ?? []) as any[]} userId={userId} />
       </div>
     </div>
   )

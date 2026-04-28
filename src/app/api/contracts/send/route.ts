@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import nodemailer from "nodemailer"
-import { createClient } from "@/lib/supabase/server"
+import { requirePermission } from "@/lib/auth-helpers"
 
 export async function POST(req: NextRequest) {
   const { contractId, customerId, jobId, recipientEmail, subject, body } =
@@ -17,9 +17,9 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Missing required fields" }, { status: 400 })
   }
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await requirePermission("contracts:send")
+  if (session instanceof Response) return session
+  const { userId, supabase } = session
 
   // Fetch contract template
   const { data: contract, error: ctErr } = await supabase
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
   const { data: sentRecord, error: insertErr } = await supabase
     .from("sent_contracts")
     .insert({
-      user_id:              user.id,
+      user_id:              userId,
       contract_template_id: contractId,
       customer_id:          customerId,
       job_id:               jobId ?? null,
@@ -133,7 +133,7 @@ The contract PDF is also attached to this email for your reference.`
   // Attach to customer's Files section (category = contracts)
   await supabase.from("file_attachments").upsert(
     {
-      user_id:      user.id,
+      user_id:      userId,
       bucket:       contract.bucket,
       storage_path: contract.storage_path,
       file_name:    contract.file_name,
@@ -150,7 +150,7 @@ The contract PDF is also attached to this email for your reference.`
   if (jobId) {
     await supabase.from("file_attachments").upsert(
       {
-        user_id:      user.id,
+        user_id:      userId,
         bucket:       contract.bucket,
         storage_path: contract.storage_path,
         file_name:    contract.file_name,
@@ -166,7 +166,7 @@ The contract PDF is also attached to this email for your reference.`
 
   // Log communication
   await supabase.from("communication_logs").insert({
-    user_id:     user.id,
+    user_id:     userId,
     customer_id: customerId,
     job_id:      jobId ?? null,
     type:        "custom",
