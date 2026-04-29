@@ -130,6 +130,10 @@ export function can(role: TeamRole, action: string): boolean {
       return roleAtLeast(role, 'admin')
 
     // ── Contracts ────────────────────────────────────────────────────────────
+    // ── Calculator ───────────────────────────────────────────────────────────────
+    case 'calculator:view':
+      return role === 'project_manager' || roleAtLeast(role, 'admin')
+
     case 'contracts:view':
     case 'contracts:send':
       return roleAtLeast(role, 'office')
