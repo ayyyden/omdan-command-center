@@ -1,12 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Button } from "@/components/ui/button"
 import { formatCurrency, cn } from "@/lib/utils"
+import { Plus, X } from "lucide-react"
 
 export interface JobOption {
   id: string
@@ -19,6 +21,14 @@ export interface JobOption {
   }
 }
 
+interface ChangeOrder {
+  id: string
+  totalSell: string
+  leadCostPct: string
+  cost: string
+  bizProfitPct: string
+}
+
 interface ProfitCalculatorProps {
   jobs: JobOption[]
   isAdmin: boolean
@@ -27,6 +37,10 @@ interface ProfitCalculatorProps {
 function parseNum(v: string): number {
   const n = parseFloat(v.replace(/[^0-9.-]/g, ""))
   return isNaN(n) ? 0 : Math.max(0, n)
+}
+
+function uid() {
+  return Math.random().toString(36).slice(2, 9)
 }
 
 function DollarInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -127,6 +141,18 @@ function TotalLeftRow({ label, value, hasValues }: { label: string; value: numbe
   )
 }
 
+function calcCO(co: ChangeOrder) {
+  const sell = parseNum(co.totalSell)
+  const leadPct = Math.min(100, parseNum(co.leadCostPct))
+  const costVal = parseNum(co.cost)
+  const bizPct = Math.min(100, parseNum(co.bizProfitPct))
+  const leadAmount = sell * leadPct / 100
+  const remaining = sell - leadAmount - costVal
+  const bizAmount = remaining * bizPct / 100
+  const totalLeft = remaining - bizAmount
+  return { sell, leadPct, costVal, bizPct, leadAmount, remaining, bizAmount, totalLeft, hasValues: sell > 0 }
+}
+
 const NO_JOB = "__none__"
 
 export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
@@ -139,11 +165,27 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
   const [bizProfitPct, setBizProfitPct] = useState("")
   const [recordedExp, setRecordedExp] = useState<{ materials: number; labor: number; other: number } | null>(null)
 
-  // --- Change order state ---
-  const [coTotalSell, setCoTotalSell] = useState("")
-  const [coLeadCostPct, setCoLeadCostPct] = useState("")
-  const [coCost, setCoCost] = useState("")
-  const [coBizProfitPct, setCoBizProfitPct] = useState("")
+  // --- Change orders state ---
+  const [changeOrders, setChangeOrders] = useState<ChangeOrder[]>([
+    { id: uid(), totalSell: "", leadCostPct: "", cost: "", bizProfitPct: "" },
+  ])
+
+  const addChangeOrder = useCallback(() => {
+    setChangeOrders((prev) => [
+      ...prev,
+      { id: uid(), totalSell: "", leadCostPct: "", cost: "", bizProfitPct: "" },
+    ])
+  }, [])
+
+  const removeChangeOrder = useCallback((id: string) => {
+    setChangeOrders((prev) => prev.filter((co) => co.id !== id))
+  }, [])
+
+  const updateCO = useCallback((id: string, field: keyof Omit<ChangeOrder, "id">, value: string) => {
+    setChangeOrders((prev) =>
+      prev.map((co) => (co.id === id ? { ...co, [field]: value } : co))
+    )
+  }, [])
 
   // --- Job select handlers ---
   function handleJobSelect(jobId: string) {
@@ -175,7 +217,6 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
   const leadPct = Math.min(100, parseNum(leadCostPct))
   const costVal = parseNum(cost)
   const bizPct = Math.min(100, parseNum(bizProfitPct))
-
   const leadAmount = sell * leadPct / 100
   const recTotal = recordedExp ? recordedExp.materials + recordedExp.labor + recordedExp.other : 0
   const remaining = sell - leadAmount - costVal - recTotal
@@ -184,20 +225,13 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
   const mainHasValues = sell > 0
 
   // --- Change order calculations ---
-  const coSell = parseNum(coTotalSell)
-  const coLeadPct = Math.min(100, parseNum(coLeadCostPct))
-  const coCostVal = parseNum(coCost)
-  const coBizPct = Math.min(100, parseNum(coBizProfitPct))
-
-  const coLeadAmount = coSell * coLeadPct / 100
-  const coRemaining = coSell - coLeadAmount - coCostVal
-  const coBizAmount = coRemaining * coBizPct / 100
-  const coTotalLeft = coRemaining - coBizAmount
-  const coHasValues = coSell > 0
+  const coCalcs = changeOrders.map((co) => ({ ...co, ...calcCO(co) }))
+  const coTotalLeftSum = coCalcs.reduce((s, co) => s + (co.hasValues ? co.totalLeft : 0), 0)
+  const anyCoHasValues = coCalcs.some((co) => co.hasValues)
 
   // --- Combined ---
-  const combinedHasValues = mainHasValues || coHasValues
-  const combinedTotalLeft = (mainHasValues ? mainTotalLeft : 0) + (coHasValues ? coTotalLeft : 0)
+  const combinedHasValues = mainHasValues || anyCoHasValues
+  const combinedTotalLeft = (mainHasValues ? mainTotalLeft : 0) + coTotalLeftSum
 
   return (
     <div className="space-y-6 max-w-lg">
@@ -208,7 +242,6 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
           <CardTitle className="text-base">Job Calculator</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Job selector */}
           {jobs.length > 0 && (
             <div className="space-y-1.5">
               <Label className="text-sm">Job (optional)</Label>
@@ -226,7 +259,6 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
             </div>
           )}
 
-          {/* Total Sell */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label>Total Sell</Label>
@@ -240,19 +272,16 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
             <DollarInput value={totalSell} onChange={handleTotalSellChange} />
           </div>
 
-          {/* Lead Cost % */}
           <div className="space-y-1.5">
             <Label>Lead Cost %</Label>
             <PctInput value={leadCostPct} onChange={setLeadCostPct} computed={leadAmount} base={sell} />
           </div>
 
-          {/* Cost */}
           <div className="space-y-1.5">
             <Label>Cost</Label>
             <DollarInput value={cost} onChange={setCost} />
           </div>
 
-          {/* Recorded job expenses (admin+ only) */}
           {isAdmin && recordedExp && recTotal > 0 && (
             <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 space-y-1.5">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -283,18 +312,14 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
             </div>
           )}
 
-          {/* Business Profit % */}
           <div className="space-y-1.5">
             <Label>Business Profit %</Label>
-            <p className="text-xs text-muted-foreground">
-              Applied to remaining after lead cost and expenses
-            </p>
+            <p className="text-xs text-muted-foreground">Applied to remaining after lead cost and expenses</p>
             <PctInput value={bizProfitPct} onChange={setBizProfitPct} computed={bizAmount} base={remaining} />
           </div>
 
           <Separator />
 
-          {/* Main summary */}
           <div className="space-y-2">
             <SummaryRow label="Total Sell" value={sell} showZero />
             {leadAmount > 0 && <SummaryRow label={`Lead Cost (${leadPct}%)`} value={leadAmount} minus />}
@@ -316,79 +341,101 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
             <div className="border-t border-border pt-2">
               <TotalLeftRow label="Job Total Left" value={mainTotalLeft} hasValues={mainHasValues} />
               {mainHasValues && mainTotalLeft < 0 && (
-                <p className="text-xs text-destructive mt-1">
-                  Over budget by {formatCurrency(-mainTotalLeft)}.
-                </p>
+                <p className="text-xs text-destructive mt-1">Over budget by {formatCurrency(-mainTotalLeft)}.</p>
               )}
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* ── Change Order Calculator ── */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Change Order Calculator</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* CO Total Sell */}
-          <div className="space-y-1.5">
-            <Label>Total Sell</Label>
-            <DollarInput value={coTotalSell} onChange={setCoTotalSell} />
-          </div>
-
-          {/* CO Lead Cost % */}
-          <div className="space-y-1.5">
-            <Label>Lead Cost %</Label>
-            <PctInput value={coLeadCostPct} onChange={setCoLeadCostPct} computed={coLeadAmount} base={coSell} />
-          </div>
-
-          {/* CO Cost */}
-          <div className="space-y-1.5">
-            <Label>Cost</Label>
-            <DollarInput value={coCost} onChange={setCoCost} />
-          </div>
-
-          {/* CO Business Profit % */}
-          <div className="space-y-1.5">
-            <Label>Business Profit %</Label>
-            <p className="text-xs text-muted-foreground">
-              Applied to remaining after lead cost and expenses
-            </p>
-            <PctInput value={coBizProfitPct} onChange={setCoBizProfitPct} computed={coBizAmount} base={coRemaining} />
-          </div>
-
-          <Separator />
-
-          {/* CO summary */}
-          <div className="space-y-2">
-            <SummaryRow label="Change Order Total Sell" value={coSell} showZero />
-            {coLeadAmount > 0 && (
-              <SummaryRow label={`Lead Cost (${coLeadPct}%)`} value={coLeadAmount} minus />
-            )}
-            {coCostVal > 0 && <SummaryRow label="Cost" value={coCostVal} minus />}
-            <div className="border-t border-border pt-2">
-              <SummaryRow label="Remaining Before Business Profit" value={coHasValues ? coRemaining : 0} bold showZero />
+      {/* ── Change Order Cards ── */}
+      {coCalcs.map((co, index) => (
+        <Card key={co.id}>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">
+                Change Order {changeOrders.length > 1 ? index + 1 : ""}
+              </CardTitle>
+              {changeOrders.length > 1 && (
+                <button
+                  onClick={() => removeChangeOrder(co.id)}
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  aria-label="Remove change order"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
-            {coBizAmount > 0 && (
-              <SummaryRow
-                label={`Business Profit (${coBizPct}%)`}
-                value={coBizAmount}
-                minus
-                valueClass="text-amber-600 dark:text-amber-400"
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Total Sell</Label>
+              <DollarInput value={co.totalSell} onChange={(v) => updateCO(co.id, "totalSell", v)} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Lead Cost %</Label>
+              <PctInput
+                value={co.leadCostPct}
+                onChange={(v) => updateCO(co.id, "leadCostPct", v)}
+                computed={co.leadAmount}
+                base={co.sell}
               />
-            )}
-            <div className="border-t border-border pt-2">
-              <TotalLeftRow label="Change Order Total Left" value={coTotalLeft} hasValues={coHasValues} />
-              {coHasValues && coTotalLeft < 0 && (
-                <p className="text-xs text-destructive mt-1">
-                  Over budget by {formatCurrency(-coTotalLeft)}.
-                </p>
-              )}
             </div>
-          </div>
-        </CardContent>
-      </Card>
+
+            <div className="space-y-1.5">
+              <Label>Cost</Label>
+              <DollarInput value={co.cost} onChange={(v) => updateCO(co.id, "cost", v)} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Business Profit %</Label>
+              <p className="text-xs text-muted-foreground">Applied to remaining after lead cost and expenses</p>
+              <PctInput
+                value={co.bizProfitPct}
+                onChange={(v) => updateCO(co.id, "bizProfitPct", v)}
+                computed={co.bizAmount}
+                base={co.remaining}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <SummaryRow label="Change Order Total Sell" value={co.sell} showZero />
+              {co.leadAmount > 0 && <SummaryRow label={`Lead Cost (${co.leadPct}%)`} value={co.leadAmount} minus />}
+              {co.costVal > 0 && <SummaryRow label="Cost" value={co.costVal} minus />}
+              <div className="border-t border-border pt-2">
+                <SummaryRow label="Remaining Before Business Profit" value={co.hasValues ? co.remaining : 0} bold showZero />
+              </div>
+              {co.bizAmount > 0 && (
+                <SummaryRow
+                  label={`Business Profit (${co.bizPct}%)`}
+                  value={co.bizAmount}
+                  minus
+                  valueClass="text-amber-600 dark:text-amber-400"
+                />
+              )}
+              <div className="border-t border-border pt-2">
+                <TotalLeftRow label="Change Order Total Left" value={co.totalLeft} hasValues={co.hasValues} />
+                {co.hasValues && co.totalLeft < 0 && (
+                  <p className="text-xs text-destructive mt-1">Over budget by {formatCurrency(-co.totalLeft)}.</p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+
+      {/* Add another CO button */}
+      <Button
+        variant="outline"
+        className="w-full"
+        onClick={addChangeOrder}
+      >
+        <Plus className="w-4 h-4 mr-2" />
+        Add Another Change Order
+      </Button>
 
       {/* ── Combined Summary ── */}
       <Card className={cn(
@@ -403,7 +450,14 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
         </CardHeader>
         <CardContent className="space-y-2">
           <SummaryRow label="Job Total Left" value={mainHasValues ? mainTotalLeft : 0} showZero />
-          <SummaryRow label="Change Order Total Left" value={coHasValues ? coTotalLeft : 0} showZero />
+          {coCalcs.map((co, index) => (
+            <SummaryRow
+              key={co.id}
+              label={changeOrders.length > 1 ? `Change Order ${index + 1} Total Left` : "Change Order Total Left"}
+              value={co.hasValues ? co.totalLeft : 0}
+              showZero
+            />
+          ))}
           <div className="border-t border-border pt-2">
             <div className="flex items-center justify-between">
               <span className="font-bold text-sm">Combined Total Left</span>
