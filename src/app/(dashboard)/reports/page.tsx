@@ -164,7 +164,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
             <Card key={label}>
               <CardContent className="pt-4 pb-4">
                 <p className="text-xs text-muted-foreground leading-tight">{label}</p>
-                <p className={`text-xl font-bold mt-1 ${cls ?? ""}`}>{value}</p>
+                <p className={`text-lg sm:text-xl font-bold mt-1 truncate ${cls ?? ""}`}>{value}</p>
               </CardContent>
             </Card>
           ))}
@@ -188,8 +188,8 @@ export default async function ReportsPage({ searchParams }: PageProps) {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">PM Performance</CardTitle>
                 </CardHeader>
-                <CardContent className="p-0 pb-1">
-                  <table className="w-full text-sm">
+                <CardContent className="p-0 pb-1 overflow-x-auto">
+                  <table className="w-full text-sm min-w-[460px]">
                     <thead>
                       <tr className="border-b">
                         <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">PM</th>
@@ -238,8 +238,8 @@ export default async function ReportsPage({ searchParams }: PageProps) {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">By Service Type</CardTitle>
                 </CardHeader>
-                <CardContent className="p-0 pb-1">
-                  <table className="w-full text-sm">
+                <CardContent className="p-0 pb-1 overflow-x-auto">
+                  <table className="w-full text-sm min-w-[360px]">
                     <thead>
                       <tr className="border-b">
                         <th className="text-left px-4 py-2 text-xs font-medium text-muted-foreground">Type</th>

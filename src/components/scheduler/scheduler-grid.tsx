@@ -12,13 +12,14 @@ import {
 } from "@dnd-kit/core"
 import type { DragEndEvent, DragStartEvent, Modifier } from "@dnd-kit/core"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { upsertJobReminders } from "@/lib/reminders"
 import { useToast } from "@/hooks/use-toast"
 import { JobBlock } from "./job-block"
 import { ReminderBlock } from "./reminder-block"
 import type { SchedulerJob, PmInfo, SchedulerReminder } from "./scheduler-client"
-import { Bell, Plus, GripVertical, X, Trash2, CalendarDays } from "lucide-react"
+import { Bell, Plus, GripVertical, X, Trash2, CalendarDays, CheckCircle2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -96,6 +97,21 @@ function getNowX(viewingDate: string): number | null {
   const minutesFromStart = h * 60 + m - GRID_START_HOUR * 60
   if (minutesFromStart < 0 || minutesFromStart >= TOTAL_HOURS * 60) return null
   return minutesFromStart * (HOUR_WIDTH / 60)
+}
+
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
+const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+  scheduled:   { bg: "bg-blue-100 dark:bg-blue-900/30",   text: "text-blue-700 dark:text-blue-300" },
+  in_progress: { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-300" },
+  completed:   { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-700 dark:text-green-300" },
+  on_hold:     { bg: "bg-gray-100 dark:bg-gray-800",      text: "text-gray-600 dark:text-gray-400" },
+  cancelled:   { bg: "bg-red-100 dark:bg-red-900/30",     text: "text-red-700 dark:text-red-300" },
 }
 
 function formatHourLabel(hour: number): string {
@@ -297,6 +313,7 @@ export function SchedulerGrid({
   const [jobs, setJobs] = useState(initialJobs)
   const [reminders, setReminders] = useState(initialReminders)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
 
   // Reminder add form state
   const [addingReminder, setAddingReminder] = useState(false)
@@ -323,6 +340,12 @@ export function SchedulerGrid({
     const interval = setInterval(() => setNowLineX(getNowX(viewingDate)), 60_000)
     return () => clearInterval(interval)
   }, [viewingDate])
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener("resize", check)
+    return () => window.removeEventListener("resize", check)
+  }, [])
 
   const isDraggingReminder = activeDragId?.startsWith("reminder_") ?? false
   const activeJobId = !isDraggingReminder ? activeDragId : null
@@ -508,6 +531,340 @@ export function SchedulerGrid({
   const timedReminders = reminders.filter((r) => r.due_time)
   const allDayReminders = reminders.filter((r) => !r.due_time)
   const reminderRowH = calcReminderRowHeight(timedReminders.length || 1)
+
+  // ─── Mobile agenda view ───────────────────────────────────────────────────
+  const mobileView = (
+    <div className="flex-1 overflow-y-auto bg-background">
+      <div className="p-3 space-y-4 pb-8">
+
+        {/* Jobs grouped by PM */}
+        {pmRows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted-foreground">
+            <CalendarDays className="w-10 h-10 opacity-20" />
+            <p className="text-sm font-medium">No jobs scheduled</p>
+            <p className="text-xs opacity-60">Jobs will appear here once scheduled</p>
+          </div>
+        ) : (
+          pmRows.map((pm) => {
+            const rowJobs = jobs
+              .filter((j) => pm.id === "unassigned" ? !j.project_manager_id : j.project_manager_id === pm.id)
+              .sort((a, b) => (a.scheduled_time ?? "").localeCompare(b.scheduled_time ?? ""))
+            const isUnassigned = pm.id === "unassigned"
+            const sc = STATUS_COLORS
+
+            return (
+              <div key={pm.id}>
+                {/* PM section header */}
+                <div className="flex items-center gap-2 mb-2 px-0.5">
+                  <div
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: pm.color }}
+                  />
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
+                    {pm.name}
+                  </span>
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {rowJobs.length === 0
+                      ? "· Free today"
+                      : `· ${rowJobs.length} job${rowJobs.length !== 1 ? "s" : ""}`}
+                  </span>
+                </div>
+
+                {rowJobs.length === 0 ? (
+                  <div
+                    className="rounded-xl border border-dashed p-3 text-center"
+                    style={{
+                      borderColor: isUnassigned ? "var(--border)" : `${pm.color}40`,
+                      backgroundColor: isUnassigned ? "var(--muted)" : `${pm.color}08`,
+                    }}
+                  >
+                    <p className="text-xs text-muted-foreground/40 italic">Free — no jobs scheduled</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {rowJobs.map((job) => {
+                      const isCarried = job.scheduled_date < viewingDate
+                      const color = isCarried ? "#F59E0B" : pm.color
+                      const durationMins = job.estimated_duration_minutes
+                      const cfg = sc[job.status] ?? sc.on_hold
+
+                      return (
+                        <Link
+                          key={job.id}
+                          href={`/jobs/${job.id}`}
+                          className="flex items-stretch gap-0 rounded-xl overflow-hidden active:opacity-70 transition-opacity"
+                          style={{
+                            border: `1px solid ${color}30`,
+                            backgroundColor: hexToRgba(color, 0.07),
+                          }}
+                        >
+                          {/* Colored left accent */}
+                          <div className="w-1 shrink-0" style={{ backgroundColor: color }} />
+
+                          {/* Time column */}
+                          <div className="flex flex-col items-end justify-center shrink-0 w-16 px-2 py-2.5 border-r border-border/30">
+                            {job.scheduled_time ? (
+                              <>
+                                <span
+                                  className="text-xs font-bold tabular-nums leading-tight"
+                                  style={{ color: isCarried ? "#B45309" : "var(--foreground)" }}
+                                >
+                                  {formatTime12(job.scheduled_time)}
+                                </span>
+                                {durationMins && (
+                                  <span className="text-[10px] text-muted-foreground tabular-nums mt-0.5">
+                                    {formatDuration(durationMins)}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground italic">No time</span>
+                            )}
+                          </div>
+
+                          {/* Job info */}
+                          <div className="flex-1 min-w-0 px-3 py-2.5 flex flex-col justify-center gap-0.5">
+                            <p className="text-sm font-semibold leading-tight truncate">
+                              {job.customer?.name ?? job.title}
+                            </p>
+                            {job.customer?.name && job.title !== (job.customer?.name) && (
+                              <p className="text-xs text-muted-foreground truncate">{job.title}</p>
+                            )}
+                            {isCarried && (
+                              <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                                Carried from {job.scheduled_date}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Status badge */}
+                          <div className="flex items-center pr-3 shrink-0">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${cfg.bg} ${cfg.text}`}>
+                              {job.status.replace(/_/g, " ")}
+                            </span>
+                          </div>
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })
+        )}
+
+        {/* Reminders section */}
+        <div className="pt-1">
+          <div className="flex items-center gap-2 mb-2 px-0.5">
+            <Bell className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Reminders
+            </span>
+            {reminders.length > 0 && (
+              <span
+                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                style={{ backgroundColor: "rgba(234,179,8,0.15)", color: "#B45309" }}
+              >
+                {reminders.length}
+              </span>
+            )}
+            <button
+              onClick={() => setAddingReminder(true)}
+              className="ml-auto flex items-center gap-1 text-xs font-semibold text-primary"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </button>
+          </div>
+
+          {reminders.length === 0 ? (
+            <div className="rounded-xl border border-dashed p-4 text-center" style={{ borderColor: "rgba(234,179,8,0.3)" }}>
+              <p className="text-xs text-muted-foreground/40 italic">No reminders — tap Add to create one</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {reminders.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedReminder(r)}
+                  className="w-full flex items-stretch gap-0 rounded-xl overflow-hidden active:opacity-70 transition-opacity text-left"
+                  style={{
+                    border: r.completed_at ? "1px solid var(--border)" : "1px solid rgba(234,179,8,0.35)",
+                    backgroundColor: r.completed_at ? "var(--muted)" : "rgba(234,179,8,0.06)",
+                    opacity: r.completed_at ? 0.65 : 1,
+                  }}
+                >
+                  <div className="w-1 shrink-0" style={{ backgroundColor: r.completed_at ? "var(--border)" : "#EAB308" }} />
+                  <div className="flex flex-col items-end justify-center shrink-0 w-16 px-2 py-2.5 border-r border-border/30">
+                    {r.due_time ? (
+                      <span className="text-xs font-bold tabular-nums" style={{ color: r.completed_at ? "var(--muted-foreground)" : "#B45309" }}>
+                        {formatTime12(r.due_time)}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">All day</span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0 px-3 py-2.5">
+                    <p className={`text-sm font-semibold leading-tight ${r.completed_at ? "line-through text-muted-foreground" : ""}`}>
+                      {r.title}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {formatReminderType(r.type)}
+                      {r.due_time && ` · ${r.duration_minutes}m`}
+                    </p>
+                  </div>
+                  {r.completed_at && (
+                    <div className="flex items-center pr-3 shrink-0">
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  )
+
+  if (isMobile) {
+    return (
+      <>
+        {mobileView}
+
+        {/* ── Reminder detail dialog ── */}
+        <Dialog open={selectedReminder !== null} onOpenChange={(open) => !open && setSelectedReminder(null)}>
+          <DialogContent className="sm:max-w-sm">
+            {selectedReminder && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className={selectedReminder.completed_at ? "line-through text-muted-foreground" : ""}>
+                    {selectedReminder.title}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 py-1">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground w-14 shrink-0">Type</span>
+                    <Badge variant="secondary" className="text-xs">
+                      {formatReminderType(selectedReminder.type)}
+                    </Badge>
+                  </div>
+                  {selectedReminder.due_time && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground w-14 shrink-0">Time</span>
+                      <span>{formatTime12(selectedReminder.due_time)}</span>
+                      <span className="text-muted-foreground text-xs">({selectedReminder.duration_minutes} min)</span>
+                    </div>
+                  )}
+                  {selectedReminder.notes && (
+                    <>
+                      <Separator />
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedReminder.notes}</p>
+                    </>
+                  )}
+                  {selectedReminder.completed_at && (
+                    <p className="text-xs text-green-600 font-medium">
+                      Completed {new Date(selectedReminder.completed_at).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+                <DialogFooter className="gap-2 sm:justify-between">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => setDeletingReminderId(selectedReminder.id)}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                    Delete
+                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => handleToggleReminder(selectedReminder)}>
+                      {selectedReminder.completed_at ? "Mark Incomplete" : "Mark Complete"}
+                    </Button>
+                    <Button size="sm" onClick={() => setSelectedReminder(null)}>Close</Button>
+                  </div>
+                </DialogFooter>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <ConfirmDialog
+          open={deletingReminderId !== null}
+          onOpenChange={(open) => { if (!open) setDeletingReminderId(null) }}
+          title="Delete reminder?"
+          description="This will permanently delete this reminder. This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={() => { if (deletingReminderId) handleDeleteReminder(deletingReminderId) }}
+          loading={deletingLoading}
+        />
+
+        <Dialog open={addingReminder} onOpenChange={setAddingReminder}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add Reminder</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="mr-title">Title *</Label>
+                <Input
+                  id="mr-title"
+                  placeholder="Call customer, order materials…"
+                  value={reminderTitle}
+                  onChange={(e) => setReminderTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddReminder() }}
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="mr-type">Type</Label>
+                <Select value={reminderType} onValueChange={setReminderType}>
+                  <SelectTrigger id="mr-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="custom">Custom</SelectItem>
+                    <SelectItem value="estimate_follow_up">Estimate Follow-up</SelectItem>
+                    <SelectItem value="payment_reminder">Payment Reminder</SelectItem>
+                    <SelectItem value="material_reminder">Material Reminder</SelectItem>
+                    <SelectItem value="review_request">Review Request</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="mr-time">Time (optional)</Label>
+                <Input
+                  id="mr-time"
+                  type="time"
+                  value={reminderTime}
+                  onChange={(e) => setReminderTime(e.target.value)}
+                  className="dark:[color-scheme:dark]"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="mr-notes">Notes</Label>
+                <Textarea
+                  id="mr-notes"
+                  placeholder="Additional details…"
+                  className="min-h-[60px]"
+                  value={reminderNotes}
+                  onChange={(e) => setReminderNotes(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAddingReminder(false)}>Cancel</Button>
+              <Button onClick={handleAddReminder} disabled={!reminderTitle.trim() || reminderSubmitting}>
+                Add Reminder
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <ReminderNotifier reminders={reminders} />
+      </>
+    )
+  }
 
   return (
     <>
@@ -918,7 +1275,7 @@ export function SchedulerGrid({
                 autoFocus
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="r-type">Type</Label>
                 <Select value={reminderType} onValueChange={setReminderType}>

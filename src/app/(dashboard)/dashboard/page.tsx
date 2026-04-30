@@ -216,9 +216,9 @@ export default async function DashboardPage() {
                 <div className={`flex items-center justify-center w-12 h-12 rounded-full ${stat.bgClass} shrink-0`}>
                   <stat.icon className={`w-6 h-6 ${stat.iconClass}`} />
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">{stat.label}</p>
-                  <p className="text-2xl font-bold">{stat.value}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-muted-foreground truncate">{stat.label}</p>
+                  <p className="text-xl sm:text-2xl font-bold truncate">{stat.value}</p>
                 </div>
               </CardContent>
             </Card>
@@ -229,9 +229,9 @@ export default async function DashboardPage() {
                 <div className="flex items-center justify-center w-12 h-12 rounded-full bg-success/10 shrink-0">
                   <DollarSign className="w-6 h-6 text-success" />
                 </div>
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-sm text-muted-foreground">My Sales This Month</p>
-                  <p className="text-2xl font-bold">{formatCurrency(data.pmSalesThisMonth)}</p>
+                  <p className="text-xl sm:text-2xl font-bold truncate">{formatCurrency(data.pmSalesThisMonth)}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">Estimate + approved COs</p>
                 </div>
               </CardContent>
@@ -242,9 +242,9 @@ export default async function DashboardPage() {
               <div className="flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 shrink-0">
                 <Briefcase className="w-6 h-6 text-primary" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-sm text-muted-foreground">{isScopedPM ? "My Jobs Today" : "Jobs Today"}</p>
-                <p className="text-2xl font-bold">{data.todayJobs.length}</p>
+                <p className="text-xl sm:text-2xl font-bold">{data.todayJobs.length}</p>
               </div>
             </CardContent>
           </Card>
@@ -261,14 +261,14 @@ export default async function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               {data.overdueJobs.map((job: any) => (
-                <Link key={job.id} href={`/jobs/${job.id}`} className="flex items-center justify-between hover:bg-warning/10 -mx-2 px-2 py-1.5 rounded-md transition-colors">
-                  <div>
-                    <p className="text-sm font-medium">{job.title}</p>
-                    <p className="text-xs text-muted-foreground">{(job.customer as any)?.name}</p>
+                <Link key={job.id} href={`/jobs/${job.id}`} className="flex items-center justify-between hover:bg-warning/10 -mx-2 px-2 py-1.5 rounded-md transition-colors gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{job.title}</p>
+                    <p className="text-xs text-muted-foreground truncate">{(job.customer as any)?.name}</p>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 shrink-0">
                     <JobStatusBadge status={job.status} />
-                    <Badge variant="warning">{formatDate(job.scheduled_date)}</Badge>
+                    <Badge variant="warning" className="hidden xs:inline-flex">{formatDate(job.scheduled_date)}</Badge>
                   </div>
                 </Link>
               ))}
@@ -287,14 +287,14 @@ export default async function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               {data.overdueEstimates.map((est: any) => (
-                <Link key={est.id} href={`/estimates/${est.id}`} className="flex items-center justify-between hover:bg-warning/10 -mx-2 px-2 py-1.5 rounded-md transition-colors">
-                  <div>
-                    <p className="text-sm font-medium">{est.title}</p>
-                    <p className="text-xs text-muted-foreground">{(est.customer as any)?.name}</p>
+                <Link key={est.id} href={`/estimates/${est.id}`} className="flex items-center justify-between hover:bg-warning/10 -mx-2 px-2 py-1.5 rounded-md transition-colors gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{est.title}</p>
+                    <p className="text-xs text-muted-foreground truncate">{(est.customer as any)?.name}</p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold">{formatCurrency(est.total)}</span>
-                    <Badge variant="warning">Sent {formatDate(est.updated_at)}</Badge>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-sm font-semibold tabular-nums">{formatCurrency(est.total)}</span>
+                    <Badge variant="warning" className="hidden xs:inline-flex">Sent {formatDate(est.updated_at)}</Badge>
                   </div>
                 </Link>
               ))}
@@ -344,15 +344,15 @@ export default async function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {data.todayJobs.map((job: any) => (
-                    <Link key={job.id} href={`/jobs/${job.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors">
-                      <div>
-                        <p className="text-sm font-medium">{job.title}</p>
-                        <p className="text-xs text-muted-foreground">
+                    <Link key={job.id} href={`/jobs/${job.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{job.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">
                           {(job.customer as any)?.name}
                           {job.scheduled_time && <span className="ml-1">· {formatJobTime(job.scheduled_time)}</span>}
                         </p>
                       </div>
-                      <JobStatusBadge status={job.status} />
+                      <div className="shrink-0"><JobStatusBadge status={job.status} /></div>
                     </Link>
                   ))}
                 </div>
@@ -377,12 +377,12 @@ export default async function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {data.upcomingJobs.map((job: any) => (
-                    <Link key={job.id} href={`/jobs/${job.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors">
-                      <div>
-                        <p className="text-sm font-medium">{job.title}</p>
-                        <p className="text-xs text-muted-foreground">{(job.customer as any)?.name}</p>
+                    <Link key={job.id} href={`/jobs/${job.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{job.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">{(job.customer as any)?.name}</p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="shrink-0">
                         <Badge variant="outline">{formatDate(job.scheduled_date)}</Badge>
                       </div>
                     </Link>
@@ -410,12 +410,12 @@ export default async function DashboardPage() {
                 ) : (
                   <div className="space-y-3">
                     {data.newLeads.map((lead: any) => (
-                      <Link key={lead.id} href={`/customers/${lead.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors">
-                        <div>
-                          <p className="text-sm font-medium">{lead.name}</p>
+                      <Link key={lead.id} href={`/customers/${lead.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate">{lead.name}</p>
                           <p className="text-xs text-muted-foreground">{lead.service_type ?? "General"}</p>
                         </div>
-                        <LeadStatusBadge status={lead.status} />
+                        <div className="shrink-0"><LeadStatusBadge status={lead.status} /></div>
                       </Link>
                     ))}
                   </div>
@@ -442,12 +442,12 @@ export default async function DashboardPage() {
                 ) : (
                   <div className="space-y-3">
                     {data.followUps.map((c: any) => (
-                      <Link key={c.id} href={`/customers/${c.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors">
-                        <div>
-                          <p className="text-sm font-medium">{c.name}</p>
+                      <Link key={c.id} href={`/customers/${c.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate">{c.name}</p>
                           <p className="text-xs text-muted-foreground">{c.phone ?? "No phone"}</p>
                         </div>
-                        <Badge variant="warning">Follow-Up</Badge>
+                        <Badge variant="warning" className="shrink-0">Follow-Up</Badge>
                       </Link>
                     ))}
                   </div>
@@ -473,12 +473,12 @@ export default async function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {data.pendingEstimates.map((est: any) => (
-                    <Link key={est.id} href={`/estimates/${est.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors">
-                      <div>
-                        <p className="text-sm font-medium">{est.title}</p>
-                        <p className="text-xs text-muted-foreground">{(est.customer as any)?.name}</p>
+                    <Link key={est.id} href={`/estimates/${est.id}`} className="flex items-center justify-between hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-md transition-colors gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{est.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">{(est.customer as any)?.name}</p>
                       </div>
-                      <span className="text-sm font-semibold">{formatCurrency(est.total)}</span>
+                      <span className="text-sm font-semibold shrink-0 tabular-nums">{formatCurrency(est.total)}</span>
                     </Link>
                   ))}
                 </div>

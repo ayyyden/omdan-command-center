@@ -242,10 +242,14 @@ export default async function EstimateDetailPage({ params }: PageProps) {
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 capitalize">{category}</p>
                 <div className="space-y-1">
                   {items.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between text-sm py-1">
-                      <span className="flex-1">{item.description}</span>
-                      <span className="text-muted-foreground mx-4">{item.quantity} × {formatCurrency(item.unit_price)}</span>
-                      <span className="font-medium w-24 text-right">{formatCurrency(item.quantity * item.unit_price)}</span>
+                    <div key={item.id} className="py-1.5">
+                      <div className="flex items-start justify-between gap-2 text-sm">
+                        <span className="flex-1 min-w-0">{item.description}</span>
+                        <span className="font-medium tabular-nums shrink-0">{formatCurrency(item.quantity * item.unit_price)}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {item.quantity} × {formatCurrency(item.unit_price)}
+                      </p>
                     </div>
                   ))}
                 </div>

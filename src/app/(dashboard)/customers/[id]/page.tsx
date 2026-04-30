@@ -137,9 +137,9 @@ export default async function CustomerDetailPage({ params }: PageProps) {
                 </div>
               )}
               {customer.email && (
-                <div className="flex items-center gap-3 text-sm">
+                <div className="flex items-center gap-3 text-sm min-w-0">
                   <Mail className="w-4 h-4 text-muted-foreground shrink-0" />
-                  <a href={`mailto:${customer.email}`} className="hover:text-primary">{customer.email}</a>
+                  <a href={`mailto:${customer.email}`} className="hover:text-primary break-all min-w-0">{customer.email}</a>
                 </div>
               )}
               {customer.address && (
@@ -248,12 +248,12 @@ export default async function CustomerDetailPage({ params }: PageProps) {
             ) : (
               <div className="space-y-2">
                 {jobs.map((job) => (
-                  <Link key={job.id} href={`/jobs/${job.id}`} className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors border">
-                    <div>
-                      <p className="text-sm font-medium">{job.title}</p>
+                  <Link key={job.id} href={`/jobs/${job.id}`} className="flex items-center justify-between gap-2 p-3 rounded-lg hover:bg-muted/50 transition-colors border">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{job.title}</p>
                       <p className="text-xs text-muted-foreground">{formatDate(job.scheduled_date)}</p>
                     </div>
-                    <JobStatusBadge status={job.status as JobStatus} />
+                    <div className="shrink-0"><JobStatusBadge status={job.status as JobStatus} /></div>
                   </Link>
                 ))}
               </div>

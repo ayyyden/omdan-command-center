@@ -590,15 +590,15 @@ export default async function JobDetailPage({ params }: PageProps) {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="grid grid-cols-2 gap-3">
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Customer</p>
                   {/* Customer link hidden from non-admin since /customers is admin-only */}
                   {isAdmin ? (
-                    <Link href={`/customers/${job.customer_id}`} className="font-medium hover:text-primary">
+                    <Link href={`/customers/${job.customer_id}`} className="font-medium hover:text-primary truncate block">
                       {(job.customer as any)?.name}
                     </Link>
                   ) : (
-                    <p className="font-medium">{(job.customer as any)?.name}</p>
+                    <p className="font-medium truncate">{(job.customer as any)?.name}</p>
                   )}
                 </div>
                 <div>
@@ -677,14 +677,14 @@ export default async function JobDetailPage({ params }: PageProps) {
               ) : (
                 <div className="space-y-2">
                   {expenses.map((exp) => (
-                    <div key={exp.id} className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-muted/50">
-                      <div>
-                        <p className="font-medium">{exp.description}</p>
+                    <div key={exp.id} className="flex items-center justify-between gap-2 text-sm p-2 rounded-lg hover:bg-muted/50">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate">{exp.description}</p>
                         <p className="text-xs text-muted-foreground capitalize">
                           {exp.category.replace(/_/g, " ")} · {formatDate(exp.date)}
                         </p>
                       </div>
-                      <span className="font-semibold text-destructive">{formatCurrency(Number(exp.amount))}</span>
+                      <span className="font-semibold text-destructive shrink-0">{formatCurrency(Number(exp.amount))}</span>
                     </div>
                   ))}
                   <Separator />
@@ -737,16 +737,16 @@ export default async function JobDetailPage({ params }: PageProps) {
                   {payments.map((pmt) => {
                     const invoiceType = (pmt.invoice as any)?.type as string | undefined
                     return (
-                      <div key={pmt.id} className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-muted/50">
-                        <div>
+                      <div key={pmt.id} className="flex items-center justify-between gap-2 text-sm p-2 rounded-lg hover:bg-muted/50">
+                        <div className="min-w-0 flex-1">
                           <p className="font-medium capitalize">{pmt.method.replace(/_/g, " ")}</p>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground truncate">
                             {formatDate(pmt.date)}
                             {invoiceType && ` · ${TYPE_LABEL[invoiceType] ?? invoiceType} invoice`}
                             {pmt.notes ? ` · ${pmt.notes}` : ""}
                           </p>
                         </div>
-                        <span className="font-semibold text-success">{formatCurrency(Number(pmt.amount))}</span>
+                        <span className="font-semibold text-success shrink-0">{formatCurrency(Number(pmt.amount))}</span>
                       </div>
                     )
                   })}
