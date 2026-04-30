@@ -19,10 +19,12 @@ export interface JobOption {
     labor: number
     other: number
   }
+  approvedChangeOrders?: Array<{ id: string; title: string; amount: number }>
 }
 
 interface ChangeOrder {
   id: string
+  label?: string
   totalSell: string
   leadCostPct: string
   cost: string
@@ -194,6 +196,7 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
       setSellSource("empty")
       setTotalSell("")
       setRecordedExp(null)
+      setChangeOrders([{ id: uid(), totalSell: "", leadCostPct: "", cost: "", bizProfitPct: "" }])
       return
     }
     const job = jobs.find((j) => j.id === jobId)
@@ -202,6 +205,21 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
     setTotalSell(sell)
     setSellSource(sell ? "job" : "empty")
     setRecordedExp(isAdmin && job.recordedExpenses ? job.recordedExpenses : null)
+
+    if (job.approvedChangeOrders && job.approvedChangeOrders.length > 0) {
+      setChangeOrders(
+        job.approvedChangeOrders.map((co) => ({
+          id: uid(),
+          label: co.title,
+          totalSell: co.amount > 0 ? co.amount.toFixed(2) : "",
+          leadCostPct: "",
+          cost: "",
+          bizProfitPct: "",
+        }))
+      )
+    } else {
+      setChangeOrders([{ id: uid(), totalSell: "", leadCostPct: "", cost: "", bizProfitPct: "" }])
+    }
   }
 
   function handleTotalSellChange(v: string) {
@@ -353,9 +371,12 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
         <Card key={co.id}>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">
-                Change Order {changeOrders.length > 1 ? index + 1 : ""}
-              </CardTitle>
+              <div>
+                <CardTitle className="text-base">
+                  {co.label ? co.label : `Change Order${changeOrders.length > 1 ? ` ${index + 1}` : ""}`}
+                </CardTitle>
+                {co.label && <p className="text-xs text-muted-foreground mt-0.5">Approved change order</p>}
+              </div>
               {changeOrders.length > 1 && (
                 <button
                   onClick={() => removeChangeOrder(co.id)}
@@ -453,7 +474,13 @@ export function ProfitCalculator({ jobs, isAdmin }: ProfitCalculatorProps) {
           {coCalcs.map((co, index) => (
             <SummaryRow
               key={co.id}
-              label={changeOrders.length > 1 ? `Change Order ${index + 1} Total Left` : "Change Order Total Left"}
+              label={
+                co.label
+                  ? `${co.label} Total Left`
+                  : changeOrders.length > 1
+                  ? `Change Order ${index + 1} Total Left`
+                  : "Change Order Total Left"
+              }
               value={co.hasValues ? co.totalLeft : 0}
               showZero
             />

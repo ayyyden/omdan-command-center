@@ -4,6 +4,16 @@ export const ROLES = [
 
 export type TeamRole = typeof ROLES[number]
 
+/** Roles that are currently active and have full app access. */
+export const ACTIVE_ROLES: TeamRole[] = ['owner', 'admin', 'project_manager']
+
+/** Roles that have been retired. Members with these roles are blocked until upgraded. */
+export const LEGACY_ROLES: TeamRole[] = ['office', 'field_worker', 'viewer']
+
+export function isLegacyRole(role: TeamRole | string): boolean {
+  return LEGACY_ROLES.includes(role as TeamRole)
+}
+
 export const ROLE_LABELS: Record<TeamRole, string> = {
   owner:           'Owner',
   admin:           'Admin',
@@ -38,14 +48,17 @@ export function canManageRole(actor: TeamRole, target: TeamRole): boolean {
   return false
 }
 
-/** Can `actor` invite someone into `targetRole`? */
+/** Can `actor` invite someone into `targetRole`? Only active non-owner roles are invitable. */
 export function canInviteRole(actor: TeamRole, targetRole: TeamRole): boolean {
+  const invitable: TeamRole[] = ['admin', 'project_manager']
+  if (!invitable.includes(targetRole)) return false
   if (actor === 'owner') return true
-  if (actor === 'admin') return targetRole !== 'owner'
+  if (actor === 'admin') return true
   return false
 }
 
 export function can(role: TeamRole, action: string): boolean {
+  if (isLegacyRole(role)) return false
   switch (action) {
     // ── Team ─────────────────────────────────────────────────────────────────
     case 'team:view':

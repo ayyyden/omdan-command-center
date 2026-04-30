@@ -23,6 +23,7 @@ interface Props {
   contractName: string
   pdfUrl: string | null
   fields: SigningField[]
+  bundleToken?: string
 }
 
 // ── Signature modal ───────────────────────────────────────────────────────────
@@ -330,7 +331,7 @@ function DateField({
 
 // ── Main signing client ───────────────────────────────────────────────────────
 
-export function SignClient({ token, contractName, pdfUrl, fields }: Props) {
+export function SignClient({ token, contractName, pdfUrl, fields, bundleToken }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
 
@@ -342,6 +343,8 @@ export function SignClient({ token, contractName, pdfUrl, fields }: Props) {
   const [error, setError]           = useState("")
   const [signerName, setSignerName] = useState("")
   const [modalField, setModalField] = useState<SigningField | null>(null)
+  const [consentChecked, setConsentChecked] = useState(false)
+  const [reviewChecked, setReviewChecked]   = useState(false)
 
   useEffect(() => {
     const el = containerRef.current
@@ -390,7 +393,11 @@ export function SignClient({ token, contractName, pdfUrl, fields }: Props) {
       return
     }
 
-    setDone(true)
+    if (bundleToken) {
+      window.location.href = `/sign-bundle/${bundleToken}`
+    } else {
+      setDone(true)
+    }
   }
 
   if (done) {
@@ -536,16 +543,34 @@ export function SignClient({ token, contractName, pdfUrl, fields }: Props) {
               </div>
             )}
 
-            <div className="pt-2 border-t border-slate-200">
-              <p className="text-xs text-slate-500 mb-4">
-                By clicking &ldquo;Sign &amp; Submit&rdquo; you agree that this electronic signature is the
-                legal equivalent of your handwritten signature.
-              </p>
+            <div className="pt-2 border-t border-slate-200 space-y-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={consentChecked}
+                  onChange={(e) => setConsentChecked(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                />
+                <span className="text-xs text-slate-600">
+                  I agree to use electronic records and electronic signatures for this transaction.
+                </span>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reviewChecked}
+                  onChange={(e) => setReviewChecked(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                />
+                <span className="text-xs text-slate-600">
+                  I have reviewed the document and agree to the terms.
+                </span>
+              </label>
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold rounded-lg px-4 py-3 transition-colors text-sm"
+                disabled={submitting || !consentChecked || !reviewChecked}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-3 transition-colors text-sm mt-2"
               >
                 {submitting ? "Submitting…" : "Sign & Submit"}
               </button>

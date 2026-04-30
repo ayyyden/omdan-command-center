@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation"
+import { headers } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/service"
+import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
 import { ApproveClient } from "./approve-client"
 import type { EstimateLineItem } from "@/types"
 
@@ -28,11 +30,34 @@ export default async function ApproveEstimatePage({
 
   if (!estimate) notFound()
 
-  const { data: company } = await supabase
-    .from("company_settings")
-    .select("company_name, phone, email, address, logo_url, license_number")
-    .eq("user_id", estimate.user_id)
-    .single()
+  const hdrs = await headers()
+  const customer0 = estimate.customer as unknown as { name: string; email: string | null } | null
+  void logAudit({
+    documentType:  "estimate",
+    documentId:    estimate.id,
+    tokenHash:     hashToken(token),
+    action:        "viewed",
+    customerName:  customer0?.name  ?? null,
+    customerEmail: customer0?.email ?? null,
+    ipAddress:     getIp(hdrs),
+    userAgent:     getUa(hdrs),
+    metadata:      (estimate.status === "approved" || estimate.status === "rejected")
+                     ? { alreadyResponded: true, status: estimate.status }
+                     : undefined,
+  })
+
+  const [{ data: company }, { data: paymentSteps }] = await Promise.all([
+    supabase
+      .from("company_settings")
+      .select("company_name, phone, email, address, logo_url, license_number")
+      .eq("user_id", estimate.user_id)
+      .single(),
+    supabase
+      .from("estimate_payment_steps")
+      .select("id, name, amount, description, sort_order")
+      .eq("estimate_id", estimate.id)
+      .order("sort_order"),
+  ])
 
   const customer = estimate.customer as unknown as {
     name: string
@@ -184,6 +209,30 @@ export default async function ApproveEstimatePage({
               <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">
                 {estimate.notes}
               </p>
+            </div>
+          )}
+
+          {/* Payment Schedule */}
+          {paymentSteps && paymentSteps.length > 0 && (
+            <div className="px-6 py-4 border-b border-gray-100">
+              <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">
+                Payment Schedule
+              </p>
+              <div className="space-y-2">
+                {paymentSteps.map((step, i) => (
+                  <div key={step.id ?? i} className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800">{step.name}</p>
+                      {step.description && (
+                        <p className="text-xs text-gray-500 mt-0.5">{step.description}</p>
+                      )}
+                    </div>
+                    <p className="text-sm font-bold text-gray-900 tabular-nums shrink-0">
+                      {fmt(Number(step.amount))}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

@@ -20,11 +20,31 @@ async function resolveContext(req: Request, id: string) {
 
   const service = createServiceClient()
   const { data: target } = await service
-    .from("team_members").select("id, role, status, user_id").eq("id", id).single()
+    .from("team_members")
+    .select("id, role, status, user_id, project_manager_id")
+    .eq("id", id)
+    .single()
 
   if (!target) return { err: "Member not found", status: 404 as const }
 
   return { invoker, target, service, userId: user.id }
+}
+
+/** Sync the linked project_manager.is_active when a team member is enabled/disabled/deleted */
+async function syncPmActive(
+  service: ReturnType<typeof createServiceClient>,
+  target: { user_id?: string | null; project_manager_id?: string | null },
+  isActive: boolean,
+) {
+  const pmId = (target as any).project_manager_id as string | null
+  const userId = target.user_id as string | null
+
+  if (pmId) {
+    await service.from("project_managers").update({ is_active: isActive }).eq("id", pmId)
+  } else if (userId) {
+    // Fallback: find PM by user_id link if project_manager_id FK not set
+    await service.from("project_managers").update({ is_active: isActive }).eq("user_id", userId)
+  }
 }
 
 export async function PATCH(req: Request, { params }: RouteCtx) {
@@ -64,6 +84,13 @@ export async function PATCH(req: Request, { params }: RouteCtx) {
   const { error } = await service.from("team_members").update(updates).eq("id", id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  // Keep project_managers.is_active in sync with team member status
+  if (status === "disabled") {
+    await syncPmActive(service, target, false)
+  } else if (status === "active") {
+    await syncPmActive(service, target, true)
+  }
+
   return NextResponse.json({ ok: true })
 }
 
@@ -90,6 +117,9 @@ export async function DELETE(_req: Request, { params }: RouteCtx) {
       return NextResponse.json({ error: "Cannot remove the last Owner" }, { status: 400 })
     }
   }
+
+  // Deactivate the linked PM so they no longer appear in job/scheduler dropdowns
+  await syncPmActive(service, target, false)
 
   const { error } = await service.from("team_members").delete().eq("id", id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

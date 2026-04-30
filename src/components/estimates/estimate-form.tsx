@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useCallback } from "react"
 import { useForm, useFieldArray, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatCurrency, cn } from "@/lib/utils"
-import { Loader2, Plus, Trash2, Send } from "lucide-react"
+import { Loader2, Plus, Trash2, Send, Wand2, AlertCircle } from "lucide-react"
 import { upsertEstimateFollowUp } from "@/lib/reminders"
 import type { Customer, Estimate } from "@/types"
 
@@ -68,6 +68,39 @@ function calcTotals(lineItems: EstimateFormValues["line_items"], markupPct: numb
   return { subtotal, markupAmount, taxAmount, total }
 }
 
+function generateTitleFromScope(scope: string): string {
+  const lower = scope.toLowerCase()
+  const keywords: Record<string, string> = {
+    kitchen: "Kitchen Renovation",
+    bathroom: "Bathroom Remodel",
+    deck: "Deck Installation",
+    roof: "Roofing Project",
+    flooring: "Flooring Installation",
+    paint: "Painting Project",
+    fence: "Fence Installation",
+    landscap: "Landscaping Project",
+    drywall: "Drywall Repair",
+    plumb: "Plumbing Work",
+    electric: "Electrical Work",
+    window: "Window Installation",
+    door: "Door Installation",
+    garage: "Garage Project",
+    basement: "Basement Renovation",
+    addition: "Home Addition",
+    remodel: "Home Remodel",
+    renovation: "Renovation Project",
+    repair: "Repair Work",
+    install: "Installation Project",
+    hvac: "HVAC Service",
+    ac: "AC Service",
+  }
+  for (const [kw, title] of Object.entries(keywords)) {
+    if (lower.includes(kw)) return title
+  }
+  const words = scope.trim().split(/\s+/).slice(0, 4).join(" ")
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
 export function EstimateForm({
   estimate, customers, userId, preselectedCustomerId, defaultNotes,
   templates = [], companySettings,
@@ -76,43 +109,53 @@ export function EstimateForm({
   const { toast } = useToast()
   const lineItemsRef = useRef<HTMLDivElement>(null)
 
-  const [sendOpen, setSendOpen]         = useState(false)
-  const [savingForSend, setSavingForSend] = useState(false)
-  const [sending, setSending]           = useState(false)
+  const [sendOpen, setSendOpen]             = useState(false)
+  const [savingForSend, setSavingForSend]   = useState(false)
+  const [sending, setSending]               = useState(false)
   const [savedEstimateId, setSavedEstimateId] = useState<string | null>(null)
-  const [selectedTplId, setSelectedTplId] = useState("")
+  const [selectedTplId, setSelectedTplId]   = useState("")
   const [to, setTo]       = useState("")
   const [subject, setSubject] = useState("")
   const [body, setBody]   = useState("")
+  const [generatingTitle, setGeneratingTitle] = useState(false)
 
   const followUpTemplates = templates.filter((t) => t.type === "estimate_follow_up")
 
   const form = useForm<EstimateFormValues>({
     resolver: zodResolver(estimateSchema),
     defaultValues: {
-      customer_id:    estimate?.customer_id    ?? preselectedCustomerId ?? "",
-      title:          estimate?.title          ?? "",
-      scope_of_work:  estimate?.scope_of_work  ?? "",
+      customer_id:        estimate?.customer_id    ?? preselectedCustomerId ?? "",
+      title:              estimate?.title          ?? "",
+      scope_of_work:      estimate?.scope_of_work  ?? "",
+      manual_total_price: (estimate as any)?.manual_total_price ?? undefined,
       line_items: estimate?.line_items?.map((item) => ({
         ...item,
         taxable: (item as any).taxable !== false,
-      })) ?? [
-        { id: uuidv4(), description: "", quantity: 1, unit_price: 0, category: "labor", taxable: true },
-      ],
+      })) ?? [],
       markup_percent: estimate?.markup_percent ?? 0,
       tax_percent:    estimate?.tax_percent    ?? 0,
       status:         estimate?.status         ?? "draft",
       notes:          estimate?.notes          ?? defaultNotes ?? "",
+      payment_steps:  (estimate as any)?.payment_steps ?? [],
     },
   })
 
   const { fields, append, remove } = useFieldArray({ control: form.control, name: "line_items" })
+  const { fields: paymentStepFields, append: appendStep, remove: removeStep } = useFieldArray({ control: form.control, name: "payment_steps" })
 
-  const lineItems = useWatch({ control: form.control, name: "line_items" })
-  const markupPct = useWatch({ control: form.control, name: "markup_percent" })
-  const taxPct    = useWatch({ control: form.control, name: "tax_percent" })
+  const lineItems          = useWatch({ control: form.control, name: "line_items" })
+  const markupPct          = useWatch({ control: form.control, name: "markup_percent" })
+  const taxPct             = useWatch({ control: form.control, name: "tax_percent" })
+  const manualTotalPrice   = useWatch({ control: form.control, name: "manual_total_price" })
+  const paymentSteps       = useWatch({ control: form.control, name: "payment_steps" })
+  const scopeOfWork        = useWatch({ control: form.control, name: "scope_of_work" })
 
-  const { subtotal, markupAmount, taxAmount, total } = calcTotals(lineItems, markupPct ?? 0, taxPct ?? 0)
+  const { subtotal, markupAmount, taxAmount, total: lineItemTotal } = calcTotals(lineItems ?? [], markupPct ?? 0, taxPct ?? 0)
+  const useManualTotal = manualTotalPrice != null && manualTotalPrice > 0
+  const displayTotal = useManualTotal ? manualTotalPrice! : lineItemTotal
+
+  const paymentStepsTotal = (paymentSteps ?? []).reduce((s, p) => s + (p.amount ?? 0), 0)
+  const paymentStepsOverage = paymentStepsTotal > displayTotal && displayTotal > 0
 
   function appendRow() {
     append({ id: uuidv4(), description: "", quantity: 1, unit_price: 0, category: "labor", taxable: true })
@@ -120,8 +163,7 @@ export function EstimateForm({
       if (!lineItemsRef.current) return
       const inputs = lineItemsRef.current.querySelectorAll<HTMLInputElement>("[data-line-desc]")
       const last = inputs[inputs.length - 1]
-      last?.focus()
-      last?.select()
+      last?.focus(); last?.select()
     }, 30)
   }
 
@@ -129,13 +171,28 @@ export function EstimateForm({
     if (!lineItemsRef.current) return
     const inputs = lineItemsRef.current.querySelectorAll<HTMLInputElement>("[data-line-desc]")
     const target = inputs[index]
-    target?.focus()
-    target?.select()
+    target?.focus(); target?.select()
+  }
+
+  function handleGenerateTitle() {
+    const scope = scopeOfWork?.trim()
+    if (!scope) {
+      toast({ title: "Enter a Scope of Work first to generate a title.", variant: "destructive" })
+      return
+    }
+    setGeneratingTitle(true)
+    setTimeout(() => {
+      const generated = generateTitleFromScope(scope)
+      form.setValue("title", generated)
+      setGeneratingTitle(false)
+    }, 300)
   }
 
   function buildTplData(values: EstimateFormValues): Record<string, string> {
     const selectedCustomer = customers.find((c) => c.id === values.customer_id)
-    const { total } = calcTotals(values.line_items, values.markup_percent, values.tax_percent)
+    const total = values.manual_total_price && values.manual_total_price > 0
+      ? values.manual_total_price
+      : calcTotals(values.line_items, values.markup_percent, values.tax_percent).total
     return {
       customer_name:  selectedCustomer?.name             ?? "",
       estimate_total: formatCurrency(total),
@@ -159,14 +216,25 @@ export function EstimateForm({
     const { subtotal, markupAmount, taxAmount, total } = calcTotals(
       values.line_items, values.markup_percent, values.tax_percent,
     )
+    const finalTotal = values.manual_total_price && values.manual_total_price > 0
+      ? values.manual_total_price
+      : total
 
     const payload = {
-      ...values,
-      user_id:       userId,
+      customer_id:         values.customer_id,
+      title:               values.title,
+      scope_of_work:       values.scope_of_work,
+      manual_total_price:  values.manual_total_price ?? null,
+      line_items:          values.line_items,
+      markup_percent:      values.markup_percent,
+      markup_amount:       markupAmount,
+      tax_percent:         values.tax_percent,
+      tax_amount:          taxAmount,
       subtotal,
-      markup_amount: markupAmount,
-      tax_amount:    taxAmount,
-      total,
+      total:               finalTotal,
+      status:              values.status,
+      notes:               values.notes,
+      user_id:             userId,
     }
 
     let error
@@ -176,10 +244,7 @@ export function EstimateForm({
       ;({ error } = await supabase.from("estimates").update(payload).eq("id", estimate.id))
     } else {
       const { data: inserted, error: insertError } = await supabase
-        .from("estimates")
-        .insert(payload)
-        .select("id")
-        .single()
+        .from("estimates").insert(payload).select("id").single()
       error = insertError
       savedId = inserted?.id ?? null
     }
@@ -187,6 +252,23 @@ export function EstimateForm({
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" })
       return null
+    }
+
+    // Save payment steps
+    if (savedId) {
+      await supabase.from("estimate_payment_steps").delete().eq("estimate_id", savedId)
+      const steps = (values.payment_steps ?? []).filter((s) => s.name && s.amount > 0)
+      if (steps.length > 0) {
+        await supabase.from("estimate_payment_steps").insert(
+          steps.map((s, i) => ({
+            estimate_id:  savedId,
+            name:         s.name,
+            amount:       s.amount,
+            description:  s.description || null,
+            sort_order:   i,
+          }))
+        )
+      }
     }
 
     if (values.status === "sent" && savedId) {
@@ -223,7 +305,6 @@ export function EstimateForm({
     if (!id) return
 
     setSavedEstimateId(id)
-
     const selectedCustomer = customers.find((c) => c.id === values.customer_id)
     setTo(selectedCustomer?.email ?? "")
 
@@ -238,7 +319,6 @@ export function EstimateForm({
       setSubject(`Estimate for ${selectedCustomer?.name ?? ""}: ${values.title}`)
       setBody("")
     }
-
     setSendOpen(true)
   }
 
@@ -307,14 +387,6 @@ export function EstimateForm({
               </FormItem>
             )} />
 
-            <FormField control={form.control} name="title" render={({ field }) => (
-              <FormItem className="sm:col-span-2">
-                <FormLabel>Estimate Title *</FormLabel>
-                <FormControl><Input placeholder="Kitchen Remodel — Phase 1" {...field} /></FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-
             <FormField control={form.control} name="scope_of_work" render={({ field }) => (
               <FormItem className="sm:col-span-2">
                 <FormLabel>Scope of Work</FormLabel>
@@ -324,27 +396,91 @@ export function EstimateForm({
                 <FormMessage />
               </FormItem>
             )} />
+
+            {/* Title with generate button */}
+            <FormField control={form.control} name="title" render={({ field }) => (
+              <FormItem className="sm:col-span-2">
+                <FormLabel>Estimate Title *</FormLabel>
+                <div className="flex gap-2">
+                  <FormControl className="flex-1">
+                    <Input placeholder="Kitchen Remodel — Phase 1" {...field} />
+                  </FormControl>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={handleGenerateTitle}
+                    disabled={generatingTitle}
+                    title="Generate title from Scope of Work"
+                  >
+                    {generatingTitle ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  </Button>
+                </div>
+                <FormMessage />
+              </FormItem>
+            )} />
           </CardContent>
         </Card>
 
-        {/* Line Items */}
+        {/* Total Price (manual override — shown above line items) */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Total Price</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <FormField control={form.control} name="manual_total_price" render={({ field }) => (
+              <FormItem>
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1 max-w-xs">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm pointer-events-none">$</span>
+                    <FormControl>
+                      <NumericInput
+                        className="pl-7"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={field.value ?? ""}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value)
+                          field.onChange(isNaN(v) || v === 0 ? undefined : v)
+                        }}
+                        onBlur={field.onBlur}
+                        name={field.name}
+                      />
+                    </FormControl>
+                  </div>
+                  {useManualTotal && (
+                    <span className="text-sm text-muted-foreground">Manual total · {formatCurrency(manualTotalPrice!)}</span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Enter the all-in job price. Leave blank to use the line item total below.
+                </p>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </CardContent>
+        </Card>
+
+        {/* Line Items (optional) */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center justify-between">
-              Line Items
-              <span className="text-xs font-normal text-muted-foreground">Tab through fields · Enter on price to add row · T = taxable</span>
+              Line Items <span className="text-xs font-normal text-muted-foreground">Optional · Tab through fields · Enter on price to add row</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 pb-4">
-            {/* Column headers */}
-            <div className="hidden sm:grid grid-cols-[1fr_96px_56px_96px_36px_32px] gap-x-2 px-2 pb-1">
-              <span className="text-xs font-medium text-muted-foreground">Description</span>
-              <span className="text-xs font-medium text-muted-foreground">Category</span>
-              <span className="text-xs font-medium text-muted-foreground">Qty</span>
-              <span className="text-xs font-medium text-muted-foreground">Unit Price</span>
-              <span className="text-xs font-medium text-muted-foreground text-center">Tax</span>
-              <span />
-            </div>
+            {fields.length > 0 && (
+              <div className="hidden sm:grid grid-cols-[1fr_96px_56px_96px_36px_32px] gap-x-2 px-2 pb-1">
+                <span className="text-xs font-medium text-muted-foreground">Description</span>
+                <span className="text-xs font-medium text-muted-foreground">Category</span>
+                <span className="text-xs font-medium text-muted-foreground">Qty</span>
+                <span className="text-xs font-medium text-muted-foreground">Unit Price</span>
+                <span className="text-xs font-medium text-muted-foreground text-center">Tax</span>
+                <span />
+              </div>
+            )}
 
             <div ref={lineItemsRef} className="space-y-0.5">
               {fields.map((field, index) => (
@@ -355,13 +491,7 @@ export function EstimateForm({
                   <FormField control={form.control} name={`line_items.${index}.description`} render={({ field }) => (
                     <FormItem className="sm:mb-0">
                       <FormControl>
-                        <Input
-                          placeholder="Description of work or material"
-                          {...field}
-                          // eslint-disable-next-line react/no-unknown-property
-                          data-line-desc=""
-                          className="h-9"
-                        />
+                        <Input placeholder="Description of work or material" {...field} data-line-desc="" className="h-9" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -370,11 +500,7 @@ export function EstimateForm({
                   <FormField control={form.control} name={`line_items.${index}.category`} render={({ field }) => (
                     <FormItem>
                       <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger className="h-9 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
+                        <FormControl><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger></FormControl>
                         <SelectContent>
                           <SelectItem value="labor">Labor</SelectItem>
                           <SelectItem value="materials">Materials</SelectItem>
@@ -389,14 +515,9 @@ export function EstimateForm({
                   <FormField control={form.control} name={`line_items.${index}.quantity`} render={({ field }) => (
                     <FormItem>
                       <FormControl>
-                        <NumericInput
-                          className="h-9"
-                          min="0"
-                          value={field.value}
+                        <NumericInput className="h-9" min="0" value={field.value}
                           onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                          onBlur={field.onBlur}
-                          name={field.name}
-                        />
+                          onBlur={field.onBlur} name={field.name} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -405,24 +526,15 @@ export function EstimateForm({
                   <FormField control={form.control} name={`line_items.${index}.unit_price`} render={({ field }) => (
                     <FormItem>
                       <FormControl>
-                        <NumericInput
-                          className="h-9"
-                          min="0"
-                          placeholder="0.00"
-                          value={field.value}
+                        <NumericInput className="h-9" min="0" placeholder="0.00" value={field.value}
                           onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                          onBlur={field.onBlur}
-                          name={field.name}
+                          onBlur={field.onBlur} name={field.name}
                           onKeyDown={(e) => {
                             if (e.key !== "Enter") return
                             e.preventDefault()
-                            if (index === fields.length - 1) {
-                              appendRow()
-                            } else {
-                              focusDescAt(index + 1)
-                            }
-                          }}
-                        />
+                            if (index === fields.length - 1) appendRow()
+                            else focusDescAt(index + 1)
+                          }} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -431,14 +543,12 @@ export function EstimateForm({
                   <FormField control={form.control} name={`line_items.${index}.taxable`} render={({ field }) => (
                     <FormItem>
                       <FormControl>
-                        <button
-                          type="button"
+                        <button type="button"
                           title={field.value !== false ? "Taxable — click to mark exempt" : "Non-taxable — click to mark taxable"}
-                          className={cn(
-                            "h-9 w-full rounded-md border text-[11px] font-semibold transition-colors",
+                          className={cn("h-9 w-full rounded-md border text-[11px] font-semibold transition-colors",
                             field.value !== false
                               ? "border-primary/40 bg-primary/10 text-primary"
-                              : "border-muted-foreground/30 text-muted-foreground",
+                              : "border-muted-foreground/30 text-muted-foreground"
                           )}
                           onClick={() => field.onChange(field.value === false ? true : false)}
                         >
@@ -448,15 +558,9 @@ export function EstimateForm({
                     </FormItem>
                   )} />
 
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    tabIndex={-1}
+                  <Button type="button" variant="ghost" size="icon" tabIndex={-1}
                     className="text-muted-foreground hover:text-destructive w-8 h-8 shrink-0"
-                    onClick={() => remove(index)}
-                    disabled={fields.length === 1}
-                  >
+                    onClick={() => remove(index)}>
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
                 </div>
@@ -464,15 +568,8 @@ export function EstimateForm({
             </div>
 
             <div className="pt-2 px-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={appendRow}
-                className="gap-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Add Line Item
+              <Button type="button" variant="outline" size="sm" onClick={appendRow} className="gap-1.5">
+                <Plus className="w-3.5 h-3.5" />Add Line Item
               </Button>
             </div>
           </CardContent>
@@ -486,7 +583,9 @@ export function EstimateForm({
                 <FormItem>
                   <FormLabel>Markup %</FormLabel>
                   <FormControl>
-                    <NumericInput min="0" max="100" value={field.value} onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} onBlur={field.onBlur} name={field.name} />
+                    <NumericInput min="0" max="100" value={field.value}
+                      onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                      onBlur={field.onBlur} name={field.name} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -496,7 +595,9 @@ export function EstimateForm({
                 <FormItem>
                   <FormLabel>Tax % <span className="font-normal text-muted-foreground text-xs">(T items only)</span></FormLabel>
                   <FormControl>
-                    <NumericInput min="0" max="100" value={field.value} onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} onBlur={field.onBlur} name={field.name} />
+                    <NumericInput min="0" max="100" value={field.value}
+                      onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                      onBlur={field.onBlur} name={field.name} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -519,73 +620,144 @@ export function EstimateForm({
               <CardTitle className="text-base">Estimate Summary</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span>{formatCurrency(subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Markup ({markupPct ?? 0}%)</span>
-                <span>{formatCurrency(markupAmount)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tax ({taxPct ?? 0}%)</span>
-                <span>{formatCurrency(taxAmount)}</span>
-              </div>
-              <Separator />
+              {!useManualTotal && fields.length > 0 && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>{formatCurrency(subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Markup ({markupPct ?? 0}%)</span>
+                    <span>{formatCurrency(markupAmount)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Tax ({taxPct ?? 0}%)</span>
+                    <span>{formatCurrency(taxAmount)}</span>
+                  </div>
+                  <Separator />
+                </>
+              )}
               <div className="flex justify-between font-bold text-lg">
                 <span>Total</span>
-                <span>{formatCurrency(total)}</span>
+                <span>{formatCurrency(displayTotal)}</span>
               </div>
+              {useManualTotal && (
+                <p className="text-xs text-muted-foreground">Using manual total price</p>
+              )}
             </CardContent>
           </Card>
         </div>
+
+        {/* Payment Schedule */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center justify-between">
+              Payment Schedule
+              <span className="text-xs font-normal text-muted-foreground">Optional</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {paymentStepsOverage && (
+              <div className="flex items-center gap-2 p-3 rounded-lg border border-destructive/40 bg-destructive/5 text-destructive text-sm">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                Payment steps total ({formatCurrency(paymentStepsTotal)}) exceeds estimate total ({formatCurrency(displayTotal)}).
+              </div>
+            )}
+
+            {paymentStepFields.length > 0 && (
+              <div className="hidden sm:grid grid-cols-[1fr_140px_1fr_32px] gap-x-2 px-1 pb-1">
+                <span className="text-xs font-medium text-muted-foreground">Step Name</span>
+                <span className="text-xs font-medium text-muted-foreground">Amount</span>
+                <span className="text-xs font-medium text-muted-foreground">Description (optional)</span>
+                <span />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {paymentStepFields.map((field, index) => (
+                <div key={field.id} className="grid grid-cols-1 sm:grid-cols-[1fr_140px_1fr_32px] gap-2 items-center">
+                  <FormField control={form.control} name={`payment_steps.${index}.name`} render={({ field }) => (
+                    <FormItem>
+                      <FormControl><Input placeholder="Deposit, Phase 1, Completion…" {...field} className="h-9" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name={`payment_steps.${index}.amount`} render={({ field }) => (
+                    <FormItem>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm pointer-events-none">$</span>
+                        <FormControl>
+                          <NumericInput className="h-9 pl-7" min="0" step="0.01" placeholder="0.00"
+                            value={field.value}
+                            onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                            onBlur={field.onBlur} name={field.name} />
+                        </FormControl>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name={`payment_steps.${index}.description`} render={({ field }) => (
+                    <FormItem>
+                      <FormControl><Input placeholder="Optional note…" {...field} className="h-9" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <Button type="button" variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive w-8 h-8 shrink-0"
+                    onClick={() => removeStep(index)}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {paymentStepFields.length > 0 && displayTotal > 0 && (
+              <div className="flex justify-between text-sm pt-1">
+                <span className="text-muted-foreground">
+                  Assigned: {formatCurrency(paymentStepsTotal)}
+                </span>
+                <span className={paymentStepsOverage ? "text-destructive font-medium" : "text-muted-foreground"}>
+                  Remaining: {formatCurrency(Math.max(0, displayTotal - paymentStepsTotal))}
+                </span>
+              </div>
+            )}
+
+            <Button type="button" variant="outline" size="sm" className="gap-1.5"
+              onClick={() => appendStep({ id: uuidv4(), name: "", amount: 0, description: "" })}>
+              <Plus className="w-3.5 h-3.5" />Add Payment Step
+            </Button>
+          </CardContent>
+        </Card>
 
         <div className="flex items-center gap-3">
           <Button type="submit" disabled={form.formState.isSubmitting || savingForSend}>
             {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {estimate ? "Save Changes" : "Create Estimate"}
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="gap-1.5"
+          <Button type="button" variant="outline" className="gap-1.5"
             disabled={form.formState.isSubmitting || savingForSend}
-            onClick={handleSaveAndSend}
-          >
-            {savingForSend
-              ? <Loader2 className="w-4 h-4 animate-spin" />
-              : <Send className="w-4 h-4" />}
+            onClick={handleSaveAndSend}>
+            {savingForSend ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             Save &amp; Send
           </Button>
           <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
         </div>
       </form>
 
-      {/* ── Send modal ──────────────────────────────────────────────────────── */}
+      {/* Send modal */}
       <Dialog open={sendOpen} onOpenChange={setSendOpen}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Send Estimate</DialogTitle>
-          </DialogHeader>
-
+          <DialogHeader><DialogTitle>Send Estimate</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-1">
             {followUpTemplates.length > 0 && (
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Template</label>
-                <Select
-                  value={selectedTplId}
-                  onValueChange={(id) => {
-                    setSelectedTplId(id)
-                    applyTemplate(id, buildTplData(form.getValues()))
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a template" />
-                  </SelectTrigger>
+                <Select value={selectedTplId} onValueChange={(id) => {
+                  setSelectedTplId(id)
+                  applyTemplate(id, buildTplData(form.getValues()))
+                }}>
+                  <SelectTrigger><SelectValue placeholder="Select a template" /></SelectTrigger>
                   <SelectContent>
-                    {followUpTemplates.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                    ))}
+                    {followUpTemplates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -593,48 +765,28 @@ export function EstimateForm({
 
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">To</label>
-              <Input
-                type="email"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                placeholder="customer@example.com"
-              />
+              <Input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="customer@example.com" />
             </div>
 
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Subject</label>
-              <Input
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                placeholder="Estimate for…"
-              />
+              <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Estimate for…" />
             </div>
 
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Message <span className="normal-case font-normal">(edit before sending)</span>
               </label>
-              <Textarea
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                className="min-h-[160px] text-sm"
-                placeholder="Hi, please find your estimate attached…"
-              />
+              <Textarea value={body} onChange={(e) => setBody(e.target.value)} className="min-h-[160px] text-sm"
+                placeholder="Hi, please find your estimate attached…" />
             </div>
 
-            <p className="text-xs text-muted-foreground">
-              The estimate PDF will be generated and attached automatically.
-            </p>
+            <p className="text-xs text-muted-foreground">The estimate PDF will be generated and attached automatically.</p>
           </div>
-
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setSendOpen(false)} disabled={sending}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setSendOpen(false)} disabled={sending}>Cancel</Button>
             <Button onClick={handleSend} disabled={sending || !to || !body}>
-              {sending
-                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Sending…</>
-                : <><Send className="w-4 h-4 mr-1.5" />Send Estimate</>}
+              {sending ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Sending…</> : <><Send className="w-4 h-4 mr-1.5" />Send Estimate</>}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -17,7 +17,9 @@ export function ApproveChangeOrderClient({ token, initialStatus, approvedAt }: P
     if (initialStatus === "rejected") return "declined"
     return "idle"
   })
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError]            = useState<string | null>(null)
+  const [consentChecked, setConsent] = useState(false)
+  const [reviewChecked, setReview]   = useState(false)
 
   async function submit(action: "approve" | "decline") {
     setState("loading")
@@ -82,11 +84,37 @@ export function ApproveChangeOrderClient({ token, initialStatus, approvedAt }: P
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
+      {/* Consent checkboxes */}
+      <div className="space-y-2.5 p-4 rounded-xl bg-gray-50 border border-gray-200">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={consentChecked}
+            onChange={(e) => setConsent(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-green-600"
+          />
+          <span className="text-xs text-gray-600 leading-relaxed">
+            I agree to use electronic records and electronic signatures for this transaction.
+          </span>
+        </label>
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={reviewChecked}
+            onChange={(e) => setReview(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-green-600"
+          />
+          <span className="text-xs text-gray-600 leading-relaxed">
+            I have reviewed the document and agree to the terms.
+          </span>
+        </label>
+      </div>
+
       <button
         onClick={() => submit("approve")}
-        disabled={state === "loading"}
-        className="flex items-center justify-center gap-2 w-full py-3.5 px-6 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-semibold rounded-xl text-sm transition-colors"
+        disabled={state === "loading" || !consentChecked || !reviewChecked}
+        className="flex items-center justify-center gap-2 w-full py-3.5 px-6 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm transition-colors"
       >
         {state === "loading" ? (
           <Loader2 className="w-4 h-4 animate-spin" />
@@ -97,8 +125,8 @@ export function ApproveChangeOrderClient({ token, initialStatus, approvedAt }: P
       </button>
       <button
         onClick={() => submit("decline")}
-        disabled={state === "loading"}
-        className="flex items-center justify-center gap-2 w-full py-3 px-6 bg-white hover:bg-gray-50 disabled:opacity-60 text-gray-600 font-medium rounded-xl text-sm border border-gray-200 transition-colors"
+        disabled={state === "loading" || !consentChecked}
+        className="flex items-center justify-center gap-2 w-full py-3 px-6 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed text-gray-600 font-medium rounded-xl text-sm border border-gray-200 transition-colors"
       >
         Decline
       </button>

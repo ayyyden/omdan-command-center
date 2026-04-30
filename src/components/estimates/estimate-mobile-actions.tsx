@@ -13,35 +13,16 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
-import {
-  Select, SelectContent, SelectGroup, SelectItem,
-  SelectLabel, SelectTrigger, SelectValue,
-} from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
-import {
-  MoreHorizontal, Trash2, Eye, Download, Send, Copy, Check,
-  MessageSquare, Loader2, CopyPlus,
-} from "lucide-react"
-import { logCommunication } from "@/lib/log-communication"
+import { MoreHorizontal, Trash2, Eye, Download, Send, Loader2, CopyPlus } from "lucide-react"
 import { logActivity } from "@/lib/activity"
-import type { TemplateData } from "@/components/templates/use-template-button"
-import type { LogContext } from "@/components/templates/quick-copy-button"
-
-const TYPE_LABELS: Record<string, string> = {
-  estimate_follow_up: "Estimate Follow-up",
-  job_scheduled:      "Job Scheduled",
-  job_reminder:       "Job Reminder",
-  payment_reminder:   "Payment Reminder",
-  review_request:     "Review Request",
-  custom:             "Custom",
-}
 
 interface TemplateShape {
   id: string; name: string; type: string; subject: string | null; body: string
 }
 
-function render(text: string, data: TemplateData): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (_, k) => (data as Record<string, string>)[k] ?? `{{${k}}}`)
+function render(text: string, data: Record<string, string>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, k) => data[k] ?? `{{${k}}}`)
 }
 
 interface Props {
@@ -53,30 +34,25 @@ interface Props {
   customerName: string
   templates: TemplateShape[]
   tplData: Record<string, string>
-  logContext: LogContext
+  logContext: { customerId?: string; estimateId?: string }
 }
 
 export function EstimateMobileActions({
   estimateId, estimateTitle, estimateStatus, userId,
-  customerEmail, customerName, templates, tplData, logContext,
+  customerEmail, customerName, templates, tplData,
 }: Props) {
   const router = useRouter()
   const { toast } = useToast()
 
-  const [deleteOpen, setDeleteOpen]   = useState(false)
-  const [deleting, setDeleting]       = useState(false)
-  const [generating, setGenerating]   = useState(false)
-  const [sendOpen, setSendOpen]       = useState(false)
-  const [sending, setSending]         = useState(false)
-  const [revising, setRevising]       = useState(false)
-  const [tplOpen, setTplOpen]         = useState(false)
-  const [selectedId, setSelectedId]   = useState("")
-  const [tplBody, setTplBody]         = useState("")
-  const [tplSubject, setTplSubject]   = useState("")
-  const [copied, setCopied]           = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting]     = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [sendOpen, setSendOpen]     = useState(false)
+  const [sending, setSending]       = useState(false)
+  const [revising, setRevising]     = useState(false)
 
   const followUpTpl = templates.find((t) => t.type === "estimate_follow_up")
-  const [to, setTo]           = useState(customerEmail ?? "")
+  const [to, setTo]               = useState(customerEmail ?? "")
   const [sendSubject, setSendSubject] = useState(
     followUpTpl?.subject ? render(followUpTpl.subject, tplData) : `Estimate for ${customerName}: ${estimateTitle}`
   )
@@ -92,23 +68,37 @@ export function EstimateMobileActions({
         return null
       }
       return ((await res.json()) as { url: string }).url
-    } catch { toast({ title: "PDF failed", description: "Network error", variant: "destructive" }); return null }
-    finally { setGenerating(false) }
+    } catch {
+      toast({ title: "PDF failed", description: "Network error", variant: "destructive" })
+      return null
+    } finally {
+      setGenerating(false)
+    }
   }
 
   async function handleDelete() {
     setDeleting(true)
     const { error } = await createClient().from("estimates").delete().eq("id", estimateId)
     setDeleting(false)
-    if (error) { toast({ title: "Error deleting estimate", description: error.message, variant: "destructive" }); setDeleteOpen(false); return }
-    toast({ title: "Estimate deleted" }); router.push("/estimates"); router.refresh()
+    if (error) {
+      toast({ title: "Error deleting estimate", description: error.message, variant: "destructive" })
+      setDeleteOpen(false)
+      return
+    }
+    toast({ title: "Estimate deleted" })
+    router.push("/estimates")
+    router.refresh()
   }
 
   async function handleRevise() {
     setRevising(true)
     const supabase = createClient()
     const { data: orig, error: fe } = await supabase.from("estimates").select("*").eq("id", estimateId).single()
-    if (fe || !orig) { toast({ title: "Could not load estimate", variant: "destructive" }); setRevising(false); return }
+    if (fe || !orig) {
+      toast({ title: "Could not load estimate", variant: "destructive" })
+      setRevising(false)
+      return
+    }
     const baseTitle = orig.title.replace(/ \(Revised\)$/, "")
     const { data: newEst, error: ie } = await supabase.from("estimates").insert({
       user_id: userId, customer_id: orig.customer_id, title: `${baseTitle} (Revised)`,
@@ -117,8 +107,15 @@ export function EstimateMobileActions({
       subtotal: orig.subtotal, markup_amount: orig.markup_amount, tax_amount: orig.tax_amount,
       total: orig.total, notes: orig.notes, status: "draft", revised_from_id: estimateId,
     }).select("id").single()
-    if (ie || !newEst) { toast({ title: "Failed to create revision", variant: "destructive" }); setRevising(false); return }
-    await logActivity(supabase, { userId, entityType: "estimate", entityId: newEst.id, action: "created", description: `Draft revision created from rejected estimate "${orig.title}"` })
+    if (ie || !newEst) {
+      toast({ title: "Failed to create revision", variant: "destructive" })
+      setRevising(false)
+      return
+    }
+    await logActivity(supabase, {
+      userId, entityType: "estimate", entityId: newEst.id, action: "created",
+      description: `Draft revision created from rejected estimate "${orig.title}"`,
+    })
     toast({ title: "Revision created", description: "Opening new draft…" })
     router.push(`/estimates/${newEst.id}/edit`)
   }
@@ -128,50 +125,23 @@ export function EstimateMobileActions({
     setSending(true)
     try {
       const res = await fetch(`/api/estimates/${estimateId}/send`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to, subject: sendSubject, body: sendBody }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); toast({ title: "Failed to send", description: (d as any).error ?? "Unknown error", variant: "destructive" }); return }
-      toast({ title: "Estimate sent", description: `Email sent to ${to}` }); setSendOpen(false)
-    } catch { toast({ title: "Failed to send", description: "Network error", variant: "destructive" })
-    } finally { setSending(false) }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        toast({ title: "Failed to send", description: (d as any).error ?? "Unknown error", variant: "destructive" })
+        return
+      }
+      toast({ title: "Estimate sent", description: `Email sent to ${to}` })
+      setSendOpen(false)
+    } catch {
+      toast({ title: "Failed to send", description: "Network error", variant: "destructive" })
+    } finally {
+      setSending(false)
+    }
   }
-
-  async function handleCopy(type: string) {
-    const tpl = templates.find((t) => t.type === type)
-    if (!tpl) { toast({ title: "No template found", variant: "destructive" }); return }
-    const b = render(tpl.body, tplData), s = tpl.subject ? render(tpl.subject, tplData) : null
-    try {
-      await navigator.clipboard.writeText(s ? `${s}\n\n${b}` : b)
-      toast({ title: `Copied: ${tpl.name}` })
-      logCommunication({ ...logContext, templateId: tpl.id, type: tpl.type, subject: s, body: b }).catch(() => {})
-    } catch { toast({ title: "Copy failed", variant: "destructive" }) }
-  }
-
-  function openTemplate() {
-    if (!templates.length) return
-    const first = templates.find((t) => t.type === "estimate_follow_up") ?? templates[0]
-    setSelectedId(first.id); setTplBody(render(first.body, tplData))
-    setTplSubject(first.subject ? render(first.subject, tplData) : ""); setTplOpen(true)
-  }
-
-  function pickTemplate(id: string) {
-    const t = templates.find((x) => x.id === id); if (!t) return
-    setSelectedId(id); setTplBody(render(t.body, tplData)); setTplSubject(t.subject ? render(t.subject, tplData) : "")
-  }
-
-  async function copyTemplate() {
-    const text = tplSubject ? `${tplSubject}\n\n${tplBody}` : tplBody
-    try {
-      await navigator.clipboard.writeText(text); setCopied(true); toast({ title: "Copied to clipboard" })
-      const tpl = templates.find((t) => t.id === selectedId)
-      logCommunication({ ...logContext, templateId: selectedId || undefined, type: tpl?.type ?? "custom", subject: tplSubject || null, body: tplBody }).catch(() => {})
-      setTimeout(() => setCopied(false), 2000)
-    } catch { toast({ title: "Copy failed", variant: "destructive" }) }
-  }
-
-  const preferred = templates.filter((t) => t.type === "estimate_follow_up")
-  const others    = templates.filter((t) => t.type !== "estimate_follow_up")
 
   return (
     <>
@@ -181,7 +151,7 @@ export function EstimateMobileActions({
             {(generating || revising) ? <Loader2 className="w-4 h-4 animate-spin" /> : <MoreHorizontal className="w-4 h-4" />}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuContent align="end" className="w-48">
           {estimateStatus === "rejected" && (
             <DropdownMenuItem onSelect={handleRevise} disabled={revising}>
               <CopyPlus className="w-4 h-4 mr-2" />Revise Estimate
@@ -199,15 +169,6 @@ export function EstimateMobileActions({
           }}>
             <Download className="w-4 h-4 mr-2" />Download PDF
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => handleCopy("estimate_follow_up")}>
-            <Copy className="w-4 h-4 mr-2" />Copy Follow-up
-          </DropdownMenuItem>
-          {templates.length > 0 && (
-            <DropdownMenuItem onSelect={openTemplate}>
-              <MessageSquare className="w-4 h-4 mr-2" />Use Template…
-            </DropdownMenuItem>
-          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setDeleteOpen(true)} className="text-destructive focus:text-destructive">
             <Trash2 className="w-4 h-4 mr-2" />Delete Estimate
@@ -255,48 +216,6 @@ export function EstimateMobileActions({
             <Button variant="outline" onClick={() => setSendOpen(false)} disabled={sending}>Cancel</Button>
             <Button onClick={handleSend} disabled={sending || !to || !sendBody}>
               {sending ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Sending…</> : <><Send className="w-4 h-4 mr-1.5" />Send Estimate</>}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Use Template dialog */}
-      <Dialog open={tplOpen} onOpenChange={setTplOpen}>
-        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Use Message Template</DialogTitle></DialogHeader>
-          <div className="space-y-4 pt-1">
-            <Select value={selectedId} onValueChange={pickTemplate}>
-              <SelectTrigger><SelectValue placeholder="Select a template…" /></SelectTrigger>
-              <SelectContent>
-                {preferred.length > 0 ? (
-                  <>
-                    <SelectGroup><SelectLabel>Suggested</SelectLabel>
-                      {preferred.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                    </SelectGroup>
-                    {others.length > 0 && (
-                      <SelectGroup><SelectLabel>Other Templates</SelectLabel>
-                        {others.map((t) => <SelectItem key={t.id} value={t.id}>{t.name} <span className="text-muted-foreground text-xs">· {TYPE_LABELS[t.type] ?? t.type}</span></SelectItem>)}
-                      </SelectGroup>
-                    )}
-                  </>
-                ) : templates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            {tplSubject && (
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Subject</p>
-                <p className="text-sm font-medium border rounded-md px-3 py-2 bg-muted/30">{tplSubject}</p>
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Message</p>
-              <Textarea value={tplBody} onChange={(e) => setTplBody(e.target.value)} className="min-h-[180px] text-sm" />
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setTplOpen(false)}>Close</Button>
-            <Button onClick={copyTemplate} disabled={!tplBody}>
-              {copied ? <><Check className="w-4 h-4 mr-1.5" />Copied!</> : <><Copy className="w-4 h-4 mr-1.5" />Copy to Clipboard</>}
             </Button>
           </DialogFooter>
         </DialogContent>

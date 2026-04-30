@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { DashboardShell } from "@/components/shared/dashboard-shell"
+import { isLegacyRole } from "@/lib/permissions"
 import type { TeamRole } from "@/lib/permissions"
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -23,8 +24,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
       .single(),
   ])
 
-  // Block access if not an active team member
-  if (!member || member.status !== "active") {
+  // Block access if not an active team member or if role is legacy
+  if (!member || member.status !== "active" || isLegacyRole(member.role)) {
     redirect("/access-denied")
   }
 

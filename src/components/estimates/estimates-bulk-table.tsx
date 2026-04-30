@@ -104,12 +104,9 @@ export function EstimatesBulkTable({ estimates, projectManagers, userId }: Props
                       </span>
                     </div>
                     {est.customer && (
-                      <Link
-                        href={`/customers/${est.customer_id}`}
-                        className="text-xs text-muted-foreground hover:text-primary mt-0.5 block"
-                      >
+                      <p className="text-xs text-muted-foreground mt-0.5">
                         {(est.customer as any).name}
-                      </Link>
+                      </p>
                     )}
                     <div className="flex items-center justify-between mt-2 gap-2">
                       <EstimateStatusUpdater
@@ -176,12 +173,8 @@ export function EstimatesBulkTable({ estimates, projectManagers, userId }: Props
                           {est.title}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-sm">
-                        {est.customer ? (
-                          <Link href={`/customers/${est.customer_id}`} className="hover:text-primary">
-                            {(est.customer as any).name}
-                          </Link>
-                        ) : "—"}
+                      <TableCell className="text-sm text-muted-foreground">
+                        {est.customer ? (est.customer as any).name : "—"}
                       </TableCell>
                       <TableCell className="text-sm font-semibold tabular-nums">
                         {formatCurrency(Number(est.total))}

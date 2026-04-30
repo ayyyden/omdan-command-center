@@ -125,12 +125,9 @@ export function JobsBulkTable({ jobs, userId }: Props) {
                     {job.description && (
                       <p className="text-xs text-muted-foreground truncate mt-0.5">{job.description}</p>
                     )}
-                    <Link
-                      href={`/customers/${job.customer_id}`}
-                      className="text-xs text-muted-foreground hover:text-primary mt-0.5 block"
-                    >
+                    <p className="text-xs text-muted-foreground mt-0.5">
                       {(job.customer as any)?.name ?? "—"}
-                    </Link>
+                    </p>
                     <div className="flex items-center justify-between mt-2">
                       <div>
                         {job.is_archived ? (
@@ -200,10 +197,8 @@ export function JobsBulkTable({ jobs, userId }: Props) {
                           <p className="text-xs text-muted-foreground truncate max-w-xs mt-0.5">{job.description}</p>
                         )}
                       </TableCell>
-                      <TableCell className="text-sm">
-                        <Link href={`/customers/${job.customer_id}`} className="hover:text-primary">
-                          {(job.customer as any)?.name ?? "—"}
-                        </Link>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {(job.customer as any)?.name ?? "—"}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">

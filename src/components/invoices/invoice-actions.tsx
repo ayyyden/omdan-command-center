@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -12,14 +12,23 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NumericInput } from "@/components/ui/numeric-input"
 import { Textarea } from "@/components/ui/textarea"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Pencil, Send, Trash2, Undo2 } from "lucide-react"
+import { Loader2, Mail, Pencil, Send, Trash2, Undo2 } from "lucide-react"
 import type { InvoiceStatus, InvoiceWithBalance } from "@/types"
 
+interface InvoiceTypeOption { value: string; label: string; is_default: boolean }
+
+const DEFAULT_TYPES: InvoiceTypeOption[] = [
+  { value: "deposit",  label: "Deposit",  is_default: true },
+  { value: "progress", label: "Progress", is_default: true },
+  { value: "final",    label: "Final",    is_default: true },
+]
+
 const editSchema = z.object({
-  type:     z.enum(["deposit", "progress", "final"]),
+  type:     z.string().min(1, "Select a type"),
   amount:   z.number().min(0.01, "Amount must be > 0"),
   due_date: z.string().optional(),
   notes:    z.string().optional(),
@@ -28,15 +37,52 @@ type EditValues = z.infer<typeof editSchema>
 
 interface InvoiceActionsProps {
   invoice: InvoiceWithBalance
+  customerEmail: string | null
+  customerName: string
+  jobTitle: string
+  companyName: string | null
 }
 
-export function InvoiceActions({ invoice }: InvoiceActionsProps) {
+const BUILT_IN_LABELS: Record<string, string> = {
+  deposit:  "Deposit",
+  progress: "Progress",
+  final:    "Final",
+}
+
+function resolveTypeLabel(value: string, types: InvoiceTypeOption[]): string {
+  return types.find((t) => t.value === value)?.label
+    ?? BUILT_IN_LABELS[value]
+    ?? value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+export function InvoiceActions({
+  invoice,
+  customerEmail,
+  customerName,
+  jobTitle,
+  companyName,
+}: InvoiceActionsProps) {
   const [editOpen, setEditOpen]       = useState(false)
   const [deleteOpen, setDeleteOpen]   = useState(false)
+  const [sendOpen, setSendOpen]       = useState(false)
   const [statusLoading, setStatusLoading] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const [sending, setSending]         = useState(false)
+  const [invoiceTypes, setInvoiceTypes] = useState<InvoiceTypeOption[]>(DEFAULT_TYPES)
+  const [sendTo, setSendTo]           = useState(customerEmail ?? "")
+  const [sendSubject, setSendSubject] = useState(
+    `${BUILT_IN_LABELS[invoice.type] ?? "Invoice"} from ${companyName ?? "Us"}${invoice.invoice_number ? ` — ${invoice.invoice_number}` : ""}`
+  )
+  const [sendBody, setSendBody]       = useState("")
   const router = useRouter()
   const { toast } = useToast()
+
+  useEffect(() => {
+    fetch("/api/invoice-types")
+      .then((r) => r.json())
+      .then((data: InvoiceTypeOption[]) => Array.isArray(data) && setInvoiceTypes(data))
+      .catch(() => {})
+  }, [])
 
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema),
@@ -60,7 +106,17 @@ export function InvoiceActions({ invoice }: InvoiceActionsProps) {
     setEditOpen(open)
   }
 
-  // Draft ↔ Sent toggle (only for user-controlled statuses)
+  function handleSendOpen(open: boolean) {
+    if (open) {
+      setSendTo(customerEmail ?? "")
+      setSendSubject(
+        `${resolveTypeLabel(invoice.type, invoiceTypes) ?? "Invoice"} from ${companyName ?? "Us"}${invoice.invoice_number ? ` — ${invoice.invoice_number}` : ""}`
+      )
+      setSendBody("")
+    }
+    setSendOpen(open)
+  }
+
   async function handleStatusToggle() {
     setStatusLoading(true)
     const supabase = createClient()
@@ -77,7 +133,6 @@ export function InvoiceActions({ invoice }: InvoiceActionsProps) {
   async function handleEdit(values: EditValues) {
     const supabase = createClient()
 
-    // Recompute status from payments so it stays accurate after amount change
     const { data: invPayments } = await supabase
       .from("payments").select("amount").eq("invoice_id", invoice.id)
 
@@ -89,7 +144,6 @@ export function InvoiceActions({ invoice }: InvoiceActionsProps) {
     if (totalPaid > 0) {
       newStatus = totalPaid >= values.amount ? "paid" : "partial"
     }
-    // If no payments, preserve the current draft/sent status
 
     const { error } = await supabase
       .from("invoices")
@@ -115,7 +169,6 @@ export function InvoiceActions({ invoice }: InvoiceActionsProps) {
   async function handleDelete() {
     setDeleteLoading(true)
     const supabase = createClient()
-    // ON DELETE SET NULL in the FK handles payments.invoice_id automatically
     const { error } = await supabase.from("invoices").delete().eq("id", invoice.id)
     setDeleteLoading(false)
     if (error) {
@@ -128,11 +181,45 @@ export function InvoiceActions({ invoice }: InvoiceActionsProps) {
     router.refresh()
   }
 
+  async function handleSend() {
+    if (!sendTo) { toast({ title: "Recipient email required", variant: "destructive" }); return }
+    setSending(true)
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: sendTo, subject: sendSubject, body: sendBody }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        toast({ title: "Send failed", description: (d as any).error ?? "Unknown error", variant: "destructive" })
+        return
+      }
+      toast({ title: "Invoice sent", description: `Email sent to ${sendTo}` })
+      setSendOpen(false)
+      router.refresh()
+    } catch {
+      toast({ title: "Send failed", description: "Network error", variant: "destructive" })
+    } finally {
+      setSending(false)
+    }
+  }
+
   const canToggle = invoice.status === "draft" || invoice.status === "sent"
 
   return (
     <>
       <div className="flex items-center gap-0.5">
+        {(invoice.status === "draft" || invoice.status === "sent") && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs px-2 gap-1"
+            onClick={() => handleSendOpen(true)}
+          >
+            <Mail className="w-3 h-3" />Email
+          </Button>
+        )}
         {canToggle && (
           <Button
             variant="outline"
@@ -168,6 +255,54 @@ export function InvoiceActions({ invoice }: InvoiceActionsProps) {
         </Button>
       </div>
 
+      {/* Send dialog */}
+      <Dialog open={sendOpen} onOpenChange={handleSendOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Email Invoice{invoice.invoice_number ? ` — ${invoice.invoice_number}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            {invoice.invoice_number && (
+              <p className="text-xs text-muted-foreground">
+                Invoice # <span className="font-semibold text-foreground">{invoice.invoice_number}</span>
+                {" · "}{resolveTypeLabel(invoice.type, invoiceTypes)} · {formatCurrency(invoice.amount)}
+              </p>
+            )}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">To</label>
+              <Input type="email" value={sendTo} onChange={(e) => setSendTo(e.target.value)} placeholder="customer@example.com" />
+              {!customerEmail && <p className="text-xs text-warning">No email on file — enter one above.</p>}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Subject</label>
+              <Input value={sendSubject} onChange={(e) => setSendSubject(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Message (optional)</label>
+              <Textarea
+                value={sendBody}
+                onChange={(e) => setSendBody(e.target.value)}
+                placeholder="Add a personal note, or leave blank for default invoice message…"
+                className="min-h-[100px] text-sm"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Invoice details, amount, and accepted payment methods will be included automatically.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setSendOpen(false)} disabled={sending}>Cancel</Button>
+            <Button onClick={handleSend} disabled={sending || !sendTo}>
+              {sending
+                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Sending…</>
+                : <><Mail className="w-4 h-4 mr-1.5" />Send Invoice</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit dialog */}
       <Dialog open={editOpen} onOpenChange={handleEditOpen}>
         <DialogContent className="sm:max-w-md">
@@ -182,9 +317,9 @@ export function InvoiceActions({ invoice }: InvoiceActionsProps) {
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                     <SelectContent>
-                      <SelectItem value="deposit">Deposit</SelectItem>
-                      <SelectItem value="progress">Progress</SelectItem>
-                      <SelectItem value="final">Final</SelectItem>
+                      {invoiceTypes.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -211,7 +346,13 @@ export function InvoiceActions({ invoice }: InvoiceActionsProps) {
               <FormField control={form.control} name="due_date" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Due Date (optional)</FormLabel>
-                  <FormControl><Input type="date" {...field} /></FormControl>
+                  <FormControl>
+                    <DatePicker
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      placeholder="Select a due date"
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
-import nodemailer from "nodemailer"
 import { createServiceClient } from "@/lib/supabase/service"
+import { createTransporter, buildHtmlEmail, smtpConfigured } from "@/lib/email"
+import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
 
 const NOTIFY_EMAIL = "omdandevelopment@gmail.com"
 
@@ -45,15 +46,23 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Could not update estimate" }, { status: 500 })
   }
 
-  // Send notification email — best effort, does not affect response
-  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-    sendNotificationEmail({ supabase, estimateId: estimate.id, action, now, req }).catch(() => {})
+  if (smtpConfigured()) {
+    sendEmails({ supabase, estimateId: estimate.id, action, now, req }).catch(() => {})
   }
+
+  void logAudit({
+    documentType: "estimate",
+    documentId:   estimate.id,
+    tokenHash:    hashToken(token),
+    action:       action === "approve" ? "approved" : "declined",
+    ipAddress:    getIp(req.headers),
+    userAgent:    getUa(req.headers),
+  })
 
   return Response.json({ success: true })
 }
 
-async function sendNotificationEmail({
+async function sendEmails({
   supabase,
   estimateId,
   action,
@@ -68,7 +77,7 @@ async function sendNotificationEmail({
 }) {
   const { data: est } = await supabase
     .from("estimates")
-    .select("id, title, total, user_id, customer:customers(name)")
+    .select("id, title, total, user_id, customer:customers(name, email)")
     .eq("id", estimateId)
     .single()
 
@@ -76,71 +85,98 @@ async function sendNotificationEmail({
 
   const { data: company } = await supabase
     .from("company_settings")
-    .select("company_name")
+    .select("company_name, email, phone")
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle()
 
   const customerName = (est.customer as any)?.name ?? "Customer"
+  const customerEmail = (est.customer as any)?.email as string | null
+  const companyName = company?.company_name ?? "Omdan"
   const total = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
     Number(est.total),
   )
   const actionDate = new Date(now).toLocaleString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
+    month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
   })
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
   const estimateUrl = `${appUrl}/estimates/${estimateId}`
-  const companyName = company?.company_name ?? "Omdan"
-
   const isApprove = action === "approve"
-  const subject = isApprove
+
+  const transporter = createTransporter()
+
+  // ── Notify business ──────────────────────────────────────────────────────────
+  const bizSubject = isApprove
     ? `Estimate Approved — ${customerName}`
     : `Estimate Declined — ${customerName}`
 
-  const body = isApprove
-    ? [
-        `An estimate has been approved online.`,
-        ``,
-        `Customer:  ${customerName}`,
-        `Estimate:  ${est.title}`,
-        `Total:     ${total}`,
-        `Approved:  ${actionDate}`,
-        ``,
-        `View estimate in CRM:`,
-        estimateUrl,
-        ``,
-        `— ${companyName}`,
-      ].join("\n")
-    : [
-        `An estimate has been declined online.`,
-        ``,
-        `Customer:  ${customerName}`,
-        `Estimate:  ${est.title}`,
-        `Total:     ${total}`,
-        `Declined:  ${actionDate}`,
-        ``,
-        `View estimate in CRM:`,
-        estimateUrl,
-        ``,
-        `— ${companyName}`,
-      ].join("\n")
-
-  const transporter = nodemailer.createTransport({
-    host:   process.env.SMTP_HOST   ?? "smtp.gmail.com",
-    port:   Number(process.env.SMTP_PORT ?? 587),
-    secure: false,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  const bizHtml = buildHtmlEmail({
+    title: isApprove ? "Estimate Approved" : "Estimate Declined",
+    preheader: `${customerName} has ${isApprove ? "approved" : "declined"} an estimate.`,
+    companyName,
+    bodyLines: [
+      `<strong>${customerName}</strong> has ${isApprove ? "approved" : "declined"} an estimate online.`,
+      "",
+      `<strong>Estimate:</strong> ${est.title}`,
+      `<strong>Total:</strong> ${total}`,
+      `<strong>${isApprove ? "Approved" : "Declined"}:</strong> ${actionDate}`,
+    ],
+    ctaLabel: "View Estimate",
+    ctaUrl: estimateUrl,
   })
 
   await transporter.sendMail({
     from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
-    to:      NOTIFY_EMAIL,
-    subject,
-    text:    body,
+    to:      company?.email ?? NOTIFY_EMAIL,
+    subject: bizSubject,
+    text:    `${customerName} has ${isApprove ? "approved" : "declined"} estimate "${est.title}" (${total}).`,
+    html:    bizHtml,
   })
+
+  // ── Confirm to customer ──────────────────────────────────────────────────────
+  if (customerEmail) {
+    const custSubject = isApprove
+      ? `Your estimate has been confirmed — ${est.title}`
+      : `Estimate declined — ${est.title}`
+
+    const custHtml = buildHtmlEmail({
+      title: isApprove ? "Estimate Confirmed" : "Estimate Declined",
+      preheader: isApprove
+        ? "Thank you for approving your estimate."
+        : "We received your response.",
+      companyName,
+      bodyLines: isApprove
+        ? [
+            `Hi ${customerName},`,
+            "",
+            `Thank you for approving your estimate. We'll be in touch shortly to schedule your project.`,
+            "",
+            `<strong>Estimate:</strong> ${est.title}`,
+            `<strong>Total:</strong> ${total}`,
+            `<strong>Approved:</strong> ${actionDate}`,
+            "",
+            company?.phone ? `Questions? Call us at ${company.phone}.` : "",
+          ].filter((l) => l !== undefined)
+        : [
+            `Hi ${customerName},`,
+            "",
+            `We received your response declining estimate "${est.title}".`,
+            "",
+            `If you have any questions or would like to discuss changes, please don't hesitate to reach out.`,
+            "",
+            company?.phone ? `Call us at ${company.phone}.` : "",
+          ].filter((l) => l !== undefined),
+    })
+
+    await transporter.sendMail({
+      from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
+      to:      customerEmail,
+      subject: custSubject,
+      text:    isApprove
+        ? `Hi ${customerName}, thank you for approving your estimate "${est.title}" (${total}).`
+        : `Hi ${customerName}, we received your response declining estimate "${est.title}".`,
+      html:    custHtml,
+    })
+  }
 }

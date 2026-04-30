@@ -12,10 +12,9 @@ import { formatCurrency, formatDate } from "@/lib/utils"
 import { Pencil, Clock, CheckCircle2, XCircle, Briefcase } from "lucide-react"
 import Link from "next/link"
 import type { EstimateLineItem, ProjectManager } from "@/types"
-import { UseTemplateButton } from "@/components/templates/use-template-button"
-import { QuickCopyButton } from "@/components/templates/quick-copy-button"
 import { CommunicationLogSection } from "@/components/shared/communication-log-section"
 import { FileSection } from "@/components/shared/file-section"
+import { AuditTrailSection } from "@/components/shared/audit-trail-section"
 import { PdfActions } from "@/components/estimates/pdf-actions"
 import { EstimateMobileActions } from "@/components/estimates/estimate-mobile-actions"
 
@@ -144,9 +143,6 @@ export default async function EstimateDetailPage({ params }: PageProps) {
                 templates={tpls}
                 tplData={tplData}
               />
-              <QuickCopyButton label="Copy Follow-up"         templateType="estimate_follow_up" templates={tpls} data={tplData} logContext={lctx} />
-              <QuickCopyButton label="Copy Estimate Sent Msg" templateType="estimate_follow_up" templates={tpls} data={tplData} logContext={lctx} />
-              <UseTemplateButton templates={tpls} preferredType="estimate_follow_up" data={tplData} logContext={lctx} />
             </div>
           </>
         }
@@ -298,6 +294,10 @@ export default async function EstimateDetailPage({ params }: PageProps) {
         <FileSection entityType="estimates" entityId={estimate.id} userId={userId} />
 
         <CommunicationLogSection logs={commLogs ?? []} />
+
+        {["owner", "admin"].includes(role) && (
+          <AuditTrailSection documentType="estimate" documentId={estimate.id} />
+        )}
       </div>
     </div>
   )

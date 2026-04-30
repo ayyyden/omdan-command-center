@@ -26,7 +26,7 @@ export function InviteMemberDialog({ currentUserRole }: Props) {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState("")
   const [name, setName] = useState("")
-  const [role, setRole] = useState<TeamRole>("office")
+  const [role, setRole] = useState<TeamRole>("project_manager")
   const [loading, setLoading] = useState(false)
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
 
@@ -52,7 +52,7 @@ export function InviteMemberDialog({ currentUserRole }: Props) {
         toast({ title: "Invite created", description: data.warning })
       } else {
         toast({ title: "Invite sent", description: `${name} will receive an email at ${email}` })
-        setEmail(""); setName(""); setRole("office")
+        setEmail(""); setName(""); setRole("project_manager")
         setOpen(false)
         router.refresh()
       }

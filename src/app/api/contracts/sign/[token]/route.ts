@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server"
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib"
-import nodemailer from "nodemailer"
 import { createServiceClient } from "@/lib/supabase/service"
+import { createTransporter, buildHtmlEmail } from "@/lib/email"
+import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
 
 type FieldType = "text" | "multiline" | "date" | "signature" | "initials" | "checkbox" | "yes_no" | "rich_text"
 type VAlign = "top" | "center" | "bottom"
@@ -72,7 +73,7 @@ async function handleSign(
     .from("sent_contracts")
     .select(`
       id, user_id, customer_id, job_id,
-      signing_token, signed_at,
+      signing_token, signed_at, recipient_email,
       contract_template:contract_templates (
         id, name, storage_path, bucket, file_name
       )
@@ -311,6 +312,22 @@ async function handleSign(
     .update({ status: "signed", signed_at: signedAt, signer_name: signerName, signed_pdf_path: signedPath })
     .eq("id", sent.id)
 
+  void logAudit({
+    documentType:  "contract",
+    documentId:    sent.id,
+    tokenHash:     hashToken(token),
+    action:        "signed",
+    customerEmail: sent.recipient_email ?? null,
+    ipAddress:     getIp(req.headers),
+    userAgent:     getUa(req.headers),
+    metadata: {
+      signer_name:    signerName,
+      contract_name:  template.name,
+      field_count:    fieldDefs?.length ?? 0,
+      signed_pdf_path: signedPath,
+    },
+  })
+
   // ── Attach files ─────────────────────────────────────────────────────────────
 
   await supabase.from("file_attachments").upsert(
@@ -329,14 +346,20 @@ async function handleSign(
     )
   }
 
-  // ── Notify business ──────────────────────────────────────────────────────────
+  // ── Notify business + confirm to customer ────────────────────────────────────
 
   const { data: company } = await supabase
     .from("company_settings")
-    .select("company_name, email")
+    .select("company_name, email, phone")
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle()
+
+  const { data: customer } = await supabase
+    .from("customers")
+    .select("name, email")
+    .eq("id", sent.customer_id)
+    .single()
 
   await supabase.from("communication_logs").insert({
     user_id: sent.user_id, customer_id: sent.customer_id, job_id: sent.job_id ?? null,
@@ -344,21 +367,58 @@ async function handleSign(
     body: `${signerName} signed "${template.name}" on ${dateStr}.`, channel: "email",
   })
 
-  if (company?.email && process.env.SMTP_USER && process.env.SMTP_PASS) {
+  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    const companyName = company?.company_name ?? "Omdan"
     try {
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST ?? "smtp.gmail.com",
-        port: Number(process.env.SMTP_PORT ?? 587),
-        secure: false,
-        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      })
-      await transporter.sendMail({
-        from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
-        to:      company.email,
-        subject: `✅ Contract signed: ${template.name}`,
-        text:    `${signerName} has signed the contract "${template.name}" on ${dateStr}.\n\nThe signed PDF is attached.`,
-        attachments: [{ filename: signedFileName, content: signedBuffer, contentType: "application/pdf" }],
-      })
+      const transporter = createTransporter()
+
+      if (company?.email) {
+        const bizHtml = buildHtmlEmail({
+          title: "Contract Signed",
+          preheader: `${signerName} has signed "${template.name}".`,
+          companyName,
+          bodyLines: [
+            `<strong>${signerName}</strong> has signed the contract.`,
+            "",
+            `<strong>Contract:</strong> ${template.name}`,
+            `<strong>Signed:</strong> ${dateStr}`,
+          ],
+        })
+        await transporter.sendMail({
+          from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
+          to:      company.email,
+          subject: `Contract Signed: ${template.name}`,
+          text:    `${signerName} has signed the contract "${template.name}" on ${dateStr}.`,
+          html:    bizHtml,
+          attachments: [{ filename: signedFileName, content: signedBuffer, contentType: "application/pdf" }],
+        })
+      }
+
+      if (customer?.email) {
+        const custHtml = buildHtmlEmail({
+          title: "Your Contract Has Been Signed",
+          preheader: `Thank you for signing "${template.name}".`,
+          companyName,
+          bodyLines: [
+            `Hi ${customer.name ?? signerName},`,
+            "",
+            `Thank you for signing the contract. We're all set to move forward.`,
+            "",
+            `<strong>Contract:</strong> ${template.name}`,
+            `<strong>Signed:</strong> ${dateStr}`,
+            "",
+            company?.phone ? `Questions? Call us at ${company.phone}.` : "",
+          ].filter((l) => l !== undefined) as string[],
+        })
+        await transporter.sendMail({
+          from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
+          to:      customer.email,
+          subject: `Contract signed — ${template.name}`,
+          text:    `Hi ${customer.name ?? signerName}, thank you for signing the contract "${template.name}". The signed copy is attached.`,
+          html:    custHtml,
+          attachments: [{ filename: signedFileName, content: signedBuffer, contentType: "application/pdf" }],
+        })
+      }
     } catch { /* non-fatal */ }
   }
 

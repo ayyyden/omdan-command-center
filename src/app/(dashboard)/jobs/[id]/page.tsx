@@ -15,6 +15,7 @@ import type { JobStatus, ExpenseCategory, InvoiceWithBalance } from "@/types"
 import { UseTemplateButton } from "@/components/templates/use-template-button"
 import { QuickCopyButton } from "@/components/templates/quick-copy-button"
 import { CommunicationLogSection } from "@/components/shared/communication-log-section"
+import { JobContractsSection } from "@/components/jobs/job-contracts-section"
 import { FileSection } from "@/components/shared/file-section"
 import { JobStatusUpdater } from "@/components/jobs/job-status-updater"
 import { JobActions } from "@/components/jobs/job-actions"
@@ -119,15 +120,17 @@ export default async function JobDetailPage({ params }: PageProps) {
       .single(),
     isAdmin ? supabase.from("expenses").select("*").eq("job_id", id).order("date", { ascending: false }) : empty,
     isAdmin ? supabase.from("payments").select("*, invoice:invoices(type)").eq("job_id", id).order("date", { ascending: false }) : empty,
-    isAdmin ? supabase.from("invoices").select("*, payments(amount)").eq("job_id", id).order("created_at") : empty,
+    isAdmin ? supabase.from("invoices").select("*, payments(amount), invoice_number, payment_methods").eq("job_id", id).order("created_at") : empty,
     activityQuery,
     supabase.from("company_settings").select("default_invoice_notes, company_name, phone, email, google_review_link").order("updated_at", { ascending: false }).limit(1).maybeSingle(),
   ])
 
-  const [{ data: jobTemplates }, { data: commLogs }, { data: changeOrders }] = await Promise.all([
+  const [{ data: jobTemplates }, { data: commLogs }, { data: changeOrders }, { data: contractTemplates }, { data: sentContracts }] = await Promise.all([
     supabase.from("message_templates").select("id, name, type, subject, body").eq("is_active", true).order("name"),
     supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("change_orders").select("id, title, description, amount, status, approved_at, rejected_at, sent_at, created_at").eq("job_id", id).order("created_at", { ascending: false }),
+    supabase.from("contract_templates").select("id, name").eq("is_active", true).order("name"),
+    supabase.from("sent_contracts").select("id, sent_at, signed_at, signer_name, status, recipient_email, contract_template:contract_templates(name)").eq("job_id", id).order("sent_at", { ascending: false }),
   ])
 
   if (!job) notFound()
@@ -152,6 +155,8 @@ export default async function JobDetailPage({ params }: PageProps) {
       notes:            inv.notes,
       amount_paid:      paid,
       amount_remaining: Math.max(0, Number(inv.amount) - paid),
+      invoice_number:   inv.invoice_number ?? null,
+      payment_methods:  inv.payment_methods ?? [],
     }
   })
 
@@ -385,6 +390,7 @@ export default async function JobDetailPage({ params }: PageProps) {
             data={jobTplData}
             logContext={lctx}
             googleReviewLink={cs?.google_review_link ?? null}
+            customerEmail={(job.customer as any)?.email ?? null}
           />
         )}
 
@@ -452,6 +458,29 @@ export default async function JobDetailPage({ params }: PageProps) {
           </CardContent>
         </Card>
 
+        {/* Contracts — admin only */}
+        {isAdmin && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FilePlus className="w-4 h-4" />
+                Contracts ({sentContracts?.length ?? 0})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <JobContractsSection
+                contracts={(contractTemplates ?? []) as { id: string; name: string }[]}
+                sentContracts={(sentContracts ?? []) as any[]}
+                customerId={job.customer_id}
+                jobId={job.id}
+                customerEmail={(job.customer as any)?.email ?? null}
+                customerName={(job.customer as any)?.name ?? "Customer"}
+                companyName={cs?.company_name ?? null}
+              />
+            </CardContent>
+          </Card>
+        )}
+
         {/* Invoices — admin only */}
         {isAdmin && (
           <Card>
@@ -509,7 +538,13 @@ export default async function JobDetailPage({ params }: PageProps) {
 
                       {/* Actions */}
                       <div className="flex items-center gap-1 ml-auto shrink-0">
-                        <InvoiceActions invoice={inv} />
+                        <InvoiceActions
+                          invoice={inv}
+                          customerEmail={(job.customer as any)?.email ?? null}
+                          customerName={(job.customer as any)?.name ?? ""}
+                          jobTitle={job.title}
+                          companyName={cs?.company_name ?? null}
+                        />
                         {inv.status !== "paid" && (
                           <AddPaymentDialog
                             jobId={job.id}

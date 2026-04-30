@@ -19,7 +19,7 @@ export default async function CalculatorPage() {
 
   let jobsQ = supabase
     .from("jobs")
-    .select("id, title, manual_total, estimate:estimates(total), expenses:expenses(amount, category)")
+    .select("id, title, manual_total, estimate:estimates(total), expenses:expenses(amount, category), change_orders(id, title, amount, status)")
     .neq("status", "cancelled")
     .eq("is_archived", false)
     .order("title")
@@ -35,7 +35,16 @@ export default async function CalculatorPage() {
     const estTotal = Number(est?.total ?? 0)
     const totalSell = j.manual_total != null ? Number(j.manual_total) : estTotal
 
-    const result: JobOption = { id: j.id, title: j.title, totalSell }
+    const approvedCOs = ((j.change_orders ?? []) as any[])
+      .filter((co) => co.status === "approved")
+      .map((co) => ({ id: co.id, title: co.title, amount: Number(co.amount) }))
+
+    const result: JobOption = {
+      id: j.id,
+      title: j.title,
+      totalSell,
+      ...(approvedCOs.length > 0 ? { approvedChangeOrders: approvedCOs } : {}),
+    }
 
     if (isAdmin) {
       const exps: { amount: string | number; category: string }[] = j.expenses ?? []

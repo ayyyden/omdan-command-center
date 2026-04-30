@@ -14,7 +14,7 @@ import { useState, useEffect } from "react"
 import type { TeamRole } from "@/lib/permissions"
 import { RoleBadge } from "@/components/team/role-badge"
 
-const ALL_ROLES: TeamRole[] = ["owner", "admin", "project_manager", "office", "field_worker", "viewer"]
+const ALL_ROLES: TeamRole[] = ["owner", "admin", "project_manager"]
 
 const navItems = [
   { href: "/dashboard",  label: "Dashboard",  icon: LayoutDashboard, roles: ALL_ROLES },

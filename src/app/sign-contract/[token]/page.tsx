@@ -1,13 +1,18 @@
 import { notFound } from "next/navigation"
+import { headers } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/service"
+import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
 import { SignClient } from "./sign-client"
 
 export default async function SignContractPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>
+  searchParams: Promise<{ bundle?: string }>
 }) {
   const { token } = await params
+  const { bundle: bundleToken } = await searchParams
   const supabase = createServiceClient()
 
   const { data: sent } = await supabase
@@ -27,6 +32,18 @@ export default async function SignContractPage({
     .single()
 
   if (!sent) notFound()
+
+  const hdrs = await headers()
+  void logAudit({
+    documentType:  "contract",
+    documentId:    sent.id,
+    tokenHash:     hashToken(token),
+    action:        "viewed",
+    customerEmail: sent.recipient_email ?? null,
+    ipAddress:     getIp(hdrs),
+    userAgent:     getUa(hdrs),
+    metadata:      sent.signed_at ? { alreadySigned: true } : undefined,
+  })
 
   if (sent.signed_at) {
     return (
@@ -75,6 +92,7 @@ export default async function SignContractPage({
       contractName={template.name}
       pdfUrl={pdfUrl}
       fields={(fields ?? []) as any}
+      bundleToken={bundleToken}
     />
   )
 }

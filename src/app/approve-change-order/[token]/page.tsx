@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation"
+import { headers } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/service"
+import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
 import { ApproveChangeOrderClient } from "./approve-client"
 
 function fmt(n: number) {
@@ -26,6 +28,22 @@ export default async function ApproveChangeOrderPage({
     .single()
 
   if (!co) notFound()
+
+  const hdrs = await headers()
+  const coCustomer = co.customer as unknown as { name: string; email: string | null } | null
+  void logAudit({
+    documentType:  "change_order",
+    documentId:    co.id,
+    tokenHash:     hashToken(token),
+    action:        "viewed",
+    customerName:  coCustomer?.name  ?? null,
+    customerEmail: coCustomer?.email ?? null,
+    ipAddress:     getIp(hdrs),
+    userAgent:     getUa(hdrs),
+    metadata:      (co.status === "approved" || co.status === "rejected")
+                     ? { alreadyResponded: true, status: co.status }
+                     : undefined,
+  })
 
   const { data: company } = await supabase
     .from("company_settings")

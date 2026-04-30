@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ExternalLink, RefreshCw, FileText, User, Briefcase, Trash2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { AuditDialog } from "@/components/contracts/audit-dialog"
 
 export interface SentContract {
   id: string
@@ -318,6 +319,7 @@ export function SentContractsTable({ sent, appUrl }: Props) {
                       Job
                     </Button>
                   )}
+                  <AuditDialog documentType="contract" documentId={s.id} />
                 </div>
               </div>
             ))}
@@ -463,6 +465,7 @@ export function SentContractsTable({ sent, appUrl }: Props) {
                             <Briefcase className="w-3.5 h-3.5" />
                           </Button>
                         )}
+                        <AuditDialog documentType="contract" documentId={s.id} />
                       </div>
                     </td>
                   </tr>

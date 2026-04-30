@@ -20,7 +20,7 @@ import {
 } from "lucide-react"
 import { RoleBadge } from "@/components/team/role-badge"
 import { InviteMemberDialog } from "@/components/team/invite-member-dialog"
-import { canManageRole, ROLES, ROLE_LABELS } from "@/lib/permissions"
+import { canManageRole, ACTIVE_ROLES, ROLE_LABELS } from "@/lib/permissions"
 import type { TeamRole } from "@/lib/permissions"
 import Link from "next/link"
 
@@ -55,7 +55,7 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
   const { toast } = useToast()
   const [busy, setBusy] = useState<string | null>(null)
   const [changeRoleTarget, setChangeRoleTarget] = useState<TeamMember | null>(null)
-  const [newRole, setNewRole] = useState<TeamRole>("viewer")
+  const [newRole, setNewRole] = useState<TeamRole>("project_manager")
   const [newPmId, setNewPmId] = useState<string>("none")
   const [deleteTarget, setDeleteTarget] = useState<TeamMember | null>(null)
 
@@ -99,7 +99,7 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
   async function handleRoleChange() {
     if (!changeRoleTarget) return
     const id = changeRoleTarget.id
-    const roleNeedsScope = newRole === "project_manager" || newRole === "field_worker"
+    const roleNeedsScope = newRole === "project_manager"
     const pmId = roleNeedsScope && newPmId !== "none" ? newPmId : null
     setChangeRoleTarget(null)
     await withBusy(id, async () => {
@@ -148,7 +148,7 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
     })
   }
 
-  const assignableRoles = ROLES.filter((r) => canManageRole(currentUserRole, r))
+  const assignableRoles = ACTIVE_ROLES.filter((r) => canManageRole(currentUserRole, r))
 
   return (
     <>
@@ -188,7 +188,7 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
                         <span className="text-sm font-semibold group-hover:underline">{member.name}</span>
                       </div>
                       <p className="text-xs text-muted-foreground truncate">{member.email}</p>
-                      {(member.role === "project_manager" || member.role === "field_worker") && (
+                      {member.role === "project_manager" && (
                         <p className="text-xs text-muted-foreground/70 truncate">
                           {member.project_manager_id
                             ? `PM: ${projectManagers.find(p => p.id === member.project_manager_id)?.name ?? "Unknown"}`
@@ -205,7 +205,7 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground truncate">{member.email}</p>
-                      {(member.role === "project_manager" || member.role === "field_worker") && (
+                      {member.role === "project_manager" && (
                         <p className="text-xs text-muted-foreground/70 truncate">
                           {member.project_manager_id
                             ? `PM: ${projectManagers.find(p => p.id === member.project_manager_id)?.name ?? "Unknown"}`
@@ -314,7 +314,7 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
               ))}
             </SelectContent>
           </Select>
-          {(newRole === "project_manager" || newRole === "field_worker") && (
+          {newRole === "project_manager" && (
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-muted-foreground">Linked Project Manager</p>
               <Select value={newPmId} onValueChange={setNewPmId}>

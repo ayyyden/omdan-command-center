@@ -1,5 +1,5 @@
 export type InvoiceStatus = "draft" | "sent" | "partial" | "paid"
-export type InvoiceType = "deposit" | "progress" | "final"
+export type InvoiceType = string
 
 export interface Invoice {
   id: string
@@ -12,6 +12,8 @@ export interface Invoice {
   amount: number
   due_date: string | null
   notes: string | null
+  invoice_number?: string | null
+  payment_methods?: string[]
 }
 
 export interface InvoiceWithBalance extends Invoice {
@@ -69,17 +71,7 @@ export type PaymentMethod =
   | "bank_transfer"
   | "other"
 
-export type LeadSource =
-  | "referral"
-  | "google"
-  | "facebook"
-  | "instagram"
-  | "door_knock"
-  | "repeat_customer"
-  | "yard_sign"
-  | "nextdoor"
-  | "yelp"
-  | "other"
+export type LeadSource = string
 
 export type ReminderType =
   | "estimate_follow_up"

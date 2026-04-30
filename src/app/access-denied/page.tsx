@@ -25,12 +25,12 @@ export default function AccessDeniedPage() {
         </div>
         <h1 className="text-2xl font-bold">Access Denied</h1>
         <p className="text-muted-foreground text-sm">
-          Your account is not an active member of this workspace. You may not
-          have been invited yet, or your access may have been disabled.
+          Your account does not have access to this workspace. This may be
+          because your role has not been set up yet, your access was disabled,
+          or your role needs to be updated by an administrator.
         </p>
         <p className="text-muted-foreground text-sm">
-          Contact your administrator to request an invite or have your access
-          restored.
+          Contact your Owner or Admin to have your role assigned or restored.
         </p>
         <Button onClick={handleSignOut} disabled={loading} variant="outline">
           {loading

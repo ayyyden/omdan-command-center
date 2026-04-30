@@ -9,8 +9,6 @@ import { Phone, Mail, MapPin, Tag, Pencil, Plus, FileText, Briefcase, MessageSqu
 import Link from "next/link"
 import type { LeadStatus, JobStatus, EstimateStatus } from "@/types"
 import { CustomerActions } from "@/components/customers/customer-actions"
-import { UseTemplateButton } from "@/components/templates/use-template-button"
-import { QuickCopyButton } from "@/components/templates/quick-copy-button"
 import { CommunicationLogSection } from "@/components/shared/communication-log-section"
 import { FileSection } from "@/components/shared/file-section"
 import { CustomerMobileActions } from "@/components/customers/customer-mobile-actions"
@@ -25,12 +23,10 @@ export default async function CustomerDetailPage({ params }: PageProps) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const [{ data: customer }, { data: estimates }, { data: jobs }, { data: templates }, { data: companySettings }, { data: commLogs }] = await Promise.all([
+  const [{ data: customer }, { data: estimates }, { data: jobs }, { data: commLogs }] = await Promise.all([
     supabase.from("customers").select("*").eq("id", id).single(),
     supabase.from("estimates").select("*, jobs(id)").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
-    supabase.from("message_templates").select("id, name, type, subject, body").eq("is_active", true).order("name"),
-    supabase.from("company_settings").select("company_name, phone, email, google_review_link").order("updated_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("customer_id", id).order("created_at", { ascending: false }),
   ])
 
@@ -38,7 +34,6 @@ export default async function CustomerDetailPage({ params }: PageProps) {
 
   const totalEstimated = (estimates ?? []).filter(e => e.status === "approved").reduce((sum, e) => sum + Number(e.total), 0)
 
-  // ── Unified timeline ──────────────────────────────────────────────────────
   type TimelineEntry = {
     id: string
     date: string
@@ -89,19 +84,6 @@ export default async function CustomerDetailPage({ params }: PageProps) {
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
-  const cs = companySettings as any
-  const customerTplData = {
-    customer_name: customer.name,
-    company_name:  cs?.company_name        ?? "",
-    company_phone: cs?.phone               ?? "",
-    sender_name:   cs?.company_name        ?? "",
-    sender_phone:  "9512920703",
-    sender_email:  cs?.email              ?? "",
-    review_link:   cs?.google_review_link ?? "",
-  }
-  const tpls = templates ?? []
-  const lctx = { customerId: customer.id }
-
   return (
     <div className="overflow-x-hidden">
       <Topbar
@@ -121,16 +103,11 @@ export default async function CustomerDetailPage({ params }: PageProps) {
                 customerId={customer.id}
                 customerName={customer.name}
                 isArchived={customer.is_archived ?? false}
-                templates={tpls}
-                data={customerTplData}
-                logContext={lctx}
               />
             </div>
             {/* Desktop: all actions */}
             <div className="hidden sm:flex items-center gap-2">
               <CustomerActions customerId={customer.id} customerName={customer.name} isArchived={customer.is_archived ?? false} />
-              <QuickCopyButton label="Copy Review Request" templateType="review_request" templates={tpls} data={customerTplData} logContext={lctx} />
-              <UseTemplateButton templates={tpls} data={customerTplData} logContext={lctx} />
               <Button variant="outline" asChild>
                 <Link href={`/customers/${customer.id}/edit`}><Pencil className="w-4 h-4 mr-2" />Edit</Link>
               </Button>
