@@ -38,6 +38,8 @@ export interface PmInfo {
   id: string
   name: string
   color: string
+  phone?: string | null
+  email?: string | null
 }
 
 export interface SchedulerReminder {

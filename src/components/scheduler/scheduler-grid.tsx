@@ -19,7 +19,7 @@ import { useToast } from "@/hooks/use-toast"
 import { JobBlock } from "./job-block"
 import { ReminderBlock } from "./reminder-block"
 import type { SchedulerJob, PmInfo, SchedulerReminder } from "./scheduler-client"
-import { Bell, Plus, GripVertical, X, Trash2, CalendarDays, CheckCircle2 } from "lucide-react"
+import { Bell, Plus, GripVertical, X, Trash2, CalendarDays, CheckCircle2, Pencil, Loader2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -50,6 +50,7 @@ export const TIME_HEADER_HEIGHT = 44
 export const DRAG_OVERLAY_WIDTH = 220
 const TOTAL_HOURS = GRID_END_HOUR - GRID_START_HOUR
 const TOTAL_GRID_WIDTH = TOTAL_HOURS * HOUR_WIDTH
+const PM_COLORS = ["#F97316","#EF4444","#3B82F6","#22C55E","#A855F7","#EC4899","#F59E0B","#06B6D4","#6B7280"]
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 export function timeToX(time: string | null): number {
@@ -328,6 +329,11 @@ export function SchedulerGrid({
   const [deletingReminderId, setDeletingReminderId] = useState<string | null>(null)
   const [deletingLoading, setDeletingLoading] = useState(false)
 
+  // PM edit state
+  const [editingPm, setEditingPm] = useState<PmInfo | null>(null)
+  const [editPmForm, setEditPmForm] = useState({ name: "", phone: "", email: "", color: "" })
+  const [savingPm, setSavingPm] = useState(false)
+
   const router = useRouter()
   const { toast } = useToast()
 
@@ -529,6 +535,31 @@ export function SchedulerGrid({
     ? (pms.find((p) => p.id === activeJob.project_manager_id)?.color ?? "#6B7280")
     : "#6B7280"
 
+  function openEditPm(pm: PmInfo) {
+    setEditingPm(pm)
+    setEditPmForm({ name: pm.name, phone: pm.phone ?? "", email: pm.email ?? "", color: pm.color })
+  }
+
+  async function saveEditPm() {
+    if (!editingPm) return
+    setSavingPm(true)
+    const supabase = createClient()
+    const { error } = await supabase
+      .from("project_managers")
+      .update({
+        name: editPmForm.name.trim(),
+        phone: editPmForm.phone.trim() || null,
+        email: editPmForm.email.trim() || null,
+        color: editPmForm.color,
+      })
+      .eq("id", editingPm.id)
+    setSavingPm(false)
+    if (error) { toast({ title: "Error saving PM", description: error.message, variant: "destructive" }); return }
+    toast({ title: "PM updated" })
+    setEditingPm(null)
+    router.refresh()
+  }
+
   const hours = Array.from({ length: TOTAL_HOURS }, (_, i) => GRID_START_HOUR + i)
   const timedReminders = reminders.filter((r) => r.due_time)
   const allDayReminders = reminders.filter((r) => !r.due_time)
@@ -564,7 +595,7 @@ export function SchedulerGrid({
                     className="w-2.5 h-2.5 rounded-full shrink-0"
                     style={{ backgroundColor: pm.color }}
                   />
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground truncate flex-1">
                     {pm.name}
                   </span>
                   <span className="text-xs text-muted-foreground shrink-0">
@@ -572,6 +603,15 @@ export function SchedulerGrid({
                       ? "· Free today"
                       : `· ${rowJobs.length} job${rowJobs.length !== 1 ? "s" : ""}`}
                   </span>
+                  {!isUnassigned && (
+                    <button
+                      onClick={() => openEditPm(pm)}
+                      className="shrink-0 p-1 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-colors"
+                      title="Edit PM"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
 
                 {rowJobs.length === 0 ? (
@@ -865,6 +905,52 @@ export function SchedulerGrid({
           </DialogContent>
         </Dialog>
 
+        {/* Edit PM dialog */}
+        <Dialog open={!!editingPm} onOpenChange={(v) => !v && setEditingPm(null)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle>Edit Project Manager</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name</Label>
+                <Input value={editPmForm.name} onChange={(e) => setEditPmForm(f => ({ ...f, name: e.target.value }))} placeholder="Name" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone</Label>
+                  <Input value={editPmForm.phone} onChange={(e) => setEditPmForm(f => ({ ...f, phone: e.target.value }))} placeholder="(555) 000-0000" />
+                </div>
+                <div>
+                  <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</Label>
+                  <Input type="email" value={editPmForm.email} onChange={(e) => setEditPmForm(f => ({ ...f, email: e.target.value }))} placeholder="pm@company.com" />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">Color</Label>
+                <div className="flex items-center gap-3">
+                  <div className="relative w-9 h-9 rounded-lg overflow-hidden border border-input shrink-0">
+                    <div className="absolute inset-0 rounded-lg" style={{ backgroundColor: editPmForm.color }} />
+                    <input type="color" value={editPmForm.color} onChange={(e) => setEditPmForm(f => ({ ...f, color: e.target.value }))} className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {PM_COLORS.map((c) => (
+                      <button key={c} type="button" onClick={() => setEditPmForm(f => ({ ...f, color: c }))}
+                        className="w-6 h-6 rounded-full border-2 transition-transform hover:scale-110"
+                        style={{ backgroundColor: c, borderColor: editPmForm.color === c ? "white" : "transparent", boxShadow: editPmForm.color === c ? `0 0 0 2px ${c}` : undefined }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setEditingPm(null)}>Cancel</Button>
+              <Button onClick={saveEditPm} disabled={savingPm || !editPmForm.name.trim()}>
+                {savingPm && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <ReminderNotifier reminders={reminders} />
       </>
     )
@@ -961,7 +1047,7 @@ export function SchedulerGrid({
                 >
                   {/* PM label */}
                   <div
-                    className="sticky left-0 z-10 shrink-0 flex items-center gap-3 px-4"
+                    className="sticky left-0 z-10 shrink-0 flex items-center gap-3 px-4 group"
                     style={{
                       width: PM_LABEL_WIDTH,
                       height: rowH,
@@ -988,6 +1074,15 @@ export function SchedulerGrid({
                           : `${rowJobs.length} job${rowJobs.length > 1 ? "s" : ""}`}
                       </span>
                     </div>
+                    {!isUnassigned && (
+                      <button
+                        onClick={() => openEditPm(pm)}
+                        className="opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded hover:bg-muted text-muted-foreground/60 hover:text-foreground transition-all"
+                        title="Edit PM"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Job cells */}
@@ -1319,6 +1414,52 @@ export function SchedulerGrid({
             <Button variant="outline" onClick={() => setAddingReminder(false)}>Cancel</Button>
             <Button onClick={handleAddReminder} disabled={!reminderTitle.trim() || reminderSubmitting}>
               Add Reminder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit PM dialog */}
+      <Dialog open={!!editingPm} onOpenChange={(v) => !v && setEditingPm(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Edit Project Manager</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name</Label>
+              <Input value={editPmForm.name} onChange={(e) => setEditPmForm(f => ({ ...f, name: e.target.value }))} placeholder="Name" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone</Label>
+                <Input value={editPmForm.phone} onChange={(e) => setEditPmForm(f => ({ ...f, phone: e.target.value }))} placeholder="(555) 000-0000" />
+              </div>
+              <div>
+                <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</Label>
+                <Input type="email" value={editPmForm.email} onChange={(e) => setEditPmForm(f => ({ ...f, email: e.target.value }))} placeholder="pm@company.com" />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">Color</Label>
+              <div className="flex items-center gap-3">
+                <div className="relative w-9 h-9 rounded-lg overflow-hidden border border-input shrink-0">
+                  <div className="absolute inset-0 rounded-lg" style={{ backgroundColor: editPmForm.color }} />
+                  <input type="color" value={editPmForm.color} onChange={(e) => setEditPmForm(f => ({ ...f, color: e.target.value }))} className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {PM_COLORS.map((c) => (
+                    <button key={c} type="button" onClick={() => setEditPmForm(f => ({ ...f, color: c }))}
+                      className="w-6 h-6 rounded-full border-2 transition-transform hover:scale-110"
+                      style={{ backgroundColor: c, borderColor: editPmForm.color === c ? "white" : "transparent", boxShadow: editPmForm.color === c ? `0 0 0 2px ${c}` : undefined }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setEditingPm(null)}>Cancel</Button>
+            <Button onClick={saveEditPm} disabled={savingPm || !editPmForm.name.trim()}>
+              {savingPm && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save
             </Button>
           </DialogFooter>
         </DialogContent>

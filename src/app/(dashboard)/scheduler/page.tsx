@@ -32,7 +32,7 @@ export default async function SchedulerPage({ searchParams }: PageProps) {
   const [{ data: pmsRaw }, { data: jobsRaw }, { data: remindersRaw }] = await Promise.all([
     supabase
       .from("project_managers")
-      .select("id, name, color")
+      .select("id, name, color, phone, email")
       .eq("is_active", true)
       .order("name"),
     jobsQuery,
