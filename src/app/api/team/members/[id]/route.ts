@@ -21,7 +21,7 @@ async function resolveContext(req: Request, id: string) {
   const service = createServiceClient()
   const { data: target } = await service
     .from("team_members")
-    .select("id, role, status, user_id, project_manager_id")
+    .select("id, role, status, user_id, project_manager_id, email")
     .eq("id", id)
     .single()
 
@@ -30,21 +30,41 @@ async function resolveContext(req: Request, id: string) {
   return { invoker, target, service, userId: user.id }
 }
 
-/** Sync the linked project_manager.is_active when a team member is enabled/disabled/deleted */
+/** Find the PM record linked to a team member. Searches project_manager_id FK first, then user_id, then email. */
+async function findLinkedPmId(
+  service: ReturnType<typeof createServiceClient>,
+  target: { user_id?: string | null; project_manager_id?: string | null; email?: string | null },
+): Promise<string | null> {
+  const pmId = (target as any).project_manager_id as string | null
+  if (pmId) return pmId
+
+  const userId = target.user_id as string | null
+  if (userId) {
+    const { data } = await service.from("project_managers").select("id").eq("user_id", userId).maybeSingle()
+    if (data) return data.id
+  }
+
+  // Last resort: match by email (covers invited members who never accepted)
+  const email = (target as any).email as string | null
+  if (email) {
+    const { data } = await service.from("project_managers").select("id").ilike("email", email).maybeSingle()
+    if (data) return data.id
+  }
+
+  return null
+}
+
+/** Sync the linked project_manager.is_active when a team member is enabled/disabled/deleted. Returns the PM id. */
 async function syncPmActive(
   service: ReturnType<typeof createServiceClient>,
-  target: { user_id?: string | null; project_manager_id?: string | null },
+  target: { user_id?: string | null; project_manager_id?: string | null; email?: string | null },
   isActive: boolean,
-) {
-  const pmId = (target as any).project_manager_id as string | null
-  const userId = target.user_id as string | null
-
+): Promise<string | null> {
+  const pmId = await findLinkedPmId(service, target)
   if (pmId) {
     await service.from("project_managers").update({ is_active: isActive }).eq("id", pmId)
-  } else if (userId) {
-    // Fallback: find PM by user_id link if project_manager_id FK not set
-    await service.from("project_managers").update({ is_active: isActive }).eq("user_id", userId)
   }
+  return pmId
 }
 
 export async function PATCH(req: Request, { params }: RouteCtx) {
@@ -119,10 +139,23 @@ export async function DELETE(_req: Request, { params }: RouteCtx) {
   }
 
   // Deactivate the linked PM so they no longer appear in job/scheduler dropdowns
-  await syncPmActive(service, target, false)
+  const deactivatedPmId = await syncPmActive(service, target, false)
+
+  // Null out open jobs assigned to this PM and count how many were affected
+  let affectedJobs = 0
+  if (deactivatedPmId) {
+    const OPEN_STATUSES = ["scheduled", "in_progress", "on_hold"]
+    const { data: updated } = await service
+      .from("jobs")
+      .update({ project_manager_id: null })
+      .eq("project_manager_id", deactivatedPmId)
+      .in("status", OPEN_STATUSES)
+      .select("id")
+    affectedJobs = updated?.length ?? 0
+  }
 
   const { error } = await service.from("team_members").delete().eq("id", id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, affectedJobs })
 }

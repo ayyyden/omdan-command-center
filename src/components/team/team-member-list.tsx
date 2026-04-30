@@ -120,7 +120,13 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
       const res = await api("DELETE", `/api/team/members/${id}`)
       const data = await safeJson(res)
       if (!res.ok) { toast({ title: "Error", description: data.error as string, variant: "destructive" }); return }
-      toast({ title: "Member removed" })
+      const n = (data.affectedJobs as number) ?? 0
+      toast({
+        title: "Member removed",
+        description: n > 0
+          ? `${n} open job${n === 1 ? "" : "s"} no longer have a PM — go to Jobs to assign new ones.`
+          : undefined,
+      })
       router.refresh()
     })
   }

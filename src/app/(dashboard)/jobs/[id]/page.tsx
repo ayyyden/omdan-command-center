@@ -244,6 +244,21 @@ export default async function JobDetailPage({ params }: PageProps) {
         }
       />
 
+      {/* No-PM warning: only shown on open jobs that had their PM removed */}
+      {!["completed", "cancelled"].includes(job.status) && !(job as any).project_manager_id && (
+        <div className="px-4 sm:px-6 pt-4">
+          <div className="flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
+            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span className="flex-1 text-sm font-medium text-amber-900 dark:text-amber-200">
+              No Project Manager assigned — please assign one.
+            </span>
+            <Button size="sm" variant="outline" className="shrink-0 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40" asChild>
+              <Link href={`/jobs/${job.id}/edit`}>Assign PM</Link>
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="p-4 sm:p-6 space-y-6">
         {/* Command bar */}
         <Card>
