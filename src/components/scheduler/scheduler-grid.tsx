@@ -352,7 +352,9 @@ export function SchedulerGrid({
   const activeReminderId = isDraggingReminder ? activeDragId!.replace("reminder_", "") : null
 
   // Show all active PMs at all times so you can see which PMs are free vs busy
-  const hasUnassigned = jobs.some((j) => !j.project_manager_id)
+  const knownPmIds = new Set(pms.map((p) => p.id))
+  // Orphan = job has a PM id that's no longer active (e.g. deleted team member) — treat as unassigned
+  const hasUnassigned = jobs.some((j) => !j.project_manager_id || !knownPmIds.has(j.project_manager_id))
   const pmRows: PmInfo[] = [...pms, ...(hasUnassigned ? [UNASSIGNED_ROW] : [])]
 
   const sensors = useSensors(
@@ -547,7 +549,9 @@ export function SchedulerGrid({
         ) : (
           pmRows.map((pm) => {
             const rowJobs = jobs
-              .filter((j) => pm.id === "unassigned" ? !j.project_manager_id : j.project_manager_id === pm.id)
+              .filter((j) => pm.id === "unassigned"
+                ? (!j.project_manager_id || !knownPmIds.has(j.project_manager_id))
+                : j.project_manager_id === pm.id)
               .sort((a, b) => (a.scheduled_time ?? "").localeCompare(b.scheduled_time ?? ""))
             const isUnassigned = pm.id === "unassigned"
             const sc = STATUS_COLORS
@@ -940,9 +944,9 @@ export function SchedulerGrid({
 
             {pmRows.map((pm) => {
               const rowJobs = jobs
-                .filter((j) =>
-                  pm.id === "unassigned" ? !j.project_manager_id : j.project_manager_id === pm.id
-                )
+                .filter((j) => pm.id === "unassigned"
+                  ? (!j.project_manager_id || !knownPmIds.has(j.project_manager_id))
+                  : j.project_manager_id === pm.id)
                 .sort((a, b) => (a.scheduled_time ?? "").localeCompare(b.scheduled_time ?? ""))
               const isUnassigned = pm.id === "unassigned"
               const rowH = calcRowHeight(rowJobs.length)

@@ -172,10 +172,23 @@ export function TogglePMButton({ pmId, pmName, isActive }: TogglePMButtonProps) 
 
   async function handleToggle() {
     setLoading(true)
-    const supabase = createClient()
-    const { error } = await supabase.from("project_managers").update({ is_active: !isActive }).eq("id", pmId)
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }) }
-    else { toast({ title: isActive ? "PM deactivated" : "PM reactivated", description: pmName }) }
+    const res = await fetch(`/api/project-managers/${pmId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active: !isActive }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast({ title: "Error", description: data.error ?? "Something went wrong", variant: "destructive" })
+    } else {
+      const n = (data.affectedJobs as number) ?? 0
+      toast({
+        title: isActive ? "PM deactivated" : "PM reactivated",
+        description: isActive && n > 0
+          ? `${pmName} — ${n} open job${n === 1 ? "" : "s"} moved to Unassigned.`
+          : pmName,
+      })
+    }
     setLoading(false)
     router.refresh()
   }
