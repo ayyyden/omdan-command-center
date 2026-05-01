@@ -1,0 +1,12 @@
+lia.omdandevelopment.com {
+    # Caddy automatically provisions and renews a Let's Encrypt TLS certificate.
+    # No additional TLS config needed.
+
+    reverse_proxy localhost:3001
+
+    # Structured access log
+    log {
+        output file /var/log/caddy/lia-access.log
+        format json
+    }
+}

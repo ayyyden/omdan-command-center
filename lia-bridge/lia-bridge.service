@@ -1,0 +1,23 @@
+[Unit]
+Description=Lia Bridge — Omdan CRM WhatsApp assistant
+Documentation=https://github.com/your-org/omdan-command-center
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/lia-bridge
+
+# Build output — run `npm run build` before starting
+ExecStart=/usr/bin/node dist/index.js
+
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/lia-bridge/.env
+
+[Install]
+WantedBy=multi-user.target
