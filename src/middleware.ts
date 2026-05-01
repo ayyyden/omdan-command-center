@@ -2,6 +2,14 @@ import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  // Assistant API: authenticated via x-assistant-secret header, never by user session.
+  // Bypass BEFORE the Supabase call so the route can never be caught by the login redirect.
+  if (pathname.startsWith("/api/assistant/")) {
+    return NextResponse.next()
+  }
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -24,7 +32,6 @@ export async function middleware(request: NextRequest) {
   )
 
   const { data: { user } } = await supabase.auth.getUser()
-  const { pathname } = request.nextUrl
 
   const isPublicPath =
     pathname === "/login" ||
@@ -36,8 +43,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/invite/") ||
     pathname.startsWith("/api/contracts/sign/") ||
     pathname.startsWith("/api/estimates/approve") ||
-    pathname.startsWith("/api/change-orders/approve") ||
-    pathname.startsWith("/api/assistant/")
+    pathname.startsWith("/api/change-orders/approve")
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone()
