@@ -28,8 +28,15 @@ export async function proxy(request: NextRequest) {
 
   const isPublicPath =
     pathname === "/login" ||
-    pathname.startsWith("/sign-contract") ||
-    pathname.startsWith("/api/contracts/sign")
+    pathname === "/access-denied" ||
+    pathname.startsWith("/sign-contract/") ||
+    pathname.startsWith("/approve-estimate/") ||
+    pathname.startsWith("/approve-change-order/") ||
+    pathname.startsWith("/sign-bundle/") ||
+    pathname.startsWith("/invite/") ||
+    pathname.startsWith("/api/contracts/sign/") ||
+    pathname.startsWith("/api/estimates/approve") ||
+    pathname.startsWith("/api/change-orders/approve")
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone()
