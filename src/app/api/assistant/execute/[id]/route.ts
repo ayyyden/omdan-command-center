@@ -33,16 +33,47 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     return NextResponse.json({ error: "Approval has expired" }, { status: 400 })
   }
 
-  // Get the owner user_id — all CRM records are created under the owner account
-  const { data: owner } = await supabase
-    .from("team_members")
-    .select("user_id")
-    .eq("role", "owner")
-    .eq("status", "active")
-    .single()
+  // Resolve owner user_id for record creation.
+  // Priority: ASSISTANT_OWNER_EMAIL env var → role=owner/admin fallback.
+  let ownerUserId: string | null = null
 
-  if (!owner) {
-    return NextResponse.json({ error: "No active owner found in team" }, { status: 500 })
+  const ownerEmail = process.env.ASSISTANT_OWNER_EMAIL
+  if (ownerEmail) {
+    const { data: byEmail, error: emailErr } = await supabase
+      .from("team_members")
+      .select("user_id, role")
+      .ilike("email", ownerEmail)
+      .not("user_id", "is", null)
+      .single()
+    if (emailErr) {
+      console.error("[execute] owner lookup by ASSISTANT_OWNER_EMAIL failed:", emailErr.message)
+    }
+    if (byEmail?.user_id && ["owner", "admin"].includes(byEmail.role)) {
+      ownerUserId = byEmail.user_id as string
+    } else if (byEmail?.user_id) {
+      console.error("[execute] ASSISTANT_OWNER_EMAIL maps to role:", byEmail.role, "— must be owner or admin")
+      return NextResponse.json({ error: "Configured ASSISTANT_OWNER_EMAIL is not an owner or admin" }, { status: 500 })
+    }
+  }
+
+  if (!ownerUserId) {
+    const { data: byRole, error: roleErr } = await supabase
+      .from("team_members")
+      .select("user_id")
+      .eq("role", "owner")
+      .eq("status", "active")
+      .not("user_id", "is", null)
+      .single()
+    if (roleErr) {
+      console.error("[execute] owner fallback lookup failed:", roleErr.message, roleErr.details)
+    }
+    ownerUserId = (byRole?.user_id as string) ?? null
+  }
+
+  if (!ownerUserId) {
+    return NextResponse.json({
+      error: "Owner not found. Set ASSISTANT_OWNER_EMAIL in Vercel env vars to the owner's email address.",
+    }, { status: 500 })
   }
 
   const payload = approval.proposed_payload as Record<string, unknown>
@@ -66,7 +97,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         email:        lead.email  ?? null,
         service_type: lead.service_type ?? null,
         status:       "New Lead",
-        user_id:      owner.user_id,
+        user_id:      ownerUserId,
       })
       .select()
       .single()
@@ -102,7 +133,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       .from("estimates")
       .insert({
         customer_id:        customer.id,
-        user_id:            owner.user_id,
+        user_id:            ownerUserId,
         title:              estimateTitle,
         scope_of_work:      estData.services ?? null,
         manual_total_price: total,
@@ -207,7 +238,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     const { data: company } = await supabase
       .from("company_settings")
       .select("company_name, email, phone")
-      .eq("user_id", owner.user_id)
+      .eq("user_id", ownerUserId)
       .maybeSingle()
 
     const companyName = company?.company_name ?? "Omdan"
@@ -271,7 +302,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     // Log communication (best-effort)
     try {
       await supabase.from("communication_logs").insert({
-        user_id:     owner.user_id,
+        user_id:     ownerUserId,
         customer_id,
         estimate_id,
         type:        "estimate_follow_up",
