@@ -8,7 +8,7 @@ import { formatDailySummary }       from "./format-response"
 import { sendWhatsAppText }         from "./openclaw-client"
 import { sendTelegramMessage, sendTelegramWithButtons, type InlineKeyboardButton } from "./telegram-client"
 import { checkHealth, sendMessage, updateApproval, executeApproval } from "./crm-client"
-import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch } from "./types"
+import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch } from "./types"
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +43,14 @@ const pendingInvoicePicks = new Map<string, {
   parsedText:  string
   invoiceData: InvoiceData
   matches:     CustomerMatch[]
+}>()
+
+// ─── Pending job disambiguation (invoice flow) ────────────────────────────────
+// Stores resolved invoice data while waiting for the user to pick a job.
+
+const pendingJobPicks = new Map<string, {
+  invoiceData: InvoiceData
+  matches:     JobMatch[]
 }>()
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -158,11 +166,12 @@ async function handleInvoice(
     sender:       senderKey,
     intent:       "create_invoice",
     invoice_data: {
-      customer_name: parsed.customer_name,
-      amount:        parsed.amount,
-      type:          parsed.type,
-      notes:         parsed.notes,
-      due_date:      parsed.due_date,
+      customer_name:  parsed.customer_name,
+      amount:         parsed.amount,
+      type:           parsed.type,
+      notes:          parsed.notes,
+      due_date:       parsed.due_date,
+      job_title_hint: parsed.notes,
     },
   })
 
@@ -196,6 +205,33 @@ async function handleInvoice(
     }])
     buttons.push([{ text: "❌ Cancel", callback_data: "cancel_invoice" }])
     await send(lines.join("\n"), buttons)
+    return
+  }
+
+  if (result.no_jobs) {
+    await send(result.response_text ?? "No active jobs found for this customer. Please create a job first.")
+    return
+  }
+
+  if (result.needs_job_selection && result.job_matches?.length) {
+    pendingJobPicks.set(senderKey, {
+      invoiceData: {
+        customer_id:   result.resolved_customer_id,
+        customer_name: result.resolved_customer_name,
+        amount:        parsed.amount,
+        type:          parsed.type,
+        notes:         parsed.notes,
+        due_date:      parsed.due_date,
+      },
+      matches: result.job_matches,
+    })
+    const jobLines = ["Multiple jobs found — which job is this invoice for?"]
+    const jobButtons: InlineKeyboardButton[][] = result.job_matches.map((j, i) => [{
+      text:          `${i + 1}. ${j.title}`,
+      callback_data: `pick_job:${i}`,
+    }])
+    jobButtons.push([{ text: "❌ Cancel", callback_data: "cancel_invoice" }])
+    await send(jobLines.join("\n"), jobButtons)
     return
   }
 
@@ -469,6 +505,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
     // ── cancel_invoice ──────────────────────────────────────────────────────
     if (intent.type === "cancel_invoice") {
       pendingInvoicePicks.delete(chatKey)
+      pendingJobPicks.delete(chatKey)
       await sendTelegramMessage(chatId, "Invoice request cancelled.")
       return
     }
@@ -491,8 +528,40 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         message:      pending.parsedText,
         sender:       chatKey,
         intent:       "create_invoice",
-        invoice_data: { ...pending.invoiceData, customer_id: match.id, customer_name: match.name },
+        invoice_data: {
+          ...pending.invoiceData,
+          customer_id:    match.id,
+          customer_name:  match.name,
+          job_title_hint: pending.invoiceData.notes,
+        },
       })
+
+      if (result2.no_jobs) {
+        await sendTelegramMessage(chatId, result2.response_text ?? "No active jobs found for this customer. Please create a job first.")
+        return
+      }
+
+      if (result2.needs_job_selection && result2.job_matches?.length) {
+        pendingJobPicks.set(chatKey, {
+          invoiceData: {
+            customer_id:   result2.resolved_customer_id,
+            customer_name: result2.resolved_customer_name,
+            amount:        pending.invoiceData.amount,
+            type:          pending.invoiceData.type,
+            notes:         pending.invoiceData.notes,
+            due_date:      pending.invoiceData.due_date,
+          },
+          matches: result2.job_matches,
+        })
+        const jLines = ["Multiple jobs found — which job is this invoice for?"]
+        const jButtons: InlineKeyboardButton[][] = result2.job_matches.map((j, i) => [{
+          text:          `${i + 1}. ${j.title}`,
+          callback_data: `pick_job:${i}`,
+        }])
+        jButtons.push([{ text: "❌ Cancel", callback_data: "cancel_invoice" }])
+        await sendTelegramWithButtons(chatId, jLines.join("\n"), jButtons)
+        return
+      }
 
       if (!result2.approval_id || !result2.invoice_preview) {
         await sendTelegramMessage(chatId, result2.response_text ?? "Failed to create invoice approval.")
@@ -503,6 +572,44 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         { text: "✅ Approve", callback_data: `approve:${result2.approval_id}` },
         { text: "❌ Reject",  callback_data: `reject:${result2.approval_id}` },
         { text: "✏️ Edit",   callback_data: `edit:${result2.approval_id}` },
+      ]])
+      return
+    }
+
+    // ── Job disambiguation reply ─────────────────────────────────────────────
+    if (intent.type === "pick_job") {
+      const pending = pendingJobPicks.get(chatKey)
+      if (!pending) {
+        await sendTelegramMessage(chatId, "No pending job selection. Re-send your invoice request.")
+        return
+      }
+      const match = pending.matches[intent.index]
+      if (!match) {
+        await sendTelegramMessage(chatId, "Invalid selection. Please try again.")
+        return
+      }
+      pendingJobPicks.delete(chatKey)
+
+      const result3 = await sendMessage({
+        message:      "",
+        sender:       chatKey,
+        intent:       "create_invoice",
+        invoice_data: { ...pending.invoiceData, job_id: match.id },
+      })
+
+      if (result3.no_jobs) {
+        await sendTelegramMessage(chatId, result3.response_text ?? "Job not found. Please try again.")
+        return
+      }
+      if (!result3.approval_id || !result3.invoice_preview) {
+        await sendTelegramMessage(chatId, result3.response_text ?? "Failed to create invoice approval.")
+        return
+      }
+      const previewText3 = formatInvoicePreview(result3.approval_id, result3.invoice_preview)
+      await sendTelegramWithButtons(chatId, previewText3, [[
+        { text: "✅ Approve", callback_data: `approve:${result3.approval_id}` },
+        { text: "❌ Reject",  callback_data: `reject:${result3.approval_id}` },
+        { text: "✏️ Edit",   callback_data: `edit:${result3.approval_id}` },
       ]])
       return
     }

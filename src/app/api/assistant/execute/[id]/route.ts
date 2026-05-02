@@ -410,12 +410,21 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       notes: string | null; due_date: string | null; payment_methods: string[]
     }
 
+    if (!job_id) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "job_id is required", updated_at: now }).eq("id", id)
+      return NextResponse.json(
+        { error: "Invoice must be linked to a job — job_id is missing from approval payload." },
+        { status: 400 },
+      )
+    }
+
     // Create the invoice (invoice_number assigned by DB trigger trg_invoice_number)
     const { data: invoice, error: invErr } = await supabase
       .from("invoices")
       .insert({
         customer_id,
-        job_id:          job_id ?? null,
+        job_id,
         user_id:         ownerUserId,
         type:            type ?? "deposit",
         status:          "draft",

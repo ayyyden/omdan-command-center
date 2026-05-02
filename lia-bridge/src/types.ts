@@ -33,17 +33,24 @@ export interface EstimateData {
 
 export interface InvoiceData {
   customer_name?: string
-  customer_id?: string      // set after disambiguation
+  customer_id?: string      // set after customer disambiguation
   amount?: number
   type?: string             // deposit | progress | final | custom string
   notes?: string
   due_date?: string         // YYYY-MM-DD
+  job_id?: string           // set after job disambiguation
+  job_title_hint?: string   // from parsed notes, used to filter jobs
 }
 
 export interface CustomerMatch {
   id: string
   name: string
   email: string | null
+}
+
+export interface JobMatch {
+  id: string
+  title: string
 }
 
 export interface InvoicePreview {
@@ -85,6 +92,12 @@ export interface CrmMessageResponse {
   needs_disambiguation?: boolean
   customer_matches?: CustomerMatch[]
   not_found?: boolean
+  no_jobs?: boolean
+  needs_job_selection?: boolean
+  job_matches?: JobMatch[]
+  resolved_customer_id?: string
+  resolved_customer_name?: string
+  resolved_customer_email?: string | null
 }
 
 export interface EstimatePreview {

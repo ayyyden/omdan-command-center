@@ -51,6 +51,8 @@ interface InvoiceData {
   type?: string
   notes?: string
   due_date?: string
+  job_id?: string
+  job_title_hint?: string
 }
 
 interface MessageBody {
@@ -253,22 +255,75 @@ async function handleCreateInvoice(body: MessageBody) {
     customerEmail = matches[0].email ?? null
   }
 
-  // ── Find most-recent active job for this customer (optional) ────────────────
-  const { data: job } = await supabase
-    .from("jobs")
-    .select("id, title")
-    .eq("customer_id", customerId)
-    .not("status", "in", "(completed,cancelled)")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  // ── Find and resolve job for this customer ──────────────────────────────────
+  let jobId:    string | null = invoice_data!.job_id ?? null
+  let jobTitle: string | null = null
+
+  if (jobId) {
+    // Pre-set job_id (post-disambiguation re-call) — verify it belongs to this customer
+    const { data: jobRow } = await supabase
+      .from("jobs")
+      .select("id, title")
+      .eq("id", jobId)
+      .eq("customer_id", customerId)
+      .maybeSingle()
+    if (!jobRow) {
+      return NextResponse.json({
+        intent:        "create_invoice",
+        no_jobs:       true,
+        response_text: `Job not found for ${customerName}. Please specify a valid job.`,
+      })
+    }
+    jobTitle = jobRow.title
+  } else {
+    // Fetch all active jobs for this customer
+    const { data: activeJobs } = await supabase
+      .from("jobs")
+      .select("id, title")
+      .eq("customer_id", customerId)
+      .not("status", "in", "(completed,cancelled)")
+      .order("created_at", { ascending: false })
+      .limit(10)
+
+    let jobs = activeJobs ?? []
+
+    // Filter by title hint if provided and there are multiple jobs
+    const hint = invoice_data!.job_title_hint ?? null
+    if (hint && jobs.length > 1) {
+      const hintLower = hint.toLowerCase()
+      const filtered = jobs.filter((j) => j.title.toLowerCase().includes(hintLower))
+      if (filtered.length > 0) jobs = filtered
+    }
+
+    if (jobs.length === 0) {
+      return NextResponse.json({
+        intent:        "create_invoice",
+        no_jobs:       true,
+        response_text: `No active jobs found for ${customerName}. Please create a job first — invoices must be connected to a job.`,
+      })
+    }
+
+    if (jobs.length > 1) {
+      return NextResponse.json({
+        intent:                  "create_invoice",
+        needs_job_selection:     true,
+        resolved_customer_id:    customerId,
+        resolved_customer_name:  customerName,
+        resolved_customer_email: customerEmail,
+        job_matches:             jobs.map((j) => ({ id: j.id, title: j.title })),
+      })
+    }
+
+    // Exactly one active job — auto-select
+    jobId    = jobs[0].id
+    jobTitle = jobs[0].title
+  }
 
   // ── Build approval ──────────────────────────────────────────────────────────
   const amount         = Number(invoice_data!.amount)
   const invoiceType    = invoice_data!.type ?? "deposit"
   const typeLabel      = invoiceTypeLabel(invoiceType)
   const paymentMethods = ["zelle", "cash", "check"]   // sensible default
-  const appUrl         = process.env.NEXT_PUBLIC_APP_URL ?? ""
 
   const { data: approval, error: approvalErr } = await supabase
     .from("assistant_approvals")
@@ -280,8 +335,8 @@ async function handleCreateInvoice(body: MessageBody) {
         customer_id:     customerId,
         customer_name:   customerName,
         customer_email:  customerEmail,
-        job_id:          job?.id   ?? null,
-        job_title:       job?.title ?? null,
+        job_id:          jobId,
+        job_title:       jobTitle,
         amount,
         type:            invoiceType,
         notes:           invoice_data!.notes ?? null,
@@ -309,8 +364,8 @@ async function handleCreateInvoice(body: MessageBody) {
       customer_name:   customerName,
       customer_email:  customerEmail,
       customer_id:     customerId,
-      job_id:          job?.id    ?? null,
-      job_title:       job?.title ?? null,
+      job_id:          jobId,
+      job_title:       jobTitle,
       amount,
       type:            invoiceType,
       type_label:      typeLabel,

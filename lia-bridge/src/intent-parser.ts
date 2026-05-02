@@ -8,6 +8,7 @@ export type Intent =
   | { type: "add_lead_estimate"; rawText: string }
   | { type: "create_invoice"; rawText: string }
   | { type: "pick_customer"; index: number }
+  | { type: "pick_job"; index: number }
   | { type: "cancel_invoice" }
   | { type: "unknown"; rawText: string }
 
@@ -30,6 +31,10 @@ export function parseIntent(text: string): Intent {
   // Customer disambiguation button callback: "pick_customer:N"
   const pickCustomer = lower.match(/^pick_customer:(\d+)$/)
   if (pickCustomer) return { type: "pick_customer", index: parseInt(pickCustomer[1], 10) }
+
+  // Job disambiguation button callback: "pick_job:N"
+  const pickJob = lower.match(/^pick_job:(\d+)$/)
+  if (pickJob) return { type: "pick_job", index: parseInt(pickJob[1], 10) }
 
   // Invoice cancel button callback
   if (lower === "cancel_invoice") return { type: "cancel_invoice" }
