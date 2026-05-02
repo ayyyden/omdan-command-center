@@ -2,12 +2,13 @@ import "dotenv/config"
 import express, { type Request, type Response } from "express"
 import { startScheduler }           from "./scheduler"
 import { parseIntent }              from "./intent-parser"
+import { parseInvoiceMessage }      from "./invoice-parser"
 import { parseLeadEstimateMessage } from "./lead-parser"
 import { formatDailySummary }       from "./format-response"
 import { sendWhatsAppText }         from "./openclaw-client"
 import { sendTelegramMessage, sendTelegramWithButtons, type InlineKeyboardButton } from "./telegram-client"
 import { checkHealth, sendMessage, updateApproval, executeApproval } from "./crm-client"
-import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData } from "./types"
+import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch } from "./types"
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,15 @@ const TELEGRAM_ALLOWED_IDS: Set<number> = new Set(
 // Key = chatId (Telegram) or phone number (WhatsApp), value = old approval to reject.
 
 const pendingEdits = new Map<string, { oldApprovalId: string }>()
+
+// ─── Pending customer disambiguation (invoice flow) ───────────────────────────
+// Stores parsed invoice data while waiting for the user to pick a customer.
+
+const pendingInvoicePicks = new Map<string, {
+  parsedText:  string
+  invoiceData: InvoiceData
+  matches:     CustomerMatch[]
+}>()
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
@@ -91,6 +101,116 @@ function formatEstimatePreview(sendApprovalId: string, preview: EstimatePreview)
   lines.push("", "📎 PDF will be attached to the customer email.")
   lines.push("", `ID: ${sendApprovalId}`)
   return lines.join("\n")
+}
+
+// ─── Invoice preview formatter ────────────────────────────────────────────────
+
+function formatInvoicePreview(approvalId: string, preview: InvoicePreview): string {
+  const METHOD_LABELS: Record<string, string> = { zelle: "Zelle", cash: "Cash", check: "Check", venmo: "Venmo" }
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+  const lines = ["📋 Invoice — Pending Approval", ""]
+  lines.push(`👤 Customer: ${preview.customer_name}`)
+  if (preview.customer_email) lines.push(`📧 Send to: ${preview.customer_email}`)
+  if (preview.job_title)      lines.push(`🔨 Job: ${preview.job_title}`)
+  lines.push(`💰 Amount: ${fmtMoney(preview.amount)}`)
+  lines.push(`📂 Type: ${preview.type_label}`)
+  if (preview.due_date) {
+    try {
+      const d = new Date(preview.due_date + "T00:00:00")
+      lines.push(`📅 Due: ${d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`)
+    } catch { lines.push(`📅 Due: ${preview.due_date}`) }
+  }
+  if (preview.notes) lines.push(`📝 Note: ${preview.notes}`)
+  if (preview.payment_methods.length) {
+    lines.push(`💳 Payment: ${preview.payment_methods.map((m) => METHOD_LABELS[m] ?? cap(m)).join(", ")}`)
+  }
+  if (!preview.customer_email) {
+    lines.push("", "⚠️ No email on file — invoice will be created but not emailed.")
+  }
+  lines.push("", `ID: ${approvalId}`)
+  return lines.join("\n")
+}
+
+// ─── Shared invoice handler ───────────────────────────────────────────────────
+
+async function handleInvoice(
+  rawText:   string,
+  senderKey: string,
+  send:      SendFn,
+): Promise<void> {
+  const parsed = parseInvoiceMessage(rawText)
+
+  if (!parsed.customer_name && !parsed.amount) {
+    await send(
+      "To create an invoice, I need a customer name and amount.\n\n" +
+      "Example: invoice John Smith $2500 for deposit",
+    )
+    return
+  }
+  if (!parsed.amount) {
+    await send(`Got customer "${parsed.customer_name}" but I need an amount.\n\nExample: invoice ${parsed.customer_name} $2500 deposit`)
+    return
+  }
+
+  const result = await sendMessage({
+    message:      rawText,
+    sender:       senderKey,
+    intent:       "create_invoice",
+    invoice_data: {
+      customer_name: parsed.customer_name,
+      amount:        parsed.amount,
+      type:          parsed.type,
+      notes:         parsed.notes,
+      due_date:      parsed.due_date,
+    },
+  })
+
+  if (result.missing_fields?.length) {
+    await send(`To create the invoice, I still need: ${result.missing_fields.join(", ")}.`)
+    return
+  }
+
+  if (result.not_found) {
+    await send(result.response_text ?? `No customer found matching "${parsed.customer_name}". Check the name and try again.`)
+    return
+  }
+
+  if (result.needs_disambiguation && result.customer_matches?.length) {
+    pendingInvoicePicks.set(senderKey, {
+      parsedText:  rawText,
+      invoiceData: {
+        customer_name: parsed.customer_name,
+        amount:        parsed.amount,
+        type:          parsed.type,
+        notes:         parsed.notes,
+        due_date:      parsed.due_date,
+      },
+      matches: result.customer_matches,
+    })
+
+    const lines = ["Multiple customers found — choose one:"]
+    const buttons: InlineKeyboardButton[][] = result.customer_matches.map((m, i) => [{
+      text:          `${i + 1}. ${m.name}${m.email ? ` (${m.email})` : ""}`,
+      callback_data: `pick_customer:${i}`,
+    }])
+    buttons.push([{ text: "❌ Cancel", callback_data: "cancel_invoice" }])
+    await send(lines.join("\n"), buttons)
+    return
+  }
+
+  if (!result.approval_id || !result.invoice_preview) {
+    await send(result.response_text ?? "Failed to create invoice approval. Please try again.")
+    return
+  }
+
+  const previewText = formatInvoicePreview(result.approval_id, result.invoice_preview)
+  const buttons: InlineKeyboardButton[][] = [[
+    { text: "✅ Approve", callback_data: `approve:${result.approval_id}` },
+    { text: "❌ Reject",  callback_data: `reject:${result.approval_id}` },
+    { text: "✏️ Edit",   callback_data: `edit:${result.approval_id}` },
+  ]]
+  await send(previewText, buttons)
 }
 
 // ─── Shared lead handler ──────────────────────────────────────────────────────
@@ -331,11 +451,59 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
   }
 
   try {
-    // ── Pending edit: next message is a lead correction ──
+    // ── Pending edit: route correction to the right handler ──
     const pendingEdit = pendingEdits.get(chatKey)
     if (pendingEdit && (intent.type === "unknown" || intent.type === "add_lead_estimate")) {
       pendingEdits.delete(chatKey)
       await handleLeadEstimate(text, chatKey, sendTG, pendingEdit.oldApprovalId)
+      return
+    }
+    if (pendingEdit && intent.type === "create_invoice") {
+      const { oldApprovalId } = pendingEdit
+      pendingEdits.delete(chatKey)
+      await updateApproval(oldApprovalId, "rejected").catch(() => {})
+      await handleInvoice(text, chatKey, sendTG)
+      return
+    }
+
+    // ── cancel_invoice ──────────────────────────────────────────────────────
+    if (intent.type === "cancel_invoice") {
+      pendingInvoicePicks.delete(chatKey)
+      await sendTelegramMessage(chatId, "Invoice request cancelled.")
+      return
+    }
+
+    // ── Customer disambiguation reply ────────────────────────────────────────
+    if (intent.type === "pick_customer") {
+      const pending = pendingInvoicePicks.get(chatKey)
+      if (!pending) {
+        await sendTelegramMessage(chatId, "No pending customer selection. Re-send your invoice request.")
+        return
+      }
+      const match = pending.matches[intent.index]
+      if (!match) {
+        await sendTelegramMessage(chatId, "Invalid selection. Please try again.")
+        return
+      }
+      pendingInvoicePicks.delete(chatKey)
+
+      const result2 = await sendMessage({
+        message:      pending.parsedText,
+        sender:       chatKey,
+        intent:       "create_invoice",
+        invoice_data: { ...pending.invoiceData, customer_id: match.id, customer_name: match.name },
+      })
+
+      if (!result2.approval_id || !result2.invoice_preview) {
+        await sendTelegramMessage(chatId, result2.response_text ?? "Failed to create invoice approval.")
+        return
+      }
+      const previewText2 = formatInvoicePreview(result2.approval_id, result2.invoice_preview)
+      await sendTelegramWithButtons(chatId, previewText2, [[
+        { text: "✅ Approve", callback_data: `approve:${result2.approval_id}` },
+        { text: "❌ Reject",  callback_data: `reject:${result2.approval_id}` },
+        { text: "✏️ Edit",   callback_data: `edit:${result2.approval_id}` },
+      ]])
       return
     }
 
@@ -370,9 +538,14 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       return
     }
 
+    if (intent.type === "create_invoice") {
+      await handleInvoice(text, chatKey, sendTG)
+      return
+    }
+
     if (intent.type === "edit_approval") {
       pendingEdits.set(chatKey, { oldApprovalId: intent.approvalId })
-      await sendTelegramMessage(chatId, "✏️ Send me the corrected lead details and I'll create a new preview.")
+      await sendTelegramMessage(chatId, "✏️ Send me the updated details and I'll create a new preview.")
       return
     }
 
@@ -408,13 +581,20 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         }
       } else if (result.action_type === "send_estimate") {
         await sendTelegramMessage(chatId, `✅ Estimate sent to ${result.sent_to}`)
+      } else if (result.action_type === "create_send_invoice") {
+        if (result.warning) {
+          await sendTelegramMessage(chatId, `⚠️ ${result.warning}`)
+        } else {
+          const invoiceRef = result.invoice_number ? ` (${result.invoice_number})` : ""
+          await sendTelegramMessage(chatId, `✅ Invoice${invoiceRef} sent to ${result.sent_to}`)
+        }
       }
       return
     }
 
     await sendTelegramMessage(
       chatId,
-      "I didn't understand that.\n\nTry:\n• \"Lia, are you connected?\"\n• \"Lia, what needs my attention today?\"\n• \"Lia add this lead: name - John...\""
+      "I didn't understand that.\n\nTry:\n• \"Lia, are you connected?\"\n• \"Lia, what needs my attention today?\"\n• \"Lia add this lead: name - John...\"\n• \"Lia invoice John Smith $2500 deposit\""
     )
   } catch (err) {
     console.error("[lia/telegram] Error:", err)

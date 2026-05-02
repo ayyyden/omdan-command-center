@@ -31,6 +31,35 @@ export interface EstimateData {
   scope_override?: string  // manually provided scope text from "Scope:" section
 }
 
+export interface InvoiceData {
+  customer_name?: string
+  customer_id?: string      // set after disambiguation
+  amount?: number
+  type?: string             // deposit | progress | final | custom string
+  notes?: string
+  due_date?: string         // YYYY-MM-DD
+}
+
+export interface CustomerMatch {
+  id: string
+  name: string
+  email: string | null
+}
+
+export interface InvoicePreview {
+  customer_name: string
+  customer_email: string | null
+  customer_id: string
+  job_id: string | null
+  job_title: string | null
+  amount: number
+  type: string
+  type_label: string
+  due_date: string | null
+  notes: string | null
+  payment_methods: string[]
+}
+
 // ─── CRM API responses ────────────────────────────────────────────────────────
 
 export interface CrmHealthResponse {
@@ -51,6 +80,11 @@ export interface CrmMessageResponse {
   estimate?: EstimateData | null
   wants_estimate?: boolean
   missing_fields?: string[]
+  // create_invoice response fields
+  invoice_preview?: InvoicePreview
+  needs_disambiguation?: boolean
+  customer_matches?: CustomerMatch[]
+  not_found?: boolean
 }
 
 export interface EstimatePreview {
@@ -74,8 +108,12 @@ export interface ExecuteResponse {
   estimate_preview?: EstimatePreview
   // send_estimate fields
   success?: boolean
-  sent_to?: string
+  sent_to?: string | null
   error?: string
+  // create_send_invoice fields
+  invoice_id?: string
+  invoice_number?: string | null
+  warning?: string
 }
 
 export interface DailySummary {

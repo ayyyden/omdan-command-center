@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service"
 import { buildHtmlEmail, smtpConfigured } from "@/lib/email"
 import { generateEstimateScope } from "@/lib/scope-generator"
 import { generateEstimatePDFBuffer } from "@/lib/pdf/generate-estimate-pdf"
+import { notifyLia } from "@/lib/lia-notifications"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -394,6 +395,235 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       success:     true,
       sent_to:     to_email,
       pdf_attached: !!pdfBuffer,
+    })
+  }
+
+  // ─── create_send_invoice ─────────────────────────────────────────────────
+
+  if (approval.action_type === "create_send_invoice") {
+    const {
+      customer_id, customer_name, customer_email,
+      job_id, amount, type, notes, due_date, payment_methods,
+    } = payload as {
+      customer_id: string; customer_name: string; customer_email: string | null
+      job_id: string | null; amount: number; type: string
+      notes: string | null; due_date: string | null; payment_methods: string[]
+    }
+
+    // Create the invoice (invoice_number assigned by DB trigger trg_invoice_number)
+    const { data: invoice, error: invErr } = await supabase
+      .from("invoices")
+      .insert({
+        customer_id,
+        job_id:          job_id ?? null,
+        user_id:         ownerUserId,
+        type:            type ?? "deposit",
+        status:          "draft",
+        amount:          Number(amount),
+        due_date:        due_date ?? null,
+        notes:           notes   ?? null,
+        payment_methods: payment_methods ?? ["zelle", "cash", "check"],
+      })
+      .select("id, invoice_number")
+      .single()
+
+    if (invErr || !invoice) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: invErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json(
+        { error: `Failed to create invoice: ${invErr?.message}` },
+        { status: 500 },
+      )
+    }
+
+    // If no email address, mark executed and return early — invoice is created
+    if (!customer_email) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "executed", executed_at: now,
+          result: { invoice_id: invoice.id }, updated_at: now }).eq("id", id)
+      return NextResponse.json({
+        action_type:    "create_send_invoice",
+        success:        true,
+        invoice_id:     invoice.id,
+        invoice_number: invoice.invoice_number ?? null,
+        sent_to:        null,
+        warning:        "Invoice created but no email address on file — could not send.",
+      })
+    }
+
+    if (!smtpConfigured()) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "executed", executed_at: now,
+          result: { invoice_id: invoice.id }, updated_at: now }).eq("id", id)
+      return NextResponse.json({
+        action_type:    "create_send_invoice",
+        success:        true,
+        invoice_id:     invoice.id,
+        invoice_number: invoice.invoice_number ?? null,
+        sent_to:        null,
+        warning:        "Invoice created but SMTP not configured — could not send email.",
+      })
+    }
+
+    // Fetch company settings
+    const { data: company } = await supabase
+      .from("company_settings")
+      .select("company_name, email, phone")
+      .eq("user_id", ownerUserId)
+      .maybeSingle()
+
+    const companyName = company?.company_name ?? "Omdan"
+
+    const BUILT_IN: Record<string, string> = { deposit: "Deposit", progress: "Progress", final: "Final" }
+    const typeLabel = BUILT_IN[type as string]
+      ?? String(type).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+    const fmtAmount = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+      .format(Number(amount))
+
+    const METHOD_LABELS: Record<string, string> = { zelle: "Zelle", cash: "Cash", check: "Check", venmo: "Venmo" }
+    const methods     = (payment_methods as string[]) ?? []
+    const methodsLine = methods.length > 0
+      ? methods.map((m) => METHOD_LABELS[m] ?? m.charAt(0).toUpperCase() + m.slice(1)).join(", ")
+      : "Contact us to arrange payment"
+
+    // Fetch job title if needed
+    let jobTitle = ""
+    if (job_id) {
+      const { data: jobRow } = await supabase.from("jobs").select("title").eq("id", job_id).single()
+      jobTitle = jobRow?.title ?? ""
+    }
+
+    const bodyLines: string[] = [
+      `Hi ${customer_name},`,
+      "",
+      "Please find your invoice details below.",
+      "",
+    ]
+    if (invoice.invoice_number) bodyLines.push(`<strong>Invoice #:</strong> ${invoice.invoice_number}`)
+    if (jobTitle)               bodyLines.push(`<strong>Job:</strong> ${jobTitle}`)
+    bodyLines.push(
+      `<strong>Type:</strong> ${typeLabel}`,
+      `<strong>Amount Due:</strong> ${fmtAmount}`,
+    )
+    if (due_date) {
+      const dueFmt = new Date(due_date + "T00:00:00").toLocaleDateString("en-US", {
+        month: "long", day: "numeric", year: "numeric",
+      })
+      bodyLines.push(`<strong>Due Date:</strong> ${dueFmt}`)
+    }
+    if (notes) bodyLines.push("", String(notes))
+    bodyLines.push("", `<strong>Payment Methods Accepted:</strong> ${methodsLine}`)
+    if (company?.phone) bodyLines.push("", `Questions? Call us at ${company.phone}.`)
+
+    const html = buildHtmlEmail({
+      title:     `${typeLabel} Invoice${invoice.invoice_number ? ` — ${invoice.invoice_number}` : ""}`,
+      preheader: `You have a ${typeLabel.toLowerCase()} invoice for ${fmtAmount}.`,
+      companyName,
+      bodyLines,
+    })
+
+    const plainText = [
+      `Hi ${customer_name},`,
+      "",
+      "Please find your invoice details below.",
+      "",
+      invoice.invoice_number ? `Invoice #: ${invoice.invoice_number}` : "",
+      jobTitle ? `Job: ${jobTitle}` : "",
+      `Type: ${typeLabel}`,
+      `Amount Due: ${fmtAmount}`,
+      due_date ? `Due Date: ${due_date}` : "",
+      notes    ? `\n${notes}`           : "",
+      "",
+      `Payment Methods Accepted: ${methodsLine}`,
+      company?.phone ? `\nQuestions? Call us at ${company.phone}.` : "",
+    ].filter(Boolean).join("\n")
+
+    const subject = `Invoice from ${companyName}${invoice.invoice_number ? ` — ${invoice.invoice_number}` : ""}`
+
+    let sendError: string | null = null
+    try {
+      const transporter = nodemailer.createTransport({
+        host:   process.env.SMTP_HOST ?? "smtp.gmail.com",
+        port:   Number(process.env.SMTP_PORT ?? 587),
+        secure: false,
+        auth:   { user: process.env.SMTP_USER!, pass: process.env.SMTP_PASS! },
+      })
+      await transporter.sendMail({
+        from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
+        to:      customer_email,
+        subject,
+        text:    plainText,
+        html,
+      })
+    } catch (err: unknown) {
+      sendError = err instanceof Error ? err.message : String(err)
+      console.error("[execute/create_send_invoice] email send failed:", sendError)
+    }
+
+    // Update invoice status only when email succeeded
+    if (!sendError) {
+      await supabase.from("invoices")
+        .update({ status: "sent" })
+        .eq("id", invoice.id)
+        .eq("status", "draft")
+    }
+
+    // Log communication (best-effort)
+    try {
+      await supabase.from("communication_logs").insert({
+        user_id:     ownerUserId,
+        customer_id,
+        job_id:      job_id ?? null,
+        type:        "custom",
+        subject,
+        body:        sendError
+          ? `Invoice ${invoice.invoice_number ?? invoice.id} created but email failed: ${sendError}`
+          : `Invoice sent via Lia to ${customer_email}`,
+        channel:     "email",
+      })
+    } catch { /* non-critical */ }
+
+    // Mark approval executed
+    await supabase.from("assistant_approvals")
+      .update({
+        status:       "executed",
+        executed_at:  now,
+        result:       { invoice_id: invoice.id, sent_to: sendError ? null : customer_email },
+        updated_at:   now,
+      })
+      .eq("id", id)
+
+    // Notify Lia (fire-and-forget) — only when email was sent
+    if (!sendError) {
+      notifyLia({
+        event_type:     "invoice_sent",
+        customer_name:  customer_name as string,
+        customer_email: customer_email as string,
+        document_name:  invoice.invoice_number
+          ? `Invoice #${invoice.invoice_number}`
+          : `${typeLabel} Invoice`,
+        amount:         Number(amount),
+        crm_url:        `${appUrl}/invoices/${invoice.id}`,
+      })
+    }
+
+    if (sendError) {
+      return NextResponse.json({
+        action_type:    "create_send_invoice",
+        success:        false,
+        invoice_id:     invoice.id,
+        invoice_number: invoice.invoice_number ?? null,
+        sent_to:        null,
+        warning:        `Invoice ${invoice.invoice_number ?? ""} created but email failed: ${sendError}`,
+      })
+    }
+
+    return NextResponse.json({
+      action_type:    "create_send_invoice",
+      success:        true,
+      invoice_id:     invoice.id,
+      invoice_number: invoice.invoice_number ?? null,
+      sent_to:        customer_email,
     })
   }
 

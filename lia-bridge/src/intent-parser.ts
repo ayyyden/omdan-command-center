@@ -6,6 +6,9 @@ export type Intent =
   | { type: "approval_reply"; approvalId: string; action: "approve" | "reject" }
   | { type: "edit_approval"; approvalId: string }
   | { type: "add_lead_estimate"; rawText: string }
+  | { type: "create_invoice"; rawText: string }
+  | { type: "pick_customer"; index: number }
+  | { type: "cancel_invoice" }
   | { type: "unknown"; rawText: string }
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
@@ -23,6 +26,13 @@ export function parseIntent(text: string): Intent {
 
   const tgEdit = lower.match(/^edit:([0-9a-f-]{36})$/)
   if (tgEdit) return { type: "edit_approval", approvalId: tgEdit[1] }
+
+  // Customer disambiguation button callback: "pick_customer:N"
+  const pickCustomer = lower.match(/^pick_customer:(\d+)$/)
+  if (pickCustomer) return { type: "pick_customer", index: parseInt(pickCustomer[1], 10) }
+
+  // Invoice cancel button callback
+  if (lower === "cancel_invoice") return { type: "cancel_invoice" }
 
   // OpenClaw interactive button format: "approve_<uuid>" / "reject_<uuid>"
   const btnApprove = lower.match(/^approve_([0-9a-f-]{36})$/)
@@ -47,6 +57,18 @@ export function parseIntent(text: string): Intent {
 
   const shortReject = lower.match(/^reject\s+([0-9a-f]{8})$/)
   if (shortReject) return { type: "approval_reply", approvalId: shortReject[1], action: "reject" }
+
+  // Invoice request — must come before lead detection to avoid "invoice" triggering "add lead"
+  if (/\b(?:invoice|bill)\b/.test(lower) && /\b(?:invoice|bill|send|create)\b/.test(lower)) {
+    // Exclude messages that are clearly about viewing/checking invoices rather than creating
+    if (!/\b(?:check|view|show|list|status|paid|unpaid)\b/.test(lower)) {
+      return { type: "create_invoice", rawText: trimmed }
+    }
+  }
+  // Natural phrasing without keyword overlap
+  if (/\bsend\s+(?:an?\s+)?invoice\b|\bcreate\s+(?:an?\s+)?invoice\b/.test(lower)) {
+    return { type: "create_invoice", rawText: trimmed }
+  }
 
   // Add lead / new lead
   if (/add\s+(this\s+)?lead|new\s+lead|lia\s+add/.test(lower)) {

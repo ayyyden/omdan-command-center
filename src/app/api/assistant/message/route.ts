@@ -44,6 +44,15 @@ interface EstimateData {
   payment_steps?: Array<{ name: string; amount: number }>
 }
 
+interface InvoiceData {
+  customer_name?: string
+  customer_id?: string
+  amount?: number
+  type?: string
+  notes?: string
+  due_date?: string
+}
+
 interface MessageBody {
   message: string
   sender?: string
@@ -52,6 +61,7 @@ interface MessageBody {
   lead?: LeadData
   estimate?: EstimateData
   wants_estimate?: boolean
+  invoice_data?: InvoiceData
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -166,6 +176,151 @@ async function handleAddLeadEstimate(body: MessageBody) {
   })
 }
 
+// ─── Invoice approval creation ────────────────────────────────────────────────
+
+const INVOICE_TYPE_LABELS: Record<string, string> = {
+  deposit:  "Deposit",
+  progress: "Progress",
+  final:    "Final",
+}
+
+function invoiceTypeLabel(type: string): string {
+  return INVOICE_TYPE_LABELS[type]
+    ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+async function handleCreateInvoice(body: MessageBody) {
+  const { invoice_data, sender } = body
+  const supabase = createServiceClient()
+
+  // Validate required fields
+  const missing: string[] = []
+  if (!invoice_data?.customer_name && !invoice_data?.customer_id) missing.push("customer name")
+  if (!invoice_data?.amount || invoice_data.amount <= 0) missing.push("amount")
+  if (missing.length) {
+    return NextResponse.json({ intent: "create_invoice", missing_fields: missing })
+  }
+
+  // ── Resolve customer ────────────────────────────────────────────────────────
+  let customerId   = invoice_data!.customer_id ?? null
+  let customerName = invoice_data!.customer_name ?? ""
+  let customerEmail: string | null = null
+
+  if (customerId) {
+    // Already resolved (post-disambiguation)
+    const { data: row } = await supabase
+      .from("customers")
+      .select("id, name, email")
+      .eq("id", customerId)
+      .single()
+    if (!row) {
+      return NextResponse.json({
+        intent: "create_invoice",
+        not_found: true,
+        response_text: "Customer not found. Please check the name and try again.",
+      })
+    }
+    customerName  = row.name
+    customerEmail = row.email ?? null
+  } else {
+    const { data: matches } = await supabase
+      .from("customers")
+      .select("id, name, email")
+      .ilike("name", `%${customerName}%`)
+      .order("name")
+      .limit(6)
+
+    if (!matches || matches.length === 0) {
+      return NextResponse.json({
+        intent:    "create_invoice",
+        not_found: true,
+        response_text: `No customer found matching "${customerName}". Check the spelling and try again.`,
+      })
+    }
+    if (matches.length > 1) {
+      return NextResponse.json({
+        intent: "create_invoice",
+        needs_disambiguation: true,
+        customer_matches: matches.map((m) => ({
+          id:    m.id,
+          name:  m.name,
+          email: m.email ?? null,
+        })),
+      })
+    }
+    customerId    = matches[0].id
+    customerName  = matches[0].name
+    customerEmail = matches[0].email ?? null
+  }
+
+  // ── Find most-recent active job for this customer (optional) ────────────────
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, title")
+    .eq("customer_id", customerId)
+    .not("status", "in", "(completed,cancelled)")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  // ── Build approval ──────────────────────────────────────────────────────────
+  const amount         = Number(invoice_data!.amount)
+  const invoiceType    = invoice_data!.type ?? "deposit"
+  const typeLabel      = invoiceTypeLabel(invoiceType)
+  const paymentMethods = ["zelle", "cash", "check"]   // sensible default
+  const appUrl         = process.env.NEXT_PUBLIC_APP_URL ?? ""
+
+  const { data: approval, error: approvalErr } = await supabase
+    .from("assistant_approvals")
+    .insert({
+      channel:               "telegram",
+      action_type:           "create_send_invoice",
+      action_summary:        `Send ${typeLabel} invoice $${amount.toLocaleString()} to ${customerName}`,
+      proposed_payload: {
+        customer_id:     customerId,
+        customer_name:   customerName,
+        customer_email:  customerEmail,
+        job_id:          job?.id   ?? null,
+        job_title:       job?.title ?? null,
+        amount,
+        type:            invoiceType,
+        notes:           invoice_data!.notes ?? null,
+        due_date:        invoice_data!.due_date ?? null,
+        payment_methods: paymentMethods,
+      },
+      requested_by_external: sender ? `telegram:${sender}` : null,
+      expires_at:            new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    })
+    .select()
+    .single()
+
+  if (approvalErr || !approval) {
+    console.error("[assistant/message] invoice approval insert error:", approvalErr?.message)
+    return NextResponse.json(
+      { error: "Failed to create invoice approval", detail: approvalErr?.message },
+      { status: 500 },
+    )
+  }
+
+  return NextResponse.json({
+    intent:      "create_invoice",
+    approval_id: approval.id,
+    invoice_preview: {
+      customer_name:   customerName,
+      customer_email:  customerEmail,
+      customer_id:     customerId,
+      job_id:          job?.id    ?? null,
+      job_title:       job?.title ?? null,
+      amount,
+      type:            invoiceType,
+      type_label:      typeLabel,
+      due_date:        invoice_data!.due_date ?? null,
+      notes:           invoice_data!.notes    ?? null,
+      payment_methods: paymentMethods,
+    },
+  })
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
@@ -179,6 +334,10 @@ export async function POST(req: Request) {
 
   if (explicitIntent === "add_lead_estimate") {
     return handleAddLeadEstimate(body)
+  }
+
+  if (explicitIntent === "create_invoice") {
+    return handleCreateInvoice(body)
   }
 
   const textIntent = parseIntentFromText(body.message ?? "")
