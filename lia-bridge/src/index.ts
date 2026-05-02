@@ -33,6 +33,13 @@ const TELEGRAM_ALLOWED_IDS: Set<number> = new Set(
     .filter(id => !isNaN(id))
 )
 
+const TELEGRAM_ALLOWED_CHAT_IDS: Set<number> = new Set(
+  (process.env.TELEGRAM_ALLOWED_CHAT_IDS ?? "")
+    .split(",")
+    .map(id => parseInt(id.trim(), 10))
+    .filter(id => !isNaN(id))
+)
+
 // ─── Pending edit state ────────────────────────────────────────────────────────
 // Key = chatId (Telegram) or phone number (WhatsApp), value = old approval to reject.
 
@@ -728,7 +735,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
     callback_query?: {
       id?: string
       from?: { id: number }
-      message?: { chat?: { id: number } }
+      message?: { chat?: { id: number; type?: string; title?: string } }
       data?: string
     }
   }
@@ -737,12 +744,14 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
   const callback = update.callback_query
   const fromId   = message?.from?.id ?? callback?.from?.id
   const chatId   = message?.chat?.id ?? callback?.message?.chat?.id
+  const chatType = message?.chat?.type ?? callback?.message?.chat?.type ?? "private"
+  const chatTitle = message?.chat?.title ?? callback?.message?.chat?.title ?? ""
   const text     = message?.text ?? callback?.data ?? ""
 
-  // DEBUG: log chat/user identity to help retrieve group chat ID
+  // Structured incoming-message log (no secrets)
   if (message) {
     console.log(
-      `[telegram-debug] from=${message.from?.id ?? "?"} username=${message.from?.username ?? "?"} ` +
+      `[lia/telegram] from=${message.from?.id ?? "?"} username=${message.from?.username ?? "?"} ` +
       `chat=${message.chat?.id ?? "?"} type=${message.chat?.type ?? "?"} ` +
       `title="${message.chat?.title ?? ""}" text="${message.text ?? ""}"`
     )
@@ -750,9 +759,18 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
 
   if (!fromId || !chatId || !text) return
 
+  // User must always be in the allowlist
   if (!TELEGRAM_ALLOWED_IDS.has(fromId)) {
     console.log(`[lia/telegram] Blocked unauthorized user: ${fromId}`)
     return
+  }
+
+  // Group/supergroup chats must additionally be in the chat allowlist
+  if (chatType === "group" || chatType === "supergroup") {
+    if (!TELEGRAM_ALLOWED_CHAT_IDS.has(chatId)) {
+      console.log(`[lia/telegram] Unauthorized chat: chat=${chatId} type=${chatType} title="${chatTitle}" from=${fromId}`)
+      return
+    }
   }
 
   const chatKey = String(chatId)
