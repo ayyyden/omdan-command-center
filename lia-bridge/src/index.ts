@@ -4,11 +4,12 @@ import { startScheduler }           from "./scheduler"
 import { parseIntent }              from "./intent-parser"
 import { parseInvoiceMessage }      from "./invoice-parser"
 import { parseLeadEstimateMessage } from "./lead-parser"
+import { parseScheduleMessage, formatScheduledDate, formatScheduledTime } from "./schedule-parser"
 import { formatDailySummary }       from "./format-response"
 import { sendWhatsAppText }         from "./openclaw-client"
 import { sendTelegramMessage, sendTelegramWithButtons, type InlineKeyboardButton } from "./telegram-client"
 import { checkHealth, sendMessage, updateApproval, executeApproval } from "./crm-client"
-import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch } from "./types"
+import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch, ScheduleData, SchedulePreview } from "./types"
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,19 @@ const pendingInvoicePicks = new Map<string, {
 const pendingJobPicks = new Map<string, {
   invoiceData: InvoiceData
   matches:     JobMatch[]
+}>()
+
+// ─── Pending schedule disambiguation ─────────────────────────────────────────
+// Stores partial schedule data while waiting for customer or job selection.
+
+const pendingScheduleCustomerPicks = new Map<string, {
+  scheduleData: ScheduleData
+  matches:      CustomerMatch[]
+}>()
+
+const pendingScheduleJobPicks = new Map<string, {
+  scheduleData: ScheduleData
+  matches:      JobMatch[]
 }>()
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -138,6 +152,117 @@ function formatInvoicePreview(approvalId: string, preview: InvoicePreview): stri
   }
   lines.push("", `ID: ${approvalId}`)
   return lines.join("\n")
+}
+
+// ─── Schedule preview formatter ──────────────────────────────────────────────
+
+function formatSchedulePreview(approvalId: string, preview: SchedulePreview): string {
+  const lines = ["📅 Schedule Job — Pending Approval", ""]
+  lines.push(`👤 Customer: ${preview.customer_name}`)
+  if (preview.customer_address) lines.push(`📍 Address: ${preview.customer_address}`)
+  lines.push(`🔨 Job: ${preview.job_title}`)
+  lines.push(`📊 Status: ${preview.job_status.replace(/_/g, " ")}`)
+
+  if (preview.current_scheduled_date) {
+    const curDate = formatScheduledDate(preview.current_scheduled_date)
+    const curTime = formatScheduledTime(preview.current_scheduled_time)
+    lines.push(``, `Current: ${curDate}${preview.current_scheduled_time ? ` at ${curTime}` : ""}`)
+  }
+
+  const newDate = formatScheduledDate(preview.new_scheduled_date)
+  const newTime = formatScheduledTime(preview.new_scheduled_time)
+  lines.push(`→ New: ${newDate} at ${newTime}`)
+
+  if (preview.pm_name) lines.push(``, `👷 PM: ${preview.pm_name}`)
+  if (preview.crm_url) lines.push(`🔗 CRM: ${preview.crm_url}`)
+  lines.push(``, `ID: ${approvalId}`)
+  return lines.join("\n")
+}
+
+// ─── Shared schedule handler ──────────────────────────────────────────────────
+
+async function handleScheduleJob(
+  rawText:   string,
+  senderKey: string,
+  send:      SendFn,
+): Promise<void> {
+  const parsed = parseScheduleMessage(rawText)
+
+  if (parsed.missing.length > 0) {
+    await send(
+      `To schedule the job, I still need: ${parsed.missing.join(", ")}.\n\n` +
+      `Example: "Lia, schedule John Smith paver job for Monday at 9am"`,
+    )
+    return
+  }
+
+  const scheduleData: ScheduleData = {
+    customer_name:  parsed.customer_name  ?? undefined,
+    job_title_hint: parsed.job_title_hint ?? undefined,
+    scheduled_date: parsed.scheduled_date!,
+    scheduled_time: parsed.scheduled_time ?? null,
+  }
+
+  const result = await sendMessage({
+    message:       rawText,
+    sender:        senderKey,
+    intent:        "schedule_job",
+    schedule_data: scheduleData,
+  })
+
+  if (result.missing_fields?.length) {
+    await send(`To schedule the job, I still need: ${result.missing_fields.join(", ")}.`)
+    return
+  }
+
+  if (result.not_found) {
+    await send(result.response_text ?? "No customer or job found. Check the name and try again.")
+    return
+  }
+
+  if (result.no_jobs) {
+    await send(result.response_text ?? "No active jobs found for this customer.")
+    return
+  }
+
+  // Customer disambiguation
+  if (result.needs_customer_disambiguation && result.customer_matches?.length) {
+    pendingScheduleCustomerPicks.set(senderKey, { scheduleData, matches: result.customer_matches })
+    const lines = ["Multiple customers found — choose one:"]
+    const buttons: InlineKeyboardButton[][] = result.customer_matches.map((m, i) => [{
+      text:          `${i + 1}. ${m.name}`,
+      callback_data: `pick_schedule_customer:${i}`,
+    }])
+    buttons.push([{ text: "❌ Cancel", callback_data: "cancel_schedule" }])
+    await send(lines.join("\n"), buttons)
+    return
+  }
+
+  // Job disambiguation
+  if (result.needs_schedule_job_selection && result.job_matches?.length) {
+    pendingScheduleJobPicks.set(senderKey, { scheduleData, matches: result.job_matches })
+    const lines = ["Multiple jobs found — which job do you want to schedule?"]
+    const buttons: InlineKeyboardButton[][] = result.job_matches.map((j, i) => [{
+      text:          `${i + 1}. ${j.title}`,
+      callback_data: `pick_schedule_job:${i}`,
+    }])
+    buttons.push([{ text: "❌ Cancel", callback_data: "cancel_schedule" }])
+    await send(lines.join("\n"), buttons)
+    return
+  }
+
+  if (!result.approval_id || !result.schedule_preview) {
+    await send(result.response_text ?? "Failed to create schedule approval. Please try again.")
+    return
+  }
+
+  const previewText = formatSchedulePreview(result.approval_id, result.schedule_preview)
+  const buttons: InlineKeyboardButton[][] = [[
+    { text: "✅ Approve", callback_data: `approve:${result.approval_id}` },
+    { text: "❌ Reject",  callback_data: `reject:${result.approval_id}` },
+    { text: "✏️ Edit",   callback_data: `edit:${result.approval_id}` },
+  ]]
+  await send(previewText, buttons)
 }
 
 // ─── Shared invoice handler ───────────────────────────────────────────────────
@@ -501,12 +626,27 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       await handleInvoice(text, chatKey, sendTG)
       return
     }
+    if (pendingEdit && intent.type === "schedule_job") {
+      const { oldApprovalId } = pendingEdit
+      pendingEdits.delete(chatKey)
+      await updateApproval(oldApprovalId, "rejected").catch(() => {})
+      await handleScheduleJob(text, chatKey, sendTG)
+      return
+    }
 
     // ── cancel_invoice ──────────────────────────────────────────────────────
     if (intent.type === "cancel_invoice") {
       pendingInvoicePicks.delete(chatKey)
       pendingJobPicks.delete(chatKey)
       await sendTelegramMessage(chatId, "Invoice request cancelled.")
+      return
+    }
+
+    // ── cancel_schedule ─────────────────────────────────────────────────────
+    if (intent.type === "cancel_schedule") {
+      pendingScheduleCustomerPicks.delete(chatKey)
+      pendingScheduleJobPicks.delete(chatKey)
+      await sendTelegramMessage(chatId, "Schedule request cancelled.")
       return
     }
 
@@ -614,6 +754,88 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       return
     }
 
+    // ── Schedule customer disambiguation reply ───────────────────────────────
+    if (intent.type === "pick_schedule_customer") {
+      const pending = pendingScheduleCustomerPicks.get(chatKey)
+      if (!pending) {
+        await sendTelegramMessage(chatId, "No pending customer selection. Re-send your schedule request.")
+        return
+      }
+      const match = pending.matches[intent.index]
+      if (!match) {
+        await sendTelegramMessage(chatId, "Invalid selection. Please try again.")
+        return
+      }
+      pendingScheduleCustomerPicks.delete(chatKey)
+
+      const result = await sendMessage({
+        message:       "",
+        sender:        chatKey,
+        intent:        "schedule_job",
+        schedule_data: { ...pending.scheduleData, customer_id: match.id, customer_name: match.name },
+      })
+
+      if (result.no_jobs) {
+        await sendTelegramMessage(chatId, result.response_text ?? `No active jobs found for ${match.name}.`)
+        return
+      }
+      if (result.needs_schedule_job_selection && result.job_matches?.length) {
+        pendingScheduleJobPicks.set(chatKey, {
+          scheduleData: { ...pending.scheduleData, customer_id: match.id, customer_name: match.name },
+          matches: result.job_matches,
+        })
+        const jButtons: InlineKeyboardButton[][] = result.job_matches.map((j, i) => [{
+          text: `${i + 1}. ${j.title}`, callback_data: `pick_schedule_job:${i}`,
+        }])
+        jButtons.push([{ text: "❌ Cancel", callback_data: "cancel_schedule" }])
+        await sendTelegramWithButtons(chatId, "Multiple jobs found — which one do you want to schedule?", jButtons)
+        return
+      }
+      if (!result.approval_id || !result.schedule_preview) {
+        await sendTelegramMessage(chatId, result.response_text ?? "Failed to create schedule approval.")
+        return
+      }
+      await sendTelegramWithButtons(chatId, formatSchedulePreview(result.approval_id, result.schedule_preview), [[
+        { text: "✅ Approve", callback_data: `approve:${result.approval_id}` },
+        { text: "❌ Reject",  callback_data: `reject:${result.approval_id}` },
+        { text: "✏️ Edit",   callback_data: `edit:${result.approval_id}` },
+      ]])
+      return
+    }
+
+    // ── Schedule job disambiguation reply ────────────────────────────────────
+    if (intent.type === "pick_schedule_job") {
+      const pending = pendingScheduleJobPicks.get(chatKey)
+      if (!pending) {
+        await sendTelegramMessage(chatId, "No pending job selection. Re-send your schedule request.")
+        return
+      }
+      const match = pending.matches[intent.index]
+      if (!match) {
+        await sendTelegramMessage(chatId, "Invalid selection. Please try again.")
+        return
+      }
+      pendingScheduleJobPicks.delete(chatKey)
+
+      const result = await sendMessage({
+        message:       "",
+        sender:        chatKey,
+        intent:        "schedule_job",
+        schedule_data: { ...pending.scheduleData, job_id: match.id },
+      })
+
+      if (!result.approval_id || !result.schedule_preview) {
+        await sendTelegramMessage(chatId, result.response_text ?? "Failed to create schedule approval.")
+        return
+      }
+      await sendTelegramWithButtons(chatId, formatSchedulePreview(result.approval_id, result.schedule_preview), [[
+        { text: "✅ Approve", callback_data: `approve:${result.approval_id}` },
+        { text: "❌ Reject",  callback_data: `reject:${result.approval_id}` },
+        { text: "✏️ Edit",   callback_data: `edit:${result.approval_id}` },
+      ]])
+      return
+    }
+
     if (intent.type === "health_check") {
       let crmOk = false
       let approvalReady = false
@@ -647,6 +869,11 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
 
     if (intent.type === "create_invoice") {
       await handleInvoice(text, chatKey, sendTG)
+      return
+    }
+
+    if (intent.type === "schedule_job") {
+      await handleScheduleJob(text, chatKey, sendTG)
       return
     }
 
@@ -695,13 +922,21 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
           const invoiceRef = result.invoice_number ? ` (${result.invoice_number})` : ""
           await sendTelegramMessage(chatId, `✅ Invoice${invoiceRef} sent to ${result.sent_to}`)
         }
+      } else if (result.action_type === "schedule_job") {
+        if (result.error) {
+          await sendTelegramMessage(chatId, `⚠️ ${result.error}`)
+        } else {
+          const dateStr = result.scheduled_date ? formatScheduledDate(result.scheduled_date) : "date unknown"
+          const timeStr = formatScheduledTime(result.scheduled_time ?? null)
+          await sendTelegramMessage(chatId, `✅ Scheduled: ${result.job_title ?? "Job"} — ${dateStr} at ${timeStr}`)
+        }
       }
       return
     }
 
     await sendTelegramMessage(
       chatId,
-      "I didn't understand that.\n\nTry:\n• \"Lia, are you connected?\"\n• \"Lia, what needs my attention today?\"\n• \"Lia add this lead: name - John...\"\n• \"Lia invoice John Smith $2500 deposit\""
+      "I didn't understand that.\n\nTry:\n• \"Lia, are you connected?\"\n• \"Lia, what needs my attention today?\"\n• \"Lia add this lead: name - John...\"\n• \"Lia invoice John Smith $2500 deposit\"\n• \"Lia, schedule John Smith paver job for Monday at 9am\""
     )
   } catch (err) {
     console.error("[lia/telegram] Error:", err)

@@ -42,6 +42,15 @@ export interface InvoiceData {
   job_title_hint?: string   // from parsed notes, used to filter jobs
 }
 
+export interface ScheduleData {
+  customer_name?: string
+  customer_id?: string      // set after customer disambiguation
+  job_id?: string           // set after job disambiguation
+  job_title_hint?: string
+  scheduled_date: string    // YYYY-MM-DD (required)
+  scheduled_time?: string | null  // HH:MM
+}
+
 export interface CustomerMatch {
   id: string
   name: string
@@ -65,6 +74,20 @@ export interface InvoicePreview {
   due_date: string | null
   notes: string | null
   payment_methods: string[]
+}
+
+export interface SchedulePreview {
+  job_id: string
+  job_title: string
+  job_status: string
+  customer_name: string
+  customer_address: string | null
+  current_scheduled_date: string | null
+  current_scheduled_time: string | null
+  new_scheduled_date: string
+  new_scheduled_time: string | null
+  pm_name: string | null
+  crm_url: string
 }
 
 // ─── CRM API responses ────────────────────────────────────────────────────────
@@ -98,6 +121,13 @@ export interface CrmMessageResponse {
   resolved_customer_id?: string
   resolved_customer_name?: string
   resolved_customer_email?: string | null
+  // schedule_job response fields
+  schedule_preview?: SchedulePreview
+  needs_customer_disambiguation?: boolean
+  needs_schedule_job_selection?: boolean
+  resolved_scheduled_date?: string
+  resolved_scheduled_time?: string | null
+  resolved_job_title_hint?: string | null
 }
 
 export interface EstimatePreview {
@@ -127,6 +157,11 @@ export interface ExecuteResponse {
   invoice_id?: string
   invoice_number?: string | null
   warning?: string
+  // schedule_job fields
+  job_id?: string
+  job_title?: string
+  scheduled_date?: string
+  scheduled_time?: string | null
 }
 
 export interface DailySummary {

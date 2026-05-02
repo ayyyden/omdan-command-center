@@ -7,9 +7,13 @@ export type Intent =
   | { type: "edit_approval"; approvalId: string }
   | { type: "add_lead_estimate"; rawText: string }
   | { type: "create_invoice"; rawText: string }
+  | { type: "schedule_job"; rawText: string }
   | { type: "pick_customer"; index: number }
   | { type: "pick_job"; index: number }
+  | { type: "pick_schedule_customer"; index: number }
+  | { type: "pick_schedule_job"; index: number }
   | { type: "cancel_invoice" }
+  | { type: "cancel_schedule" }
   | { type: "unknown"; rawText: string }
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
@@ -36,8 +40,16 @@ export function parseIntent(text: string): Intent {
   const pickJob = lower.match(/^pick_job:(\d+)$/)
   if (pickJob) return { type: "pick_job", index: parseInt(pickJob[1], 10) }
 
-  // Invoice cancel button callback
+  // Schedule disambiguation callbacks
+  const pickSchedCustomer = lower.match(/^pick_schedule_customer:(\d+)$/)
+  if (pickSchedCustomer) return { type: "pick_schedule_customer", index: parseInt(pickSchedCustomer[1], 10) }
+
+  const pickSchedJob = lower.match(/^pick_schedule_job:(\d+)$/)
+  if (pickSchedJob) return { type: "pick_schedule_job", index: parseInt(pickSchedJob[1], 10) }
+
+  // Cancel callbacks
   if (lower === "cancel_invoice") return { type: "cancel_invoice" }
+  if (lower === "cancel_schedule") return { type: "cancel_schedule" }
 
   // OpenClaw interactive button format: "approve_<uuid>" / "reject_<uuid>"
   const btnApprove = lower.match(/^approve_([0-9a-f-]{36})$/)
@@ -73,6 +85,16 @@ export function parseIntent(text: string): Intent {
   // Natural phrasing without keyword overlap
   if (/\bsend\s+(?:an?\s+)?invoice\b|\bcreate\s+(?:an?\s+)?invoice\b/.test(lower)) {
     return { type: "create_invoice", rawText: trimmed }
+  }
+
+  // Schedule job — explicit scheduling requests
+  if (/\b(?:schedule|book)\b/.test(lower) && /\b(?:job|on\s+the\s+calendar|calendar)\b|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today|morning|afternoon|\d{1,2}am|\d{1,2}pm)\b/.test(lower)) {
+    if (!/\b(?:check|view|show|list|status)\b/.test(lower)) {
+      return { type: "schedule_job", rawText: trimmed }
+    }
+  }
+  if (/\bput\b.+\bon\s+the\s+calendar\b/.test(lower)) {
+    return { type: "schedule_job", rawText: trimmed }
   }
 
   // Add lead / new lead

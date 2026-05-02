@@ -1,6 +1,6 @@
 import type {
   CrmHealthResponse, CrmMessageResponse, AssistantApproval, ExecuteResponse,
-  LeadData, EstimateData, InvoiceData,
+  LeadData, EstimateData, InvoiceData, ScheduleData,
 } from "./types"
 
 const BASE_URL = process.env.CRM_BASE_URL!
@@ -32,6 +32,7 @@ export interface SendMessageBody {
   estimate?: EstimateData | null
   wants_estimate?: boolean
   invoice_data?: InvoiceData
+  schedule_data?: ScheduleData
 }
 
 export async function sendMessage(body: SendMessageBody): Promise<CrmMessageResponse> {

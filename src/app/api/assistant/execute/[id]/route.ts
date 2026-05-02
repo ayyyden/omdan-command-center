@@ -682,5 +682,75 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     })
   }
 
+  // ─── schedule_job ─────────────────────────────────────────────────────────
+
+  if (approval.action_type === "schedule_job") {
+    const {
+      job_id, job_title, new_scheduled_date, new_scheduled_time,
+    } = payload as {
+      job_id: string
+      job_title: string
+      new_scheduled_date: string
+      new_scheduled_time: string | null
+    }
+
+    if (!job_id) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "job_id is required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "job_id missing from approval payload" }, { status: 400 })
+    }
+
+    const { error: updateErr } = await supabase
+      .from("jobs")
+      .update({
+        scheduled_date: new_scheduled_date,
+        scheduled_time: new_scheduled_time ?? null,
+        updated_at:     now,
+      })
+      .eq("id", job_id)
+
+    if (updateErr) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: updateErr.message, updated_at: now }).eq("id", id)
+      return NextResponse.json(
+        { error: `Failed to update job schedule: ${updateErr.message}` },
+        { status: 500 },
+      )
+    }
+
+    // Log activity (best-effort — RLS bypassed by service role)
+    try {
+      const timeStr = new_scheduled_time
+        ? ` at ${new_scheduled_time}`
+        : ""
+      await supabase.from("activity_log").insert({
+        user_id:     ownerUserId,
+        entity_type: "job",
+        entity_id:   job_id,
+        job_id:      job_id,
+        action:      "scheduled",
+        description: `Rescheduled via Lia to ${new_scheduled_date}${timeStr}`,
+      })
+    } catch { /* non-critical */ }
+
+    await supabase.from("assistant_approvals")
+      .update({
+        status:      "executed",
+        executed_at: now,
+        result:      { job_id, scheduled_date: new_scheduled_date, scheduled_time: new_scheduled_time },
+        updated_at:  now,
+      })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:    "schedule_job",
+      success:        true,
+      job_id,
+      job_title,
+      scheduled_date: new_scheduled_date,
+      scheduled_time: new_scheduled_time ?? null,
+    })
+  }
+
   return NextResponse.json({ error: `Unknown action_type: ${approval.action_type}` }, { status: 400 })
 }

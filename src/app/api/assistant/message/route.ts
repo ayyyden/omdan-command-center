@@ -55,6 +55,15 @@ interface InvoiceData {
   job_title_hint?: string
 }
 
+interface ScheduleData {
+  customer_name?: string
+  customer_id?: string
+  job_id?: string
+  job_title_hint?: string
+  scheduled_date: string
+  scheduled_time?: string | null
+}
+
 interface MessageBody {
   message: string
   sender?: string
@@ -64,6 +73,7 @@ interface MessageBody {
   estimate?: EstimateData
   wants_estimate?: boolean
   invoice_data?: InvoiceData
+  schedule_data?: ScheduleData
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -376,6 +386,254 @@ async function handleCreateInvoice(body: MessageBody) {
   })
 }
 
+// ─── Schedule job approval creation ──────────────────────────────────────────
+
+async function handleScheduleJob(body: MessageBody) {
+  const { schedule_data, sender } = body
+  const supabase = createServiceClient()
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app"
+
+  if (!schedule_data?.scheduled_date) {
+    return NextResponse.json({
+      intent: "schedule_job",
+      missing_fields: ["scheduled_date"],
+      response_text: "I need a date to schedule the job. Please include a date in your request.",
+    })
+  }
+
+  const { scheduled_date, scheduled_time } = schedule_data
+
+  // Helper: fetch full job details and create the approval
+  async function createApprovalForJob(jobId: string) {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("id, title, status, scheduled_date, scheduled_time, customer_id, project_manager:project_managers(name), customer:customers(name, address)")
+      .eq("id", jobId)
+      .maybeSingle()
+
+    if (!job) {
+      return NextResponse.json({
+        intent:        "schedule_job",
+        not_found:     true,
+        response_text: "Job not found. Please check and try again.",
+      })
+    }
+
+    const jobAny      = job as Record<string, unknown>
+    const pm          = jobAny.project_manager as { name: string } | null
+    const customer    = jobAny.customer        as { name: string; address: string | null } | null
+    const customerName = customer?.name ?? "Unknown"
+
+    const { data: approval, error: approvalErr } = await supabase
+      .from("assistant_approvals")
+      .insert({
+        channel:               "telegram",
+        action_type:           "schedule_job",
+        action_summary:        `Schedule "${job.title as string}" for ${customerName} on ${scheduled_date}`,
+        proposed_payload: {
+          job_id:                   job.id,
+          job_title:                job.title,
+          customer_name:            customerName,
+          customer_address:         customer?.address ?? null,
+          job_status:               job.status,
+          current_scheduled_date:   job.scheduled_date ?? null,
+          current_scheduled_time:   job.scheduled_time ?? null,
+          new_scheduled_date:       scheduled_date,
+          new_scheduled_time:       scheduled_time ?? null,
+          pm_name:                  pm?.name ?? null,
+        },
+        requested_by_external: sender ? `telegram:${sender}` : null,
+        expires_at:            new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      })
+      .select()
+      .single()
+
+    if (approvalErr || !approval) {
+      console.error("[assistant/message] schedule approval insert error:", approvalErr?.message)
+      return NextResponse.json(
+        { error: "Failed to create schedule approval", detail: approvalErr?.message },
+        { status: 500 },
+      )
+    }
+
+    return NextResponse.json({
+      intent:      "schedule_job",
+      approval_id: approval.id,
+      schedule_preview: {
+        job_id:                 job.id,
+        job_title:              job.title as string,
+        job_status:             job.status as string,
+        customer_name:          customerName,
+        customer_address:       customer?.address ?? null,
+        current_scheduled_date: (job.scheduled_date as string | null) ?? null,
+        current_scheduled_time: (job.scheduled_time as string | null) ?? null,
+        new_scheduled_date:     scheduled_date,
+        new_scheduled_time:     scheduled_time ?? null,
+        pm_name:                pm?.name ?? null,
+        crm_url:                `${appUrl}/jobs/${job.id as string}`,
+      },
+    })
+  }
+
+  // ── job_id pre-set (post-disambiguation) ──────────────────────────────────
+  if (schedule_data.job_id) {
+    return createApprovalForJob(schedule_data.job_id)
+  }
+
+  // ── customer_id pre-set (post-customer-disambiguation) ────────────────────
+  if (schedule_data.customer_id) {
+    const hint = schedule_data.job_title_hint ?? null
+    const jobQuery = supabase
+      .from("jobs")
+      .select("id, title")
+      .eq("customer_id", schedule_data.customer_id)
+      .not("status", "in", "(completed,cancelled)")
+      .order("created_at", { ascending: false })
+      .limit(10)
+
+    const { data: customerJobs } = await jobQuery
+    let jobs = customerJobs ?? []
+
+    if (hint && jobs.length > 1) {
+      const filtered = jobs.filter((j) => j.title.toLowerCase().includes(hint.toLowerCase()))
+      if (filtered.length > 0) jobs = filtered
+    }
+
+    if (jobs.length === 0) {
+      return NextResponse.json({
+        intent:        "schedule_job",
+        no_jobs:       true,
+        response_text: `No active jobs found for this customer. A job must exist before scheduling.`,
+      })
+    }
+    if (jobs.length > 1) {
+      return NextResponse.json({
+        intent:                      "schedule_job",
+        needs_schedule_job_selection: true,
+        job_matches:                 jobs.map((j) => ({ id: j.id, title: j.title })),
+      })
+    }
+    return createApprovalForJob(jobs[0].id)
+  }
+
+  // ── customer_name provided → search for matching customer ─────────────────
+  if (schedule_data.customer_name) {
+    const { data: customerMatches } = await supabase
+      .from("customers")
+      .select("id, name")
+      .ilike("name", `%${schedule_data.customer_name}%`)
+      .order("name")
+      .limit(6)
+
+    const matches = customerMatches ?? []
+
+    if (matches.length === 0) {
+      // Fall back to job title search if hint available
+      if (schedule_data.job_title_hint) {
+        const { data: jobMatches } = await supabase
+          .from("jobs")
+          .select("id, title")
+          .ilike("title", `%${schedule_data.job_title_hint}%`)
+          .not("status", "in", "(completed,cancelled)")
+          .order("created_at", { ascending: false })
+          .limit(6)
+
+        const jm = jobMatches ?? []
+        if (jm.length === 1) return createApprovalForJob(jm[0].id)
+        if (jm.length > 1) {
+          return NextResponse.json({
+            intent:                      "schedule_job",
+            needs_schedule_job_selection: true,
+            job_matches:                 jm.map((j) => ({ id: j.id, title: j.title })),
+          })
+        }
+      }
+      return NextResponse.json({
+        intent:        "schedule_job",
+        not_found:     true,
+        response_text: `No customer found matching "${schedule_data.customer_name}". Check the spelling and try again.`,
+      })
+    }
+
+    if (matches.length > 1) {
+      return NextResponse.json({
+        intent:                       "schedule_job",
+        needs_customer_disambiguation: true,
+        customer_matches:             matches.map((m) => ({ id: m.id, name: m.name, email: null })),
+        resolved_scheduled_date:      scheduled_date,
+        resolved_scheduled_time:      scheduled_time ?? null,
+        resolved_job_title_hint:      schedule_data.job_title_hint ?? null,
+      })
+    }
+
+    // Exactly 1 customer match
+    const customerId = matches[0].id
+    const hint = schedule_data.job_title_hint ?? null
+
+    const { data: custJobs } = await supabase
+      .from("jobs")
+      .select("id, title")
+      .eq("customer_id", customerId)
+      .not("status", "in", "(completed,cancelled)")
+      .order("created_at", { ascending: false })
+      .limit(10)
+
+    let jobs2 = custJobs ?? []
+    if (hint && jobs2.length > 1) {
+      const filtered = jobs2.filter((j) => j.title.toLowerCase().includes(hint.toLowerCase()))
+      if (filtered.length > 0) jobs2 = filtered
+    }
+
+    if (jobs2.length === 0) {
+      return NextResponse.json({
+        intent:        "schedule_job",
+        no_jobs:       true,
+        response_text: `No active jobs found for ${matches[0].name}. A job must exist before scheduling.`,
+      })
+    }
+    if (jobs2.length > 1) {
+      return NextResponse.json({
+        intent:                      "schedule_job",
+        needs_schedule_job_selection: true,
+        job_matches:                 jobs2.map((j) => ({ id: j.id, title: j.title })),
+      })
+    }
+    return createApprovalForJob(jobs2[0].id)
+  }
+
+  // ── No customer name — search jobs by title hint ───────────────────────────
+  if (schedule_data.job_title_hint) {
+    const { data: jobMatches } = await supabase
+      .from("jobs")
+      .select("id, title")
+      .ilike("title", `%${schedule_data.job_title_hint}%`)
+      .not("status", "in", "(completed,cancelled)")
+      .order("created_at", { ascending: false })
+      .limit(6)
+
+    const jm = jobMatches ?? []
+    if (jm.length === 0) {
+      return NextResponse.json({
+        intent:        "schedule_job",
+        not_found:     true,
+        response_text: `No active job found matching "${schedule_data.job_title_hint}". Check the name and try again.`,
+      })
+    }
+    if (jm.length === 1) return createApprovalForJob(jm[0].id)
+    return NextResponse.json({
+      intent:                      "schedule_job",
+      needs_schedule_job_selection: true,
+      job_matches:                 jm.map((j) => ({ id: j.id, title: j.title })),
+    })
+  }
+
+  return NextResponse.json({
+    intent:        "schedule_job",
+    missing_fields: ["customer_name"],
+    response_text: "I need a customer name or job title to find the job to schedule.",
+  })
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
@@ -393,6 +651,10 @@ export async function POST(req: Request) {
 
   if (explicitIntent === "create_invoice") {
     return handleCreateInvoice(body)
+  }
+
+  if (explicitIntent === "schedule_job") {
+    return handleScheduleJob(body)
   }
 
   const textIntent = parseIntentFromText(body.message ?? "")
