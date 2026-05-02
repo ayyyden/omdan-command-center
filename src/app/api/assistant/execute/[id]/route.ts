@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service"
 import { buildHtmlEmail, smtpConfigured } from "@/lib/email"
 import { generateEstimateScope } from "@/lib/scope-generator"
 import { generateEstimatePDFBuffer } from "@/lib/pdf/generate-estimate-pdf"
+import { generateInvoicePDFBuffer } from "@/lib/pdf/generate-invoice-pdf"
 import { notifyLia } from "@/lib/lia-notifications"
 
 interface RouteCtx { params: Promise<{ id: string }> }
@@ -403,10 +404,10 @@ export async function POST(_req: Request, { params }: RouteCtx) {
   if (approval.action_type === "create_send_invoice") {
     const {
       customer_id, customer_name, customer_email,
-      job_id, amount, type, notes, due_date, payment_methods,
+      job_id, job_title: payloadJobTitle, amount, type, notes, due_date, payment_methods,
     } = payload as {
       customer_id: string; customer_name: string; customer_email: string | null
-      job_id: string | null; amount: number; type: string
+      job_id: string | null; job_title?: string | null; amount: number; type: string
       notes: string | null; due_date: string | null; payment_methods: string[]
     }
 
@@ -433,7 +434,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         notes:           notes   ?? null,
         payment_methods: payment_methods ?? ["zelle", "cash", "check"],
       })
-      .select("id, invoice_number")
+      .select("id, invoice_number, created_at")
       .single()
 
     if (invErr || !invoice) {
@@ -477,7 +478,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     // Fetch company settings
     const { data: company } = await supabase
       .from("company_settings")
-      .select("company_name, email, phone")
+      .select("company_name, email, phone, address")
       .eq("user_id", ownerUserId)
       .maybeSingle()
 
@@ -495,11 +496,38 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       ? methods.map((m) => METHOD_LABELS[m] ?? m.charAt(0).toUpperCase() + m.slice(1)).join(", ")
       : "Contact us to arrange payment"
 
-    // Fetch job title if needed
-    let jobTitle = ""
-    if (job_id) {
+    // Fetch job title (use payload job_title first; fall back to DB fetch)
+    let jobTitle = payloadJobTitle ?? ""
+    if (!jobTitle && job_id) {
       const { data: jobRow } = await supabase.from("jobs").select("title").eq("id", job_id).single()
       jobTitle = jobRow?.title ?? ""
+    }
+
+    // Generate invoice PDF (best-effort — logged on failure, email still sends)
+    let pdfBuffer: Buffer | null = null
+    const pdfFilename = `Invoice-${invoice.invoice_number ?? invoice.id.slice(0, 8)}.pdf`
+    try {
+      pdfBuffer = await generateInvoicePDFBuffer({
+        invoice: {
+          id:              invoice.id as string,
+          invoice_number:  invoice.invoice_number ?? null,
+          created_at:      (invoice as { created_at: string }).created_at,
+          type:            type as string,
+          type_label:      typeLabel,
+          amount:          Number(amount),
+          due_date:        due_date ?? null,
+          notes:           notes   ?? null,
+          payment_methods: methods,
+        },
+        customer: {
+          name:  customer_name as string,
+          email: customer_email,
+        },
+        job: jobTitle ? { title: jobTitle } : null,
+        ownerUserId,
+      })
+    } catch (err) {
+      console.error("[execute/create_send_invoice] PDF generation failed:", err)
     }
 
     const bodyLines: string[] = [
@@ -523,6 +551,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     if (notes) bodyLines.push("", String(notes))
     bodyLines.push("", `<strong>Payment Methods Accepted:</strong> ${methodsLine}`)
     if (company?.phone) bodyLines.push("", `Questions? Call us at ${company.phone}.`)
+    if (pdfBuffer) bodyLines.push("", "Your invoice PDF is attached to this email for your records.")
 
     const html = buildHtmlEmail({
       title:     `${typeLabel} Invoice${invoice.invoice_number ? ` — ${invoice.invoice_number}` : ""}`,
@@ -558,11 +587,14 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         auth:   { user: process.env.SMTP_USER!, pass: process.env.SMTP_PASS! },
       })
       await transporter.sendMail({
-        from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
-        to:      customer_email,
+        from:        process.env.SMTP_FROM ?? process.env.SMTP_USER,
+        to:          customer_email,
         subject,
-        text:    plainText,
+        text:        plainText,
         html,
+        attachments: pdfBuffer
+          ? [{ filename: pdfFilename, content: pdfBuffer, contentType: "application/pdf" }]
+          : [],
       })
     } catch (err: unknown) {
       sendError = err instanceof Error ? err.message : String(err)
@@ -575,6 +607,20 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         .update({ status: "sent" })
         .eq("id", invoice.id)
         .eq("status", "draft")
+    }
+
+    // Upload PDF to Supabase Storage (best-effort, only on successful send)
+    if (!sendError && pdfBuffer) {
+      try {
+        const storagePath = `invoices/${invoice.id}.pdf`
+        const { error: uploadErr } = await supabase.storage
+          .from("documents")
+          .upload(storagePath, pdfBuffer, { contentType: "application/pdf", upsert: true })
+        if (!uploadErr) {
+          const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath)
+          await supabase.from("invoices").update({ pdf_url: urlData.publicUrl }).eq("id", invoice.id)
+        }
+      } catch { /* non-critical */ }
     }
 
     // Log communication (best-effort)
