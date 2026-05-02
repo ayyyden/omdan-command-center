@@ -28,6 +28,7 @@ export interface EstimateData {
   services?: string
   total?: number
   payment_steps?: PaymentStep[]
+  scope_override?: string  // manually provided scope text from "Scope:" section
 }
 
 // ─── CRM API responses ────────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ export interface EstimatePreview {
   customer_name: string
   email: string | null
   services: string | null
+  scope: string | null
   total: number
   payment_steps: PaymentStep[]
   estimate_url: string

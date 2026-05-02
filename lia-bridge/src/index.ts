@@ -67,10 +67,15 @@ function formatLeadPreview(
 }
 
 function formatEstimatePreview(sendApprovalId: string, preview: EstimatePreview): string {
-  const lines = ["✅ Lead created!", "", "📄 Draft Estimate Ready", ""]
-  lines.push(`Title: ${preview.title}`)
-  if (preview.services) lines.push(`Services: ${preview.services}`)
-  lines.push(`Total: ${fmtMoney(preview.total)}`)
+  const lines = ["✅ Lead created — Draft Estimate Ready", ""]
+  lines.push(`📋 ${preview.title}`)
+  lines.push(`💰 Total: ${fmtMoney(preview.total)}`)
+
+  if (preview.scope) {
+    lines.push("", `📝 Scope: ${preview.scope}`)
+  } else if (preview.services) {
+    lines.push(`🛠 Services: ${preview.services}`)
+  }
 
   if (preview.payment_steps?.length) {
     lines.push("", "Payment Schedule:")
@@ -79,8 +84,10 @@ function formatEstimatePreview(sendApprovalId: string, preview: EstimatePreview)
     }
   }
 
-  if (preview.email) lines.push("", `Send estimate email to: ${preview.email}`)
+  if (preview.email) lines.push("", `📧 Send to: ${preview.email}`)
+  if (preview.estimate_url) lines.push(`🔗 CRM: ${preview.estimate_url}`)
 
+  lines.push("", "📎 PDF will be attached to the customer email.")
   lines.push("", `ID: ${sendApprovalId}`)
   return lines.join("\n")
 }

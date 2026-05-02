@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server"
+import nodemailer from "nodemailer"
 import { verifyAssistantSecret } from "@/lib/assistant-auth"
 import { createServiceClient } from "@/lib/supabase/service"
-import { createTransporter, buildHtmlEmail, smtpConfigured } from "@/lib/email"
+import { buildHtmlEmail, smtpConfigured } from "@/lib/email"
+import { generateEstimateScope } from "@/lib/scope-generator"
+import { generateEstimatePDFBuffer } from "@/lib/pdf/generate-estimate-pdf"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -78,13 +81,14 @@ export async function POST(_req: Request, { params }: RouteCtx) {
 
   const payload = approval.proposed_payload as Record<string, unknown>
   const now = new Date().toISOString()
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app"
 
   // ─── create_lead_estimate ─────────────────────────────────────────────────
 
   if (approval.action_type === "create_lead_estimate") {
-    const lead  = payload.lead  as Record<string, string | undefined>
+    const lead = payload.lead as Record<string, string | undefined>
     const estData = payload.estimate as {
-      services?: string; total?: number
+      services?: string; total?: number; scope_override?: string
       payment_steps?: Array<{ name: string; amount: number }>
     } | null
 
@@ -116,17 +120,21 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     // No estimate requested
     if (!estData || !estData.total) {
       return NextResponse.json({
-        action_type:  "create_lead_estimate",
-        customer_id:  customer.id,
-        estimate_id:  null,
+        action_type:      "create_lead_estimate",
+        customer_id:      customer.id,
+        estimate_id:      null,
         send_approval_id: null,
         message: `Lead created for ${lead.name}.`,
       })
     }
 
-    // Create draft estimate
+    // Generate professional scope of work + title using Claude
+    const { title: generatedTitle, scope: generatedScope } = await generateEstimateScope(
+      estData.services ?? lead.service_type ?? "Project",
+      estData.scope_override,
+    )
+
     const total         = Number(estData.total)
-    const estimateTitle = `${lead.name} — ${estData.services ?? "Estimate"}`
     const approvalToken = crypto.randomUUID()
 
     const { data: estimate, error: estErr } = await supabase
@@ -134,8 +142,8 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       .insert({
         customer_id:        customer.id,
         user_id:            ownerUserId,
-        title:              estimateTitle,
-        scope_of_work:      estData.services ?? null,
+        title:              generatedTitle,
+        scope_of_work:      generatedScope || null,
         manual_total_price: total,
         line_items:         [],
         markup_percent:     0,
@@ -166,8 +174,8 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       )
     }
 
-    // Create approval for the send step
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app"
+    // Create approval for the send step — include scope so PDF can be generated later
+    const estimateUrl   = `${appUrl}/estimates/${estimate.id}`
     const { data: sendApproval } = await supabase
       .from("assistant_approvals")
       .insert({
@@ -179,18 +187,24 @@ export async function POST(_req: Request, { params }: RouteCtx) {
           customer_id:    customer.id,
           to_email:       lead.email ?? null,
           customer_name:  lead.name,
-          estimate_title: estimateTitle,
+          estimate_title: generatedTitle,
           total,
           services:       estData.services,
+          scope:          generatedScope,
           payment_steps:  estData.payment_steps ?? [],
-          estimate_url:   `${appUrl}/estimates/${estimate.id}`,
+          estimate_url:   estimateUrl,
         },
-        requested_by_whatsapp:  approval.requested_by_whatsapp ?? null,
-        requested_by_external:  approval.requested_by_external ?? null,
+        requested_by_whatsapp: approval.requested_by_whatsapp ?? null,
+        requested_by_external: approval.requested_by_external ?? null,
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       })
       .select()
       .single()
+
+    // Scope summary: first 200 chars for Telegram preview
+    const scopeSummary = generatedScope
+      ? generatedScope.slice(0, 200).replace(/\n/g, " ").trimEnd() + (generatedScope.length > 200 ? "…" : "")
+      : null
 
     return NextResponse.json({
       action_type:      "create_lead_estimate",
@@ -198,13 +212,14 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       estimate_id:      estimate.id,
       send_approval_id: sendApproval?.id ?? null,
       estimate_preview: {
-        title:         estimateTitle,
+        title:         generatedTitle,
         customer_name: lead.name as string,
         email:         lead.email ?? null,
         services:      estData.services ?? null,
+        scope:         scopeSummary,
         total,
         payment_steps: estData.payment_steps ?? [],
-        estimate_url:  `${appUrl}/estimates/${estimate.id}`,
+        estimate_url:  estimateUrl,
       },
     })
   }
@@ -214,11 +229,12 @@ export async function POST(_req: Request, { params }: RouteCtx) {
   if (approval.action_type === "send_estimate") {
     const {
       estimate_id, customer_id, to_email, customer_name,
-      estimate_title, total, services, payment_steps, estimate_url,
+      estimate_title, total, services, scope, payment_steps, estimate_url,
     } = payload as {
       estimate_id: string; customer_id: string; to_email: string | null
       customer_name: string; estimate_title: string; total: number
-      services: string | null; payment_steps: Array<{ name: string; amount: number }>
+      services: string | null; scope: string | null
+      payment_steps: Array<{ name: string; amount: number }>
       estimate_url: string
     }
 
@@ -234,28 +250,55 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       return NextResponse.json({ error: "SMTP not configured" }, { status: 500 })
     }
 
-    // Fetch company settings
-    const { data: company } = await supabase
-      .from("company_settings")
-      .select("company_name, email, phone")
-      .eq("user_id", ownerUserId)
-      .maybeSingle()
+    // Fetch company name and approval token
+    const [{ data: company }, { data: est }, { data: customerRow }] = await Promise.all([
+      supabase.from("company_settings")
+        .select("company_name, email, phone")
+        .eq("user_id", ownerUserId)
+        .maybeSingle(),
+      supabase.from("estimates")
+        .select("approval_token, scope_of_work, created_at")
+        .eq("id", estimate_id)
+        .single(),
+      supabase.from("customers")
+        .select("name, phone, email, address")
+        .eq("id", customer_id)
+        .single(),
+    ])
 
-    const companyName = company?.company_name ?? "Omdan"
-
-    // Get approval token for the customer-facing approval link
-    const { data: est } = await supabase
-      .from("estimates")
-      .select("approval_token")
-      .eq("id", estimate_id)
-      .single()
-
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app"
-    const approvalLink = est?.approval_token
-      ? `${appUrl}/approve-estimate/${est.approval_token}`
+    const companyName   = company?.company_name ?? "Omdan"
+    const approvalToken = est?.approval_token
+    const approvalLink  = approvalToken
+      ? `${appUrl}/approve-estimate/${approvalToken}`
       : estimate_url
+    const scopeOfWork   = est?.scope_of_work ?? scope ?? null
 
-    // Build payment schedule lines for email
+    // Generate PDF with scope + payment schedule + approval link
+    let pdfBuffer: Buffer | null = null
+    try {
+      pdfBuffer = await generateEstimatePDFBuffer({
+        estimate: {
+          id:            estimate_id,
+          title:         estimate_title,
+          created_at:    est?.created_at ?? now,
+          scope_of_work: scopeOfWork,
+          total:         Number(total),
+          payment_steps: (payment_steps ?? []).map((s, i) => ({ ...s, sort_order: i })),
+          approval_link: approvalLink,
+        },
+        customer: {
+          name:    customerRow?.name    ?? customer_name,
+          phone:   customerRow?.phone   ?? null,
+          email:   customerRow?.email   ?? to_email,
+          address: customerRow?.address ?? null,
+        },
+        ownerUserId,
+      })
+    } catch (pdfErr) {
+      console.error("[execute/send_estimate] PDF generation failed:", pdfErr)
+    }
+
+    // Build HTML email
     const paymentLines = (payment_steps ?? []).map(
       (s) => `${s.name}: $${Number(s.amount).toLocaleString()}`
     )
@@ -265,7 +308,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       "",
       `${companyName} has prepared an estimate for your project.`,
       "",
-      `<strong>Services:</strong> ${services ?? estimate_title}`,
+      `<strong>Project:</strong> ${services ?? estimate_title}`,
       `<strong>Total: $${Number(total).toLocaleString()}</strong>`,
     ]
 
@@ -274,7 +317,12 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       paymentLines.forEach((l) => bodyLines.push(`&nbsp;&nbsp;• ${l}`))
     }
 
-    bodyLines.push("", "Please review and approve your estimate using the button below.")
+    bodyLines.push(
+      "",
+      pdfBuffer
+        ? "A PDF copy of your estimate is attached. Please review and approve using the button below."
+        : "Please review and approve your estimate using the button below.",
+    )
 
     const html = buildHtmlEmail({
       title:       `Your Estimate from ${companyName}`,
@@ -285,13 +333,37 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       ctaUrl:      approvalLink,
     })
 
-    const transporter = createTransporter()
+    // Send email with PDF attachment
+    const transporter = nodemailer.createTransport({
+      host:   process.env.SMTP_HOST ?? "smtp.gmail.com",
+      port:   Number(process.env.SMTP_PORT ?? 587),
+      secure: false,
+      auth:   { user: process.env.SMTP_USER!, pass: process.env.SMTP_PASS! },
+    })
+
     await transporter.sendMail({
       from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
       to:      to_email,
       subject: `Your Estimate from ${companyName}`,
       html,
+      attachments: pdfBuffer
+        ? [{ filename: `estimate-${estimate_id.slice(0, 8)}.pdf`, content: pdfBuffer, contentType: "application/pdf" }]
+        : [],
     })
+
+    // Upload PDF to storage (best-effort)
+    if (pdfBuffer) {
+      try {
+        const storagePath = `estimates/${estimate_id}.pdf`
+        const { error: uploadErr } = await supabase.storage
+          .from("documents")
+          .upload(storagePath, pdfBuffer, { contentType: "application/pdf", upsert: true })
+        if (!uploadErr) {
+          const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath)
+          await supabase.from("estimates").update({ pdf_url: urlData.publicUrl }).eq("id", estimate_id)
+        }
+      } catch { /* non-critical */ }
+    }
 
     // Update estimate → sent
     await supabase.from("estimates")
@@ -307,7 +379,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         estimate_id,
         type:        "estimate_follow_up",
         subject:     `Your Estimate from ${companyName}`,
-        body:        `Estimate sent via Lia assistant to ${to_email}`,
+        body:        `Estimate sent via Lia assistant to ${to_email}${pdfBuffer ? " (with PDF)" : ""}`,
         channel:     "email",
       })
     } catch { /* non-critical */ }
@@ -321,6 +393,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       action_type: "send_estimate",
       success:     true,
       sent_to:     to_email,
+      pdf_attached: !!pdfBuffer,
     })
   }
 

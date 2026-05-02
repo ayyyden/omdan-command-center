@@ -24,6 +24,7 @@ export interface ParsedEstimate {
   services?: string
   total?: number
   payment_steps?: ParsedPaymentStep[]
+  scope_override?: string  // text from "Scope:" or "Scope of work:" section
 }
 
 export interface ParsedLeadEstimate {
@@ -108,6 +109,10 @@ export function parseLeadEstimateMessage(text: string): ParsedLeadEstimate {
 
     const steps = parsePaymentSchedule(text)
     if (steps.length) est.payment_steps = steps
+
+    // Manually provided scope: "Scope:" or "Scope of work:" followed by text
+    const scopeM = text.match(/\bscope(?:\s+of\s+work)?\s*:\s*([\s\S]+)/i)
+    if (scopeM) est.scope_override = scopeM[1].trim()
 
     result.estimate = est
   }

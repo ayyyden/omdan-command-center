@@ -1,6 +1,6 @@
 import React from "react"
 import {
-  Document, Page, Text, View, StyleSheet, Image,
+  Document, Page, Text, View, StyleSheet, Image, Link,
 } from "@react-pdf/renderer"
 import type { EstimateLineItem } from "@/types"
 
@@ -291,6 +291,12 @@ function fmt(n: number): string {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface EstimatePaymentStep {
+  name: string
+  amount: number
+  sort_order?: number
+}
+
 export interface EstimatePDFData {
   estimate: {
     id: string
@@ -305,6 +311,8 @@ export interface EstimatePDFData {
     tax_amount: number
     total: number
     notes: string | null
+    payment_steps?: EstimatePaymentStep[]
+    approval_link?: string | null
   }
   customer: {
     name: string
@@ -467,11 +475,47 @@ export function EstimatePDFDocument({ estimate, customer, company }: EstimatePDF
           </View>
         </View>
 
+        {/* ── Payment Schedule ───────────────────────────────────── */}
+        {(estimate.payment_steps?.length ?? 0) > 0 && (
+          <View style={{ marginBottom: 24 }}>
+            <Text style={styles.sectionLabel}>Payment Schedule</Text>
+            {[...(estimate.payment_steps ?? [])]
+              .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+              .map((step, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.tableRow,
+                    i % 2 === 1 ? styles.tableRowEven : {},
+                  ]}
+                >
+                  <Text style={[styles.tdText, { flex: 4 }]}>{step.name}</Text>
+                  <Text style={[styles.tdText, { flex: 2, textAlign: "right" }]}>
+                    {fmt(step.amount)}
+                  </Text>
+                </View>
+              ))}
+          </View>
+        )}
+
         {/* ── Notes ──────────────────────────────────────────────── */}
         {estimate.notes && (
           <View style={styles.notesBox}>
             <Text style={styles.notesLabel}>Notes</Text>
             <Text style={styles.notesText}>{estimate.notes}</Text>
+          </View>
+        )}
+
+        {/* ── Approval link ───────────────────────────────────────── */}
+        {estimate.approval_link && (
+          <View style={[styles.notesBox, { borderLeftColor: C.dark, marginBottom: 24 }]}>
+            <Text style={[styles.notesLabel, { color: C.dark }]}>Approve This Estimate</Text>
+            <Text style={[styles.notesText, { marginBottom: 4 }]}>
+              Review and approve your estimate online:
+            </Text>
+            <Link src={estimate.approval_link} style={{ fontSize: 8, color: C.dark }}>
+              {estimate.approval_link}
+            </Link>
           </View>
         )}
 
