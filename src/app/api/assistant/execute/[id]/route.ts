@@ -154,7 +154,8 @@ export async function POST(_req: Request, { params }: RouteCtx) {
           payment_steps:  estData.payment_steps ?? [],
           estimate_url:   `${appUrl}/estimates/${estimate.id}`,
         },
-        requested_by_whatsapp: approval.requested_by_whatsapp,
+        requested_by_whatsapp:  approval.requested_by_whatsapp ?? null,
+        requested_by_external:  approval.requested_by_external ?? null,
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       })
       .select()

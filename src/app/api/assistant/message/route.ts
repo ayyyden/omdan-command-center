@@ -146,14 +146,15 @@ async function handleAddLeadEstimate(body: MessageBody) {
         lead,
         estimate: wants_estimate ? (estimate ?? null) : null,
       },
-      requested_by_whatsapp: sender ?? null,
+      requested_by_external: sender ? `telegram:${sender}` : null,
       expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     })
     .select()
     .single()
 
   if (error || !approval) {
-    return NextResponse.json({ error: "Failed to create approval record" }, { status: 500 })
+    console.error("[assistant/message] approval insert error:", error?.message, error?.details, error?.hint)
+    return NextResponse.json({ error: "Failed to create approval record", detail: error?.message }, { status: 500 })
   }
 
   return NextResponse.json({
