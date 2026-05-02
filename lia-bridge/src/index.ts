@@ -104,10 +104,18 @@ function formatLeadPreview(
   estimate: EstimateData | null | undefined,
   wantsEstimate: boolean,
 ): string {
+  const SOURCE_LABELS: Record<string, string> = {
+    facebook: "Facebook / Meta", instagram: "Instagram", google: "Google",
+    yelp: "Yelp", nextdoor: "Nextdoor", referral: "Referral",
+    door_knock: "Door Knock", yard_sign: "Yard Sign", repeat_customer: "Repeat Customer",
+  }
+
   const lines = ["📋 New Lead — Pending Approval", ""]
   lines.push(`👤 Customer: ${lead.name ?? "Unknown"}`)
   if (lead.phone)        lines.push(`📞 Phone: ${lead.phone}`)
   if (lead.email)        lines.push(`📧 Email: ${lead.email}`)
+  if (lead.address)      lines.push(`📍 Address: ${lead.address}`)
+  if (lead.lead_source)  lines.push(`🔗 Lead Source: ${SOURCE_LABELS[lead.lead_source] ?? lead.lead_source}`)
   if (lead.service_type) lines.push(`🛠 Services: ${lead.service_type}`)
 
   if (wantsEstimate && estimate?.total) {

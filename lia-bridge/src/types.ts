@@ -16,7 +16,9 @@ export interface LeadData {
   name?: string
   phone?: string
   email?: string
+  address?: string
   service_type?: string
+  lead_source?: string
 }
 
 export interface PaymentStep {

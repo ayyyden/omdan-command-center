@@ -99,9 +99,11 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       .from("customers")
       .insert({
         name:         lead.name ?? "Unknown",
-        phone:        lead.phone  ?? null,
-        email:        lead.email  ?? null,
+        phone:        lead.phone        ?? null,
+        email:        lead.email        ?? null,
+        address:      lead.address      ?? null,
         service_type: lead.service_type ?? null,
+        lead_source:  lead.lead_source  ?? null,
         status:       "New Lead",
         user_id:      ownerUserId,
       })
