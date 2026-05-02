@@ -421,6 +421,82 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
   }
 })
 
+// ─── CRM notification push ───────────────────────────────────────────────────
+// POST /notify — receives a structured event from the CRM and sends Telegram
+// messages to all allowed owner IDs. Protected by x-assistant-secret.
+
+interface NotifyBody {
+  event_type: string
+  customer_name?: string
+  customer_email?: string
+  document_name?: string
+  amount?: number
+  crm_url?: string
+  extra?: string
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  estimate_approved:      "Estimate Approved",
+  estimate_declined:      "Estimate Declined",
+  change_order_approved:  "Change Order Approved",
+  change_order_declined:  "Change Order Declined",
+  contract_signed:        "Contract Signed",
+  estimate_sent:          "Estimate Sent",
+  invoice_sent:           "Invoice Sent",
+  estimate_send_failed:   "Estimate Send Failed",
+  invoice_send_failed:    "Invoice Send Failed",
+  contract_send_failed:   "Contract Send Failed",
+}
+
+function formatNotification(body: NotifyBody): string {
+  const label = EVENT_LABELS[body.event_type] ?? body.event_type
+  const lines: string[] = [`Lia — ${label}`, ""]
+
+  if (body.customer_name) lines.push(`Customer: ${body.customer_name}`)
+  if (body.document_name) {
+    const docLabel =
+      body.event_type.startsWith("estimate") ? "Estimate" :
+      body.event_type.startsWith("change_order") ? "Change Order" :
+      body.event_type.startsWith("contract") ? "Contract" :
+      body.event_type.startsWith("invoice") ? "Invoice" : "Document"
+    lines.push(`${docLabel}: ${body.document_name}`)
+  }
+  if (body.amount != null) {
+    lines.push(`Amount: $${Number(body.amount).toLocaleString("en-US")}`)
+  }
+  if (body.extra) lines.push(`Note: ${body.extra}`)
+  if (body.crm_url) {
+    lines.push("", body.crm_url)
+  }
+
+  return lines.join("\n")
+}
+
+app.post("/notify", async (req: Request, res: Response) => {
+  // Verify shared secret
+  const incoming = req.headers["x-assistant-secret"]
+  const expected = process.env.CRM_ASSISTANT_SECRET
+  if (!incoming || incoming !== expected) {
+    res.status(401).json({ error: "Unauthorized" })
+    return
+  }
+
+  res.json({ ok: true })   // acknowledge immediately
+
+  const body = req.body as NotifyBody
+  if (!body?.event_type) return
+
+  const message = formatNotification(body)
+  console.log(`[lia/notify] ${body.event_type} — ${body.customer_name ?? ""}`)
+
+  // Send to all allowed Telegram IDs
+  for (const chatId of TELEGRAM_ALLOWED_IDS) {
+    sendTelegramMessage(chatId, message).catch((err) => {
+      console.error(`[lia/notify] Telegram send failed for ${chatId}:`, err?.message)
+    })
+  }
+})
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {

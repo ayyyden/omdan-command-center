@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { createServiceClient } from "@/lib/supabase/service"
 import { createTransporter, buildHtmlEmail, smtpConfigured } from "@/lib/email"
 import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
+import { notifyLia } from "@/lib/lia-notifications"
 
 const NOTIFY_EMAIL = "omdandevelopment@gmail.com"
 
@@ -54,6 +55,28 @@ export async function POST(req: NextRequest) {
     ipAddress:    getIp(req.headers),
     userAgent:    getUa(req.headers),
   })
+
+  // Lia notification (fire-and-forget)
+  void (async () => {
+    try {
+      const { data: full } = await supabase
+        .from("change_orders")
+        .select("id, title, amount, job_id, customer:customers(name, email)")
+        .eq("id", co.id)
+        .single()
+      if (!full) return
+      const customer = full.customer as { name?: string; email?: string } | null
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
+      notifyLia({
+        event_type:     action === "approve" ? "change_order_approved" : "change_order_declined",
+        customer_name:  customer?.name,
+        customer_email: customer?.email,
+        document_name:  full.title ?? undefined,
+        amount:         Number(full.amount),
+        crm_url:        full.job_id ? `${appUrl}/jobs/${full.job_id}` : `${appUrl}/change-orders/${full.id}`,
+      })
+    } catch { /* non-fatal */ }
+  })()
 
   return Response.json({ success: true })
 }

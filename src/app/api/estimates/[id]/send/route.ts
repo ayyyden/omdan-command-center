@@ -5,6 +5,7 @@ import React from "react"
 import { requirePermission, hasJobScope, NO_ROWS_ID } from "@/lib/auth-helpers"
 import { EstimatePDFDocument } from "@/lib/pdf/estimate-document"
 import type { EstimateLineItem } from "@/types"
+import { notifyLia } from "@/lib/lia-notifications"
 
 export async function POST(
   req: NextRequest,
@@ -129,6 +130,15 @@ The estimate PDF is also attached to this email for your reference.`
         contentType: "application/pdf",
       },
     ],
+  })
+
+  notifyLia({
+    event_type:     "estimate_sent",
+    customer_name:  customer?.name,
+    customer_email: to,
+    document_name:  estimate.title ?? undefined,
+    amount:         Number(estimate.total),
+    crm_url:        `${appUrl}/estimates/${id}`,
   })
 
   // Also store PDF in Supabase Storage

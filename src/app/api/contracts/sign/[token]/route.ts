@@ -3,6 +3,7 @@ import { PDFDocument, rgb, StandardFonts } from "pdf-lib"
 import { createServiceClient } from "@/lib/supabase/service"
 import { createTransporter, buildHtmlEmail } from "@/lib/email"
 import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
+import { notifyLia } from "@/lib/lia-notifications"
 
 type FieldType = "text" | "multiline" | "date" | "signature" | "initials" | "checkbox" | "yes_no" | "rich_text"
 type VAlign = "top" | "center" | "bottom"
@@ -421,6 +422,22 @@ async function handleSign(
       }
     } catch { /* non-fatal */ }
   }
+
+  // Lia notification (fire-and-forget)
+  void (async () => {
+    try {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ""
+      notifyLia({
+        event_type:     "contract_signed",
+        customer_name:  customer?.name ?? signerName,
+        customer_email: customer?.email ?? sent.recipient_email ?? undefined,
+        document_name:  template.name,
+        crm_url:        sent.job_id
+          ? `${appUrl}/jobs/${sent.job_id}`
+          : `${appUrl}/customers/${sent.customer_id}`,
+      })
+    } catch { /* non-fatal */ }
+  })()
 
   return Response.json({ success: true })
 }

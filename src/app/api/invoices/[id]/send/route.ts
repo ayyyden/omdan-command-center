@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { requirePermission, hasJobScope } from "@/lib/auth-helpers"
 import { createTransporter, buildHtmlEmail, smtpConfigured } from "@/lib/email"
+import { notifyLia } from "@/lib/lia-notifications"
 
 const METHOD_LABELS: Record<string, string> = {
   zelle:  "Zelle",
@@ -127,6 +128,15 @@ export async function POST(
     subject: subject || `Invoice from ${companyName}${inv.invoice_number ? ` — ${inv.invoice_number}` : ""}`,
     text:    plainText,
     html,
+  })
+
+  notifyLia({
+    event_type:     "invoice_sent",
+    customer_name:  customerName,
+    customer_email: to,
+    document_name:  inv.invoice_number ? `Invoice #${inv.invoice_number}` : `${typeLabel} Invoice`,
+    amount:         Number(inv.amount),
+    crm_url:        `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/invoices/${id}`,
   })
 
   await supabase
