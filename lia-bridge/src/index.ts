@@ -721,8 +721,8 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
 
   const update = req.body as {
     message?: {
-      from?: { id: number; first_name?: string }
-      chat?: { id: number }
+      from?: { id: number; first_name?: string; username?: string }
+      chat?: { id: number; type?: string; title?: string }
       text?: string
     }
     callback_query?: {
@@ -738,6 +738,15 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
   const fromId   = message?.from?.id ?? callback?.from?.id
   const chatId   = message?.chat?.id ?? callback?.message?.chat?.id
   const text     = message?.text ?? callback?.data ?? ""
+
+  // DEBUG: log chat/user identity to help retrieve group chat ID
+  if (message) {
+    console.log(
+      `[telegram-debug] from=${message.from?.id ?? "?"} username=${message.from?.username ?? "?"} ` +
+      `chat=${message.chat?.id ?? "?"} type=${message.chat?.type ?? "?"} ` +
+      `title="${message.chat?.title ?? ""}" text="${message.text ?? ""}"`
+    )
+  }
 
   if (!fromId || !chatId || !text) return
 
