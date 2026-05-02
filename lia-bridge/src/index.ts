@@ -1,5 +1,6 @@
 import "dotenv/config"
 import express, { type Request, type Response } from "express"
+import { startScheduler }           from "./scheduler"
 import { parseIntent }              from "./intent-parser"
 import { parseLeadEstimateMessage } from "./lead-parser"
 import { formatDailySummary }       from "./format-response"
@@ -504,4 +505,5 @@ app.listen(PORT, () => {
   console.log(`[lia-bridge] CRM: ${process.env.CRM_BASE_URL}`)
   console.log(`[lia-bridge] Allowed WhatsApp numbers: ${ALLOWED_NUMBERS.join(", ") || "(none)"}`)
   console.log(`[lia-bridge] Allowed Telegram IDs: ${[...TELEGRAM_ALLOWED_IDS].join(", ") || "(none — set TELEGRAM_ALLOWED_USER_IDS)"}`)
+  startScheduler(TELEGRAM_ALLOWED_IDS)
 })
