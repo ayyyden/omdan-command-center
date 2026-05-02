@@ -1,5 +1,4 @@
 // ─── Incoming webhook from OpenClaw ───────────────────────────────────────────
-// Adapt field names to match your actual OpenClaw webhook payload.
 
 export interface IncomingWebhook {
   from: string         // WhatsApp sender number, e.g. "15551234567" or "15551234567@s.whatsapp.net"
@@ -9,6 +8,26 @@ export interface IncomingWebhook {
   type: "text" | "button_reply" | "list_reply"
   buttonId?: string    // For interactive button replies (e.g. "approve_<uuid>")
   buttonTitle?: string
+}
+
+// ─── CRM shared types ─────────────────────────────────────────────────────────
+
+export interface LeadData {
+  name?: string
+  phone?: string
+  email?: string
+  service_type?: string
+}
+
+export interface PaymentStep {
+  name: string
+  amount: number
+}
+
+export interface EstimateData {
+  services?: string
+  total?: number
+  payment_steps?: PaymentStep[]
 }
 
 // ─── CRM API responses ────────────────────────────────────────────────────────
@@ -25,6 +44,36 @@ export interface CrmMessageResponse {
   intent: string
   response_text?: string
   summary?: DailySummary
+  // add_lead_estimate response fields
+  approval_id?: string
+  lead?: LeadData
+  estimate?: EstimateData | null
+  wants_estimate?: boolean
+  missing_fields?: string[]
+}
+
+export interface EstimatePreview {
+  title: string
+  customer_name: string
+  email: string | null
+  services: string | null
+  total: number
+  payment_steps: PaymentStep[]
+  estimate_url: string
+}
+
+export interface ExecuteResponse {
+  action_type: string
+  // create_lead_estimate fields
+  customer_id?: string
+  estimate_id?: string | null
+  send_approval_id?: string | null
+  message?: string
+  estimate_preview?: EstimatePreview
+  // send_estimate fields
+  success?: boolean
+  sent_to?: string
+  error?: string
 }
 
 export interface DailySummary {

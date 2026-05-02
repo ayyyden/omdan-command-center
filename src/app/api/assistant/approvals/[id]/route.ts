@@ -4,6 +4,23 @@ import { createServiceClient } from "@/lib/supabase/service"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
+// GET /api/assistant/approvals/[id] — fetch a single approval (used by bridge for edit flow)
+export async function GET(req: Request, { params }: RouteCtx) {
+  const err = verifyAssistantSecret(req)
+  if (err) return err
+
+  const { id } = await params
+  const supabase = createServiceClient()
+  const { data, error } = await supabase
+    .from("assistant_approvals")
+    .select("*")
+    .eq("id", id)
+    .single()
+
+  if (error || !data) return NextResponse.json({ error: "Not found" }, { status: 404 })
+  return NextResponse.json({ approval: data })
+}
+
 const VALID_STATUSES = ["approved", "rejected", "edited", "executed", "failed"] as const
 type TransitionStatus = typeof VALID_STATUSES[number]
 

@@ -1,11 +1,13 @@
-import type { CrmHealthResponse, CrmMessageResponse, AssistantApproval } from "./types"
+import type {
+  CrmHealthResponse, CrmMessageResponse, AssistantApproval, ExecuteResponse,
+  LeadData, EstimateData,
+} from "./types"
 
 const BASE_URL = process.env.CRM_BASE_URL!
 const SECRET   = process.env.CRM_ASSISTANT_SECRET!
 
 async function crmFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  const url = `${BASE_URL}${path}`
-  const res = await fetch(url, {
+  const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -22,10 +24,19 @@ export async function checkHealth(): Promise<CrmHealthResponse> {
   return res.json() as Promise<CrmHealthResponse>
 }
 
-export async function sendMessage(message: string, sender: string): Promise<CrmMessageResponse> {
+export interface SendMessageBody {
+  message: string
+  sender?: string
+  intent?: string
+  lead?: LeadData
+  estimate?: EstimateData | null
+  wants_estimate?: boolean
+}
+
+export async function sendMessage(body: SendMessageBody): Promise<CrmMessageResponse> {
   const res = await crmFetch("/api/assistant/message", {
     method: "POST",
-    body: JSON.stringify({ message, sender }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const text = await res.text()
@@ -41,11 +52,18 @@ export async function getPendingApprovals(): Promise<AssistantApproval[]> {
   return data.approvals
 }
 
+export async function getApproval(id: string): Promise<AssistantApproval> {
+  const res = await crmFetch(`/api/assistant/approvals/${id}`)
+  if (!res.ok) throw new Error(`CRM approval fetch failed: ${res.status}`)
+  const data = await res.json() as { approval: AssistantApproval }
+  return data.approval
+}
+
 export async function updateApproval(
   id: string,
   status: "approved" | "rejected" | "edited" | "executed" | "failed",
   extras?: { result?: unknown; error?: string; proposed_payload?: unknown }
-): Promise<void> {
+): Promise<AssistantApproval> {
   const res = await crmFetch(`/api/assistant/approvals/${id}`, {
     method: "PATCH",
     body: JSON.stringify({ status, ...extras }),
@@ -54,4 +72,15 @@ export async function updateApproval(
     const text = await res.text()
     throw new Error(`CRM approval update failed (${res.status}): ${text}`)
   }
+  const data = await res.json() as { approval: AssistantApproval }
+  return data.approval
+}
+
+export async function executeApproval(id: string): Promise<ExecuteResponse> {
+  const res = await crmFetch(`/api/assistant/execute/${id}`, { method: "POST" })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`CRM execute failed (${res.status}): ${text}`)
+  }
+  return res.json() as Promise<ExecuteResponse>
 }
