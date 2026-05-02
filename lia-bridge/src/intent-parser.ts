@@ -8,12 +8,18 @@ export type Intent =
   | { type: "add_lead_estimate"; rawText: string }
   | { type: "create_invoice"; rawText: string }
   | { type: "schedule_job"; rawText: string }
+  | { type: "send_contract"; rawText: string }
   | { type: "pick_customer"; index: number }
   | { type: "pick_job"; index: number }
   | { type: "pick_schedule_customer"; index: number }
   | { type: "pick_schedule_job"; index: number }
+  | { type: "pick_contract_customer"; index: number }
+  | { type: "pick_contract_job"; index: number }
+  | { type: "pick_contract_template"; index: number }
+  | { type: "pick_all_contracts" }
   | { type: "cancel_invoice" }
   | { type: "cancel_schedule" }
+  | { type: "cancel_contract" }
   | { type: "unknown"; rawText: string }
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
@@ -47,9 +53,22 @@ export function parseIntent(text: string): Intent {
   const pickSchedJob = lower.match(/^pick_schedule_job:(\d+)$/)
   if (pickSchedJob) return { type: "pick_schedule_job", index: parseInt(pickSchedJob[1], 10) }
 
+  // Contract disambiguation callbacks
+  const pickContractCustomer = lower.match(/^pick_contract_customer:(\d+)$/)
+  if (pickContractCustomer) return { type: "pick_contract_customer", index: parseInt(pickContractCustomer[1], 10) }
+
+  const pickContractJob = lower.match(/^pick_contract_job:(\d+)$/)
+  if (pickContractJob) return { type: "pick_contract_job", index: parseInt(pickContractJob[1], 10) }
+
+  const pickContractTemplate = lower.match(/^pick_contract_template:(\d+)$/)
+  if (pickContractTemplate) return { type: "pick_contract_template", index: parseInt(pickContractTemplate[1], 10) }
+
+  if (lower === "pick_all_contracts") return { type: "pick_all_contracts" }
+
   // Cancel callbacks
   if (lower === "cancel_invoice") return { type: "cancel_invoice" }
   if (lower === "cancel_schedule") return { type: "cancel_schedule" }
+  if (lower === "cancel_contract") return { type: "cancel_contract" }
 
   // OpenClaw interactive button format: "approve_<uuid>" / "reject_<uuid>"
   const btnApprove = lower.match(/^approve_([0-9a-f-]{36})$/)
@@ -85,6 +104,13 @@ export function parseIntent(text: string): Intent {
   // Natural phrasing without keyword overlap
   if (/\bsend\s+(?:an?\s+)?invoice\b|\bcreate\s+(?:an?\s+)?invoice\b/.test(lower)) {
     return { type: "create_invoice", rawText: trimmed }
+  }
+
+  // Contract send request
+  if (/\bsend\b/.test(lower) && /\bcontracts?\b/.test(lower)) {
+    if (!/\b(?:check|view|show|list|status|signed|unsigned)\b/.test(lower)) {
+      return { type: "send_contract", rawText: trimmed }
+    }
   }
 
   // Schedule job — explicit scheduling requests

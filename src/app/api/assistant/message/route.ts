@@ -64,6 +64,16 @@ interface ScheduleData {
   scheduled_time?: string | null
 }
 
+interface ContractData {
+  customer_name?: string
+  customer_id?: string
+  job_id?: string
+  job_title_hint?: string
+  template_name_hint?: string
+  template_ids?: string[]
+  bundle_all?: boolean
+}
+
 interface MessageBody {
   message: string
   sender?: string
@@ -74,6 +84,7 @@ interface MessageBody {
   wants_estimate?: boolean
   invoice_data?: InvoiceData
   schedule_data?: ScheduleData
+  contract_data?: ContractData
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -391,7 +402,7 @@ async function handleCreateInvoice(body: MessageBody) {
 async function handleScheduleJob(body: MessageBody) {
   const { schedule_data, sender } = body
   const supabase = createServiceClient()
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app"
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app").replace(/\/+$/, "")
 
   if (!schedule_data?.scheduled_date) {
     return NextResponse.json({
@@ -634,6 +645,301 @@ async function handleScheduleJob(body: MessageBody) {
   })
 }
 
+// ─── Contract send approval creation ─────────────────────────────────────────
+
+async function handleSendContract(body: MessageBody) {
+  const { contract_data, sender } = body
+  const supabase = createServiceClient()
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app").replace(/\/+$/, "")
+
+  // Helper: resolve customer email, then templates, then create approval
+  async function buildApproval(customerId: string, customerName: string, customerEmail: string | null, jobId: string | null, jobTitle: string | null) {
+    if (!customerEmail) {
+      return NextResponse.json({
+        intent:        "send_contract",
+        no_email:      true,
+        response_text: `${customerName} has no email address on file. Add an email to the customer record first.`,
+      })
+    }
+
+    // Resolve templates
+    const templateIds = contract_data?.template_ids ?? null
+    const nameHint    = contract_data?.template_name_hint ?? null
+    const bundleAll   = contract_data?.bundle_all ?? false
+
+    let selectedTemplates: Array<{ id: string; name: string }> = []
+
+    if (templateIds?.length) {
+      // Already selected — validate
+      const { data } = await supabase
+        .from("contract_templates")
+        .select("id, name")
+        .in("id", templateIds)
+        .eq("is_active", true)
+      selectedTemplates = data ?? []
+      if (!selectedTemplates.length) {
+        return NextResponse.json({
+          intent:        "send_contract",
+          not_found:     true,
+          response_text: "Selected contract template(s) not found or inactive.",
+        })
+      }
+    } else {
+      // Fetch owner's active templates
+      const ownerEmail = process.env.ASSISTANT_OWNER_EMAIL
+      let ownerUserId: string | null = null
+      if (ownerEmail) {
+        const { data: ownerRow } = await supabase
+          .from("team_members")
+          .select("user_id")
+          .ilike("email", ownerEmail)
+          .not("user_id", "is", null)
+          .single()
+        ownerUserId = (ownerRow?.user_id as string) ?? null
+      }
+      if (!ownerUserId) {
+        const { data: byRole } = await supabase
+          .from("team_members")
+          .select("user_id")
+          .eq("role", "owner")
+          .eq("status", "active")
+          .not("user_id", "is", null)
+          .single()
+        ownerUserId = (byRole?.user_id as string) ?? null
+      }
+      if (!ownerUserId) {
+        return NextResponse.json({ error: "Owner not found" }, { status: 500 })
+      }
+
+      const { data: allTemplates } = await supabase
+        .from("contract_templates")
+        .select("id, name")
+        .eq("user_id", ownerUserId)
+        .eq("is_active", true)
+        .order("created_at", { ascending: true })
+
+      const templates = allTemplates ?? []
+
+      if (!templates.length) {
+        return NextResponse.json({
+          intent:        "send_contract",
+          no_templates:  true,
+          response_text: "No contract templates are set up. Add templates in the CRM first.",
+        })
+      }
+
+      if (bundleAll) {
+        // User wants all templates
+        selectedTemplates = templates
+      } else if (nameHint) {
+        // Filter by name hint
+        const filtered = templates.filter((t) =>
+          t.name.toLowerCase().includes(nameHint.toLowerCase())
+        )
+        if (filtered.length === 1) {
+          selectedTemplates = filtered
+        } else if (filtered.length > 1) {
+          // Multiple matches — let user pick
+          return NextResponse.json({
+            intent:                  "send_contract",
+            needs_template_selection: true,
+            available_templates:     filtered.map((t) => ({ id: t.id, name: t.name })),
+          })
+        } else {
+          // No name match — show all templates
+          if (templates.length === 1) {
+            selectedTemplates = templates
+          } else {
+            return NextResponse.json({
+              intent:                  "send_contract",
+              needs_template_selection: true,
+              available_templates:     templates.map((t) => ({ id: t.id, name: t.name })),
+            })
+          }
+        }
+      } else if (templates.length === 1) {
+        // Exactly one template — auto-select
+        selectedTemplates = templates
+      } else {
+        // Multiple templates, no hint → let user pick
+        return NextResponse.json({
+          intent:                  "send_contract",
+          needs_template_selection: true,
+          available_templates:     templates.map((t) => ({ id: t.id, name: t.name })),
+        })
+      }
+    }
+
+    // Build action summary
+    const templateNames = selectedTemplates.map((t) => t.name).join(", ")
+    const actionSummary = `Send contract to ${customerName}${jobTitle ? ` for ${jobTitle}` : ""}: ${templateNames}`
+
+    const { data: approval, error: approvalErr } = await supabase
+      .from("assistant_approvals")
+      .insert({
+        channel:               "telegram",
+        action_type:           "send_contracts",
+        action_summary:        actionSummary,
+        proposed_payload: {
+          customer_id:    customerId,
+          customer_name:  customerName,
+          customer_email: customerEmail,
+          job_id:         jobId,
+          job_title:      jobTitle,
+          template_ids:   selectedTemplates.map((t) => t.id),
+        },
+        requested_by_external: sender ? `telegram:${sender}` : null,
+        expires_at:            new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      })
+      .select()
+      .single()
+
+    if (approvalErr || !approval) {
+      console.error("[assistant/message] contract approval insert error:", approvalErr?.message)
+      return NextResponse.json(
+        { error: "Failed to create contract approval", detail: approvalErr?.message },
+        { status: 500 },
+      )
+    }
+
+    return NextResponse.json({
+      intent:      "send_contract",
+      approval_id: approval.id,
+      contract_preview: {
+        customer_name:  customerName,
+        customer_email: customerEmail,
+        customer_id:    customerId,
+        job_id:         jobId,
+        job_title:      jobTitle,
+        templates:      selectedTemplates.map((t) => ({ id: t.id, name: t.name })),
+        signing_mode:   "bundle" as const,
+        crm_url:        jobId ? `${appUrl}/jobs/${jobId}` : `${appUrl}/customers/${customerId}`,
+      },
+    })
+  }
+
+  // ── job_id pre-set → verify and proceed ───────────────────────────────────
+  if (contract_data?.job_id) {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("id, title, customer:customers(id, name, email)")
+      .eq("id", contract_data.job_id)
+      .maybeSingle()
+
+    if (!job) {
+      return NextResponse.json({ intent: "send_contract", not_found: true, response_text: "Job not found." })
+    }
+    const cust = job.customer as unknown as { id: string; name: string; email: string | null } | null
+    return buildApproval(
+      cust?.id ?? "", cust?.name ?? "Customer", cust?.email ?? null,
+      job.id as string, job.title as string,
+    )
+  }
+
+  // ── customer_id pre-set → find job ────────────────────────────────────────
+  if (contract_data?.customer_id) {
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("id, name, email")
+      .eq("id", contract_data.customer_id)
+      .single()
+
+    if (!customer) {
+      return NextResponse.json({ intent: "send_contract", not_found: true, response_text: "Customer not found." })
+    }
+
+    const hint = contract_data.job_title_hint ?? null
+    const { data: custJobs } = await supabase
+      .from("jobs")
+      .select("id, title")
+      .eq("customer_id", customer.id)
+      .not("status", "in", "(completed,cancelled)")
+      .order("created_at", { ascending: false })
+      .limit(10)
+
+    let jobs = custJobs ?? []
+    if (hint && jobs.length > 1) {
+      const filtered = jobs.filter((j) => j.title.toLowerCase().includes(hint.toLowerCase()))
+      if (filtered.length > 0) jobs = filtered
+    }
+
+    if (jobs.length === 0) {
+      return buildApproval(customer.id, customer.name, customer.email ?? null, null, null)
+    }
+    if (jobs.length === 1) {
+      return buildApproval(customer.id, customer.name, customer.email ?? null, jobs[0].id, jobs[0].title)
+    }
+    return NextResponse.json({
+      intent:                    "send_contract",
+      needs_contract_job_selection: true,
+      job_matches:               jobs.map((j) => ({ id: j.id, title: j.title })),
+    })
+  }
+
+  // ── customer_name provided → search ───────────────────────────────────────
+  if (contract_data?.customer_name) {
+    const { data: customerMatches } = await supabase
+      .from("customers")
+      .select("id, name, email")
+      .ilike("name", `%${contract_data.customer_name}%`)
+      .order("name")
+      .limit(6)
+
+    const matches = customerMatches ?? []
+
+    if (matches.length === 0) {
+      return NextResponse.json({
+        intent:        "send_contract",
+        not_found:     true,
+        response_text: `No customer found matching "${contract_data.customer_name}". Check the spelling and try again.`,
+      })
+    }
+
+    if (matches.length > 1) {
+      return NextResponse.json({
+        intent:                             "send_contract",
+        needs_contract_customer_disambiguation: true,
+        customer_matches:                   matches.map((m) => ({ id: m.id, name: m.name, email: m.email ?? null })),
+      })
+    }
+
+    const customer = matches[0]
+    const hint = contract_data.job_title_hint ?? null
+
+    const { data: custJobs } = await supabase
+      .from("jobs")
+      .select("id, title")
+      .eq("customer_id", customer.id)
+      .not("status", "in", "(completed,cancelled)")
+      .order("created_at", { ascending: false })
+      .limit(10)
+
+    let jobs2 = custJobs ?? []
+    if (hint && jobs2.length > 1) {
+      const filtered = jobs2.filter((j) => j.title.toLowerCase().includes(hint.toLowerCase()))
+      if (filtered.length > 0) jobs2 = filtered
+    }
+
+    if (jobs2.length === 0) {
+      return buildApproval(customer.id, customer.name, customer.email ?? null, null, null)
+    }
+    if (jobs2.length === 1) {
+      return buildApproval(customer.id, customer.name, customer.email ?? null, jobs2[0].id, jobs2[0].title)
+    }
+    return NextResponse.json({
+      intent:                    "send_contract",
+      needs_contract_job_selection: true,
+      job_matches:               jobs2.map((j) => ({ id: j.id, title: j.title })),
+    })
+  }
+
+  return NextResponse.json({
+    intent:         "send_contract",
+    missing_fields: ["customer_name"],
+    response_text:  "I need a customer name to find who to send the contract to.",
+  })
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
@@ -655,6 +961,10 @@ export async function POST(req: Request) {
 
   if (explicitIntent === "schedule_job") {
     return handleScheduleJob(body)
+  }
+
+  if (explicitIntent === "send_contract") {
+    return handleSendContract(body)
   }
 
   const textIntent = parseIntentFromText(body.message ?? "")

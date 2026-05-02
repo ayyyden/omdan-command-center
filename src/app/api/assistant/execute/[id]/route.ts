@@ -83,7 +83,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
 
   const payload = approval.proposed_payload as Record<string, unknown>
   const now = new Date().toISOString()
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app"
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app").replace(/\/+$/, "")
 
   // ─── create_lead_estimate ─────────────────────────────────────────────────
 
@@ -749,6 +749,220 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       job_title,
       scheduled_date: new_scheduled_date,
       scheduled_time: new_scheduled_time ?? null,
+    })
+  }
+
+  // ─── send_contracts ───────────────────────────────────────────────────────
+
+  if (approval.action_type === "send_contracts") {
+    const {
+      customer_id, customer_name, customer_email,
+      job_id, job_title, template_ids,
+    } = payload as {
+      customer_id:    string
+      customer_name:  string
+      customer_email: string
+      job_id:         string | null
+      job_title:      string | null
+      template_ids:   string[]
+    }
+
+    if (!customer_email) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "No customer email", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "No customer email in approval payload" }, { status: 400 })
+    }
+
+    if (!smtpConfigured()) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "SMTP not configured", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "SMTP not configured" }, { status: 500 })
+    }
+
+    // Fetch the selected templates in order
+    const { data: templatesUnordered } = await supabase
+      .from("contract_templates")
+      .select("id, name, storage_path, bucket, file_name")
+      .in("id", template_ids)
+      .eq("is_active", true)
+
+    if (!templatesUnordered?.length) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "Templates not found", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "No valid contract templates found" }, { status: 404 })
+    }
+
+    const templates = template_ids
+      .map((tid) => templatesUnordered.find((t) => t.id === tid))
+      .filter(Boolean) as typeof templatesUnordered
+
+    // Fetch company settings for email
+    const { data: company } = await supabase
+      .from("company_settings")
+      .select("company_name, email, phone")
+      .eq("user_id", ownerUserId)
+      .maybeSingle()
+
+    const companyName = company?.company_name ?? "Omdan"
+
+    // Create a single bundle record
+    const { data: bundle, error: bundleErr } = await supabase
+      .from("contract_bundles")
+      .insert({ user_id: ownerUserId, customer_id, job_id: job_id ?? null })
+      .select("id, signing_token")
+      .single()
+
+    if (bundleErr || !bundle) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: bundleErr?.message ?? "Bundle creation failed", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "Could not create contract bundle" }, { status: 500 })
+    }
+
+    const subject = `${companyName} — Contract${templates.length > 1 ? "s" : ""} Ready for Signing`
+    const emailBody = `Hi ${customer_name},\n\nPlease review and sign your contract${templates.length > 1 ? "s" : ""}.`
+
+    // Create sent_contracts for each template in order and attach PDFs to files
+    let successCount = 0
+    for (let i = 0; i < templates.length; i++) {
+      const tmpl = templates[i]
+
+      const { data: sentRecord, error: insertErr } = await supabase
+        .from("sent_contracts")
+        .insert({
+          user_id:              ownerUserId,
+          contract_template_id: tmpl.id,
+          customer_id,
+          job_id:               job_id ?? null,
+          recipient_email:      customer_email,
+          subject,
+          body:                 emailBody,
+          status:               "sent",
+          bundle_id:            bundle.id,
+          bundle_sort_order:    i,
+        })
+        .select("id")
+        .single()
+
+      if (insertErr || !sentRecord) continue
+
+      // Attach PDF to customer (and job) files — best-effort
+      const { data: blob } = await supabase.storage
+        .from(tmpl.bucket)
+        .download(tmpl.storage_path)
+
+      if (blob) {
+        const pdfBuffer = Buffer.from(await blob.arrayBuffer())
+        const attachBase = {
+          user_id: ownerUserId, bucket: tmpl.bucket, storage_path: tmpl.storage_path,
+          file_name: tmpl.file_name, category: "contracts",
+          size_bytes: pdfBuffer.byteLength, mime_type: "application/pdf",
+        }
+        await supabase.from("file_attachments").upsert(
+          { ...attachBase, entity_type: "customers", entity_id: customer_id },
+          { onConflict: "bucket,storage_path,entity_type,entity_id" }
+        )
+        if (job_id) {
+          await supabase.from("file_attachments").upsert(
+            { ...attachBase, entity_type: "jobs", entity_id: job_id },
+            { onConflict: "bucket,storage_path,entity_type,entity_id" }
+          )
+        }
+      }
+
+      successCount++
+    }
+
+    if (successCount === 0) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "Could not prepare any contracts", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "Could not prepare any contracts" }, { status: 500 })
+    }
+
+    const bundleLink = `${appUrl}/sign-bundle/${bundle.signing_token as string}`
+
+    const htmlBody = buildHtmlEmail({
+      title:     successCount > 1 ? "Contracts Ready for Signing" : `Contract: ${templates[0].name}`,
+      preheader: `Please review and sign ${successCount > 1 ? `${successCount} contracts` : "your contract"}.`,
+      companyName,
+      bodyLines: [
+        emailBody,
+        "",
+        successCount > 1
+          ? `You have <strong>${successCount} contracts</strong> to sign:`
+          : "You have a contract to sign:",
+        ...templates.slice(0, successCount).map((t, i) => `${i + 1}. ${t.name}`),
+        "",
+        "Click the button below to begin. Contracts are presented one at a time in order.",
+      ],
+      ctaLabel: successCount > 1 ? "Sign All Contracts" : "Sign Contract",
+      ctaUrl:   bundleLink,
+    })
+
+    const plainText = [
+      emailBody, "",
+      successCount > 1 ? `You have ${successCount} contracts to sign:` : "You have a contract to sign:",
+      ...templates.slice(0, successCount).map((t, i) => `${i + 1}. ${t.name}`),
+      "", `Sign here: ${bundleLink}`,
+    ].join("\n")
+
+    let sendError: string | null = null
+    try {
+      const transporter = nodemailer.createTransport({
+        host:   process.env.SMTP_HOST ?? "smtp.gmail.com",
+        port:   Number(process.env.SMTP_PORT ?? 587),
+        secure: false,
+        auth:   { user: process.env.SMTP_USER!, pass: process.env.SMTP_PASS! },
+      })
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+        to:   customer_email,
+        subject,
+        text: plainText,
+        html: htmlBody,
+      })
+    } catch (err: unknown) {
+      sendError = err instanceof Error ? err.message : String(err)
+      console.error("[execute/send_contracts] email send failed:", sendError)
+    }
+
+    // Log communication (best-effort)
+    try {
+      await supabase.from("communication_logs").insert({
+        user_id:     ownerUserId,
+        customer_id,
+        job_id:      job_id ?? null,
+        type:        "custom",
+        subject,
+        body:        sendError
+          ? `Contract bundle created but email failed: ${sendError}`
+          : plainText,
+        channel:     "email",
+      })
+    } catch { /* non-critical */ }
+
+    await supabase.from("assistant_approvals")
+      .update({
+        status:      "executed",
+        executed_at: now,
+        result:      { bundle_id: bundle.id, count: successCount, sent_to: sendError ? null : customer_email },
+        updated_at:  now,
+      })
+      .eq("id", id)
+
+    if (sendError) {
+      return NextResponse.json({
+        action_type: "send_contracts",
+        success:     false,
+        warning:     `Bundle created but email failed: ${sendError}`,
+      })
+    }
+
+    return NextResponse.json({
+      action_type: "send_contracts",
+      success:     true,
+      count:       successCount,
+      sent_to:     customer_email,
+      bundle_link: bundleLink,
     })
   }
 

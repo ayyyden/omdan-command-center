@@ -51,6 +51,21 @@ export interface ScheduleData {
   scheduled_time?: string | null  // HH:MM
 }
 
+export interface ContractData {
+  customer_name?: string
+  customer_id?: string      // set after customer disambiguation
+  job_id?: string           // set after job disambiguation
+  job_title_hint?: string
+  template_name_hint?: string
+  template_ids?: string[]   // set after template selection
+  bundle_all?: boolean
+}
+
+export interface ContractTemplate {
+  id: string
+  name: string
+}
+
 export interface CustomerMatch {
   id: string
   name: string
@@ -87,6 +102,17 @@ export interface SchedulePreview {
   new_scheduled_date: string
   new_scheduled_time: string | null
   pm_name: string | null
+  crm_url: string
+}
+
+export interface ContractPreview {
+  customer_name: string
+  customer_email: string
+  customer_id: string
+  job_id: string | null
+  job_title: string | null
+  templates: ContractTemplate[]
+  signing_mode: "bundle"
   crm_url: string
 }
 
@@ -128,6 +154,14 @@ export interface CrmMessageResponse {
   resolved_scheduled_date?: string
   resolved_scheduled_time?: string | null
   resolved_job_title_hint?: string | null
+  // send_contract response fields
+  contract_preview?: ContractPreview
+  needs_contract_customer_disambiguation?: boolean
+  needs_contract_job_selection?: boolean
+  needs_template_selection?: boolean
+  available_templates?: ContractTemplate[]
+  no_email?: boolean
+  no_templates?: boolean
 }
 
 export interface EstimatePreview {
@@ -162,6 +196,9 @@ export interface ExecuteResponse {
   job_title?: string
   scheduled_date?: string
   scheduled_time?: string | null
+  // send_contracts fields
+  count?: number
+  bundle_link?: string
 }
 
 export interface DailySummary {
