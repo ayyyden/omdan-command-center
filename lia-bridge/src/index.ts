@@ -92,6 +92,19 @@ const pendingContractTemplatePicks = new Map<string, {
   templates:    ContractTemplate[]
 }>()
 
+// ─── Pending contract follow-up state (scoped by chatId:fromId) ───────────────
+// Used when Lia asks for a missing customer name or job — the next unknown text
+// from the same user/chat continues the flow instead of falling through.
+
+const pendingContractMissingCustomer = new Map<string, {
+  contractData: ContractData
+}>()
+
+const pendingContractMissingJob = new Map<string, {
+  contractData: ContractData
+  matches:      JobMatch[]
+}>()
+
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
 function fmtMoney(n: number): string {
@@ -327,17 +340,24 @@ function formatContractPreview(approvalId: string, preview: ContractPreview): st
 // ─── Shared contract handler ──────────────────────────────────────────────────
 
 async function handleSendContract(
-  rawText:   string,
-  senderKey: string,
-  send:      SendFn,
+  rawText:      string,
+  senderKey:    string,
+  send:         SendFn,
+  userChatKey?: string,
 ): Promise<void> {
   const parsed = parseContractMessage(rawText)
 
   if (!parsed.customer_name) {
-    await send(
-      "To send a contract, I need a customer name.\n\n" +
-      "Example: \"Lia, send home improvement contract to John Smith for paver job\"",
-    )
+    if (userChatKey) {
+      pendingContractMissingCustomer.set(userChatKey, {
+        contractData: {
+          job_title_hint:     parsed.job_title_hint     ?? undefined,
+          template_name_hint: parsed.template_name_hint ?? undefined,
+          bundle_all:         parsed.bundle_all,
+        },
+      })
+    }
+    await send("I can do that. Who should I send the contract to?")
     return
   }
 
@@ -355,7 +375,7 @@ async function handleSendContract(
     contract_data: contractData,
   })
 
-  await handleContractResult(result, contractData, senderKey, send)
+  await handleContractResult(result, contractData, senderKey, send, userChatKey)
 }
 
 async function handleContractResult(
@@ -363,6 +383,7 @@ async function handleContractResult(
   contractData: ContractData,
   senderKey:    string,
   send:         SendFn,
+  userChatKey?: string,
 ): Promise<void> {
   if (result.not_found) {
     await send(result.response_text ?? "No customer or job found. Check the name and try again.")
@@ -399,11 +420,17 @@ async function handleContractResult(
   // Job disambiguation
   if (result.needs_contract_job_selection && result.job_matches?.length) {
     pendingContractJobPicks.set(senderKey, { contractData, matches: result.job_matches })
+    if (userChatKey) {
+      pendingContractMissingJob.set(userChatKey, { contractData, matches: result.job_matches })
+    }
     const buttons: InlineKeyboardButton[][] = result.job_matches.map((j, i) => [{
       text: `${i + 1}. ${j.title}`, callback_data: `pick_contract_job:${i}`,
     }])
     buttons.push([{ text: "❌ Cancel", callback_data: "cancel_contract" }])
-    await send("Multiple jobs found — which job is this contract for?", buttons)
+    const jobPrompt = contractData.customer_name
+      ? `Found ${contractData.customer_name} — which job is this contract for?`
+      : "Which job is this contract for?"
+    await send(jobPrompt, buttons)
     return
   }
 
@@ -785,8 +812,9 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
     }
   }
 
-  const chatKey = String(chatId)
-  const intent  = parseIntent(text)
+  const chatKey    = String(chatId)
+  const userChatKey = `${chatId}:${fromId}`
+  const intent     = parseIntent(text)
   console.log(`[lia/telegram] ${fromId} → intent: ${intent.type}`)
 
   // Telegram send helper (uses inline buttons when provided)
@@ -824,7 +852,46 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       const { oldApprovalId } = pendingEdit
       pendingEdits.delete(chatKey)
       await updateApproval(oldApprovalId, "rejected").catch(() => {})
-      await handleSendContract(text, chatKey, sendTG)
+      await handleSendContract(text, chatKey, sendTG, userChatKey)
+      return
+    }
+
+    // ── Contract follow-up: waiting for customer name ────────────────────────
+    // Fires when Lia previously asked "Who should I send the contract to?" and
+    // the user replied with a plain name (unknown intent).
+    const pendingMissingCust = pendingContractMissingCustomer.get(userChatKey)
+    if (pendingMissingCust && intent.type === "unknown") {
+      pendingContractMissingCustomer.delete(userChatKey)
+      const contractData: ContractData = { ...pendingMissingCust.contractData, customer_name: text.trim() }
+      const result = await sendMessage({
+        message: text, sender: chatKey, intent: "send_contract", contract_data: contractData,
+      })
+      await handleContractResult(result, contractData, chatKey, sendTG, userChatKey)
+      return
+    }
+
+    // ── Contract follow-up: waiting for job text reply ───────────────────────
+    // Fires when Lia showed a job picker and the user replied with a plain keyword
+    // like "paver" or "turf" instead of pressing a button.
+    const pendingMissingJob = pendingContractMissingJob.get(userChatKey)
+    if (pendingMissingJob && intent.type === "unknown") {
+      pendingContractMissingJob.delete(userChatKey)
+      const queryLower = text.trim().toLowerCase()
+      const match = pendingMissingJob.matches.find((j) => j.title.toLowerCase().includes(queryLower))
+      if (!match) {
+        pendingContractMissingJob.set(userChatKey, pendingMissingJob)
+        const retryButtons = pendingMissingJob.matches.map((j, i) => [{
+          text: `${i + 1}. ${j.title}`, callback_data: `pick_contract_job:${i}`,
+        }]) as InlineKeyboardButton[][]
+        retryButtons.push([{ text: "❌ Cancel", callback_data: "cancel_contract" }])
+        await sendTG(`I couldn't match "${text.trim()}" to a job. Which one?`, retryButtons)
+        return
+      }
+      const contractDataWithJob: ContractData = { ...pendingMissingJob.contractData, job_id: match.id }
+      const result = await sendMessage({
+        message: "", sender: chatKey, intent: "send_contract", contract_data: contractDataWithJob,
+      })
+      await handleContractResult(result, contractDataWithJob, chatKey, sendTG, userChatKey)
       return
     }
 
@@ -849,6 +916,8 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       pendingContractCustomerPicks.delete(chatKey)
       pendingContractJobPicks.delete(chatKey)
       pendingContractTemplatePicks.delete(chatKey)
+      pendingContractMissingCustomer.delete(userChatKey)
+      pendingContractMissingJob.delete(userChatKey)
       await sendTelegramMessage(chatId, "Contract request cancelled.")
       return
     }
@@ -1051,7 +1120,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         message: "", sender: chatKey, intent: "send_contract",
         contract_data: { ...pending.contractData, customer_id: match.id, customer_name: match.name },
       })
-      await handleContractResult(result, { ...pending.contractData, customer_id: match.id, customer_name: match.name }, chatKey, sendTG)
+      await handleContractResult(result, { ...pending.contractData, customer_id: match.id, customer_name: match.name }, chatKey, sendTG, userChatKey)
       return
     }
 
@@ -1062,12 +1131,13 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       const match = pending.matches[intent.index]
       if (!match) { await sendTelegramMessage(chatId, "Invalid selection. Please try again."); return }
       pendingContractJobPicks.delete(chatKey)
+      pendingContractMissingJob.delete(userChatKey)
 
       const result = await sendMessage({
         message: "", sender: chatKey, intent: "send_contract",
         contract_data: { ...pending.contractData, job_id: match.id },
       })
-      await handleContractResult(result, { ...pending.contractData, job_id: match.id }, chatKey, sendTG)
+      await handleContractResult(result, { ...pending.contractData, job_id: match.id }, chatKey, sendTG, userChatKey)
       return
     }
 
@@ -1090,7 +1160,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         message: "", sender: chatKey, intent: "send_contract",
         contract_data: { ...pending.contractData, template_ids: selectedIds },
       })
-      await handleContractResult(result, { ...pending.contractData, template_ids: selectedIds }, chatKey, sendTG)
+      await handleContractResult(result, { ...pending.contractData, template_ids: selectedIds }, chatKey, sendTG, userChatKey)
       return
     }
 
@@ -1136,7 +1206,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
     }
 
     if (intent.type === "send_contract") {
-      await handleSendContract(text, chatKey, sendTG)
+      await handleSendContract(text, chatKey, sendTG, userChatKey)
       return
     }
 
