@@ -46,6 +46,41 @@ function capitalize(s: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1)
 }
 
+// ─── Payment label normalization ───────────────────────────────────────────────
+// Converts raw parser output into professional labels safe for customer-facing
+// content. Kept in sync with src/lib/lia-text-normalizer.ts in the CRM.
+
+export function normalizePaymentLabel(raw: string): string {
+  const lower = raw.toLowerCase().trim()
+  if (!lower) return "Payment"
+  if (/\bdeposit\b/.test(lower)) return "Deposit"
+  if (/\bmaterials?\b/.test(lower)) {
+    return /\b(?:arrive[sd]?|arrival|deliver(?:y|ies|ed)?|order(?:ed)?)\b/.test(lower)
+      ? "Upon Material Arrival"
+      : "Upon Material Delivery"
+  }
+  if (/\b(?:start|begin[s]?|mobiliz(?:ation)?|kick[\s-]?off)\b/.test(lower)) return "Upon Project Start"
+  if (/^final\s*(?:payment)?$/.test(lower)) return "Final Payment"
+  if (/\b(?:done|finish(?:ed)?|complet(?:e[sd]?|ion)|end(?:\s+of)?|rest|remainder|remaining|balance|final)\b/.test(lower)) {
+    return "Final Payment Upon Completion"
+  }
+  if (/\b(?:progress|mid(?:way)?|halfway|partial)\b/.test(lower)) return "Progress Payment"
+  return raw.trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ")
+}
+
+// ─── Services text cleanup ─────────────────────────────────────────────────────
+// Strips action prefixes that the parser captures before the real service text.
+
+function cleanServicesText(raw: string): string {
+  return raw
+    .replace(/^to\s+(?:do|have|get|install|build)\s+/i, "")
+    .trim()
+}
+
 // ─── Lead source normalization ─────────────────────────────────────────────────
 // Maps common keywords to lead_sources.value identifiers.
 // The CHECK constraint was dropped in migration 040, so unlisted values are OK.
@@ -130,13 +165,13 @@ function extractLeadSource(text: string): string | undefined {
 function extractServices(text: string): string | undefined {
   // 1. "needs: painting, pavers, turf"
   const needsM = text.match(/\bneeds?\s*[-:]?\s+([^\n]{5,200})/i)
-  if (needsM) return needsM[1].trim()
+  if (needsM) return cleanServicesText(needsM[1].trim())
 
   // 2. "client/customer need(s)/wants to do/have/get ..."
   const clientM = text.match(
     /\b(?:client|customer)\s+(?:needs?|wants?|would\s+like)\s+to\s+(?:do\s+|have\s+|get\s+|install\s+|build\s+)?(.{10,200})/i,
   )
-  if (clientM) return clientM[1].trim()
+  if (clientM) return cleanServicesText(clientM[1].trim())
 
   return undefined
 }
@@ -155,7 +190,7 @@ function parseStepCandidate(s: string): ParsedPaymentStep | null {
   )
   if (restM) {
     const label = restM[1].trim() || "Final Payment"
-    return { name: capitalize(label), amount: REST_SENTINEL }
+    return { name: normalizePaymentLabel(capitalize(label)), amount: REST_SENTINEL }
   }
 
   // "1000 deposit", "25k when material arrives"
@@ -163,7 +198,7 @@ function parseStepCandidate(s: string): ParsedPaymentStep | null {
   if (amtM) {
     const amount = parseMoneyAmount(amtM[1])
     if (amount !== undefined) {
-      return { name: capitalize(amtM[2].trim()), amount }
+      return { name: normalizePaymentLabel(capitalize(amtM[2].trim())), amount }
     }
   }
 

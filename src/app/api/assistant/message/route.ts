@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { verifyAssistantSecret } from "@/lib/assistant-auth"
 import { createServiceClient } from "@/lib/supabase/service"
+import { generateEstimateScope } from "@/lib/scope-generator"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,9 @@ interface EstimateData {
   services?: string
   total?: number
   payment_steps?: Array<{ name: string; amount: number }>
+  scope_override?: string
+  generated_title?: string
+  generated_scope?: string
 }
 
 interface InvoiceData {
@@ -170,6 +174,27 @@ async function handleAddLeadEstimate(body: MessageBody) {
     wants_estimate && total > 0 ? ` + $${total.toLocaleString()} estimate` : "",
   ].join("")
 
+  // Pre-generate a professional title and scope so the Telegram approval preview
+  // shows polished wording and the execute route can skip a second API call.
+  let preTitle: string | null = null
+  let preScope: string | null = null
+  if (wants_estimate && (estimate?.services ?? lead?.service_type)) {
+    try {
+      const scopeResult = await generateEstimateScope(
+        estimate?.services ?? lead?.service_type ?? "Project",
+        estimate?.scope_override,
+      )
+      preTitle = scopeResult.title
+      preScope = scopeResult.scope
+    } catch {
+      // Non-fatal — execute route will regenerate on approval
+    }
+  }
+
+  const estimatePayload = wants_estimate
+    ? { ...(estimate ?? {}), generated_title: preTitle, generated_scope: preScope }
+    : null
+
   const supabase = createServiceClient()
   const { data: approval, error } = await supabase
     .from("assistant_approvals")
@@ -179,7 +204,7 @@ async function handleAddLeadEstimate(body: MessageBody) {
       action_summary: actionSummary,
       proposed_payload: {
         lead,
-        estimate: wants_estimate ? (estimate ?? null) : null,
+        estimate: estimatePayload,
       },
       requested_by_external: sender ? `telegram:${sender}` : null,
       expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
@@ -196,7 +221,9 @@ async function handleAddLeadEstimate(body: MessageBody) {
     intent: "add_lead_estimate",
     approval_id: approval.id,
     lead,
-    estimate: wants_estimate ? (estimate ?? null) : null,
+    estimate: wants_estimate
+      ? { ...(estimate ?? {}), generated_title: preTitle }
+      : null,
     wants_estimate,
   })
 }

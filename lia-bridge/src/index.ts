@@ -116,7 +116,11 @@ function formatLeadPreview(
   if (lead.email)        lines.push(`📧 Email: ${lead.email}`)
   if (lead.address)      lines.push(`📍 Address: ${lead.address}`)
   if (lead.lead_source)  lines.push(`🔗 Lead Source: ${SOURCE_LABELS[lead.lead_source] ?? lead.lead_source}`)
-  if (lead.service_type) lines.push(`🛠 Services: ${lead.service_type}`)
+  if (estimate?.generated_title) {
+    lines.push(`📋 Project: ${estimate.generated_title}`)
+  } else if (lead.service_type) {
+    lines.push(`🛠 Services: ${lead.service_type}`)
+  }
 
   if (wantsEstimate && estimate?.total) {
     lines.push(`💰 Estimate Total: ${fmtMoney(estimate.total)}`)

@@ -7,6 +7,7 @@ import { generateEstimateScope } from "@/lib/scope-generator"
 import { generateEstimatePDFBuffer } from "@/lib/pdf/generate-estimate-pdf"
 import { generateInvoicePDFBuffer } from "@/lib/pdf/generate-invoice-pdf"
 import { notifyLia } from "@/lib/lia-notifications"
+import { normalizePaymentLabel } from "@/lib/lia-text-normalizer"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -91,6 +92,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     const lead = payload.lead as Record<string, string | undefined>
     const estData = payload.estimate as {
       services?: string; total?: number; scope_override?: string
+      generated_title?: string; generated_scope?: string
       payment_steps?: Array<{ name: string; amount: number }>
     } | null
 
@@ -132,11 +134,20 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       })
     }
 
-    // Generate professional scope of work + title using Claude
-    const { title: generatedTitle, scope: generatedScope } = await generateEstimateScope(
-      estData.services ?? lead.service_type ?? "Project",
-      estData.scope_override,
-    )
+    // Use pre-generated title/scope from approval payload (stored at message time) or generate now
+    let generatedTitle: string
+    let generatedScope: string | null
+    if (estData.generated_title) {
+      generatedTitle = estData.generated_title
+      generatedScope = estData.generated_scope ?? null
+    } else {
+      const scopeResult = await generateEstimateScope(
+        estData.services ?? lead.service_type ?? "Project",
+        estData.scope_override,
+      )
+      generatedTitle = scopeResult.title
+      generatedScope = scopeResult.scope
+    }
 
     const total         = Number(estData.total)
     const approvalToken = crypto.randomUUID()
@@ -171,7 +182,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       await supabase.from("estimate_payment_steps").insert(
         estData.payment_steps.map((s, i) => ({
           estimate_id: estimate.id,
-          name:        s.name,
+          name:        normalizePaymentLabel(s.name),
           amount:      s.amount,
           sort_order:  i,
         }))
@@ -195,7 +206,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
           total,
           services:       estData.services,
           scope:          generatedScope,
-          payment_steps:  estData.payment_steps ?? [],
+          payment_steps:  (estData.payment_steps ?? []).map((s) => ({ ...s, name: normalizePaymentLabel(s.name) })),
           estimate_url:   estimateUrl,
         },
         requested_by_whatsapp: approval.requested_by_whatsapp ?? null,
@@ -222,7 +233,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         services:      estData.services ?? null,
         scope:         scopeSummary,
         total,
-        payment_steps: estData.payment_steps ?? [],
+        payment_steps: (estData.payment_steps ?? []).map((s) => ({ ...s, name: normalizePaymentLabel(s.name) })),
         estimate_url:  estimateUrl,
       },
     })
@@ -312,7 +323,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       "",
       `${companyName} has prepared an estimate for your project.`,
       "",
-      `<strong>Project:</strong> ${services ?? estimate_title}`,
+      `<strong>Project:</strong> ${estimate_title}`,
       `<strong>Total: $${Number(total).toLocaleString()}</strong>`,
     ]
 
