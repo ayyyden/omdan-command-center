@@ -1283,10 +1283,14 @@ app.post("/notify", async (req: Request, res: Response) => {
   const message = formatNotification(body)
   console.log(`[lia/notify] ${body.event_type} — ${body.customer_name ?? ""}`)
 
-  // Send to all allowed Telegram IDs
-  for (const chatId of TELEGRAM_ALLOWED_IDS) {
+  // Send to all approved group chats only (not private DMs)
+  if (TELEGRAM_ALLOWED_CHAT_IDS.size === 0) {
+    console.log("[lia/notify] No TELEGRAM_ALLOWED_CHAT_IDS configured — notification not delivered")
+    return
+  }
+  for (const chatId of TELEGRAM_ALLOWED_CHAT_IDS) {
     sendTelegramMessage(chatId, message).catch((err) => {
-      console.error(`[lia/notify] Telegram send failed for ${chatId}:`, err?.message)
+      console.error(`[lia/notify] Telegram send failed for chat ${chatId}:`, err?.message)
     })
   }
 })
@@ -1296,7 +1300,9 @@ app.post("/notify", async (req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`[lia-bridge] Listening on port ${PORT}`)
   console.log(`[lia-bridge] CRM: ${process.env.CRM_BASE_URL}`)
-  console.log(`[lia-bridge] Allowed WhatsApp numbers: ${ALLOWED_NUMBERS.join(", ") || "(none)"}`)
-  console.log(`[lia-bridge] Allowed Telegram IDs: ${[...TELEGRAM_ALLOWED_IDS].join(", ") || "(none — set TELEGRAM_ALLOWED_USER_IDS)"}`)
+  console.log(`[lia-bridge] Allowed WhatsApp numbers:   ${ALLOWED_NUMBERS.join(", ") || "(none)"}`)
+  console.log(`[lia-bridge] Allowed Telegram user IDs:  ${[...TELEGRAM_ALLOWED_IDS].join(", ") || "(none — set TELEGRAM_ALLOWED_USER_IDS)"}`)
+  console.log(`[lia-bridge] Allowed Telegram chat IDs:  ${[...TELEGRAM_ALLOWED_CHAT_IDS].join(", ") || "(none — set TELEGRAM_ALLOWED_CHAT_IDS)"}`)
+  console.log(`[lia-bridge] Notification destination:   ${TELEGRAM_ALLOWED_CHAT_IDS.size > 0 ? `group chats only (${[...TELEGRAM_ALLOWED_CHAT_IDS].join(", ")})` : "⚠ none — set TELEGRAM_ALLOWED_CHAT_IDS"}`)
   startScheduler(TELEGRAM_ALLOWED_IDS)
 })
