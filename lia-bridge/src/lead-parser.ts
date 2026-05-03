@@ -85,16 +85,20 @@ function extractName(text: string): string | undefined {
   const nameIs = text.match(/\bname\s+is\s+([^\n,]{2,60})/i)
   if (nameIs) return nameIs[1].trim()
 
-  // 3. "customer/client [name is] Foo Bar"
-  const custClient = text.match(
-    /\b(?:customer|client)(?:'s)?\s+(?:name\s+(?:is\s+)?)?([A-Za-z][A-Za-z'-]+(?:\s+[A-Za-z][A-Za-z'-]+)+)/i,
-  )
-  if (custClient) return custClient[1].trim()
-
-  // 4. Loose line-anchored: "name Foo Bar" (2–4 name-like words, whole line only)
-  //    Uses multiline so ^ matches line start — avoids matching mid-sentence.
+  // 3. Loose line-anchored: "name Foo Bar" (2–4 name-like words, whole line only)
+  //    Checked BEFORE customer/client so "name idan slik" is never mis-parsed
+  //    as a customer/client sentence.
   const loose = text.match(/^name\s+([A-Za-z][A-Za-z'-]+(?:\s+[A-Za-z][A-Za-z'-]+){1,3})\s*$/im)
   if (loose) return loose[1].trim()
+
+  // 4. "customer/client [name is] Foo Bar"
+  //    Negative lookahead blocks action-verb phrases so "client need to do X"
+  //    is never captured as a name. Repetition also stops at action verbs so
+  //    "client John Smith needs pavers" yields "John Smith" not "John Smith needs".
+  const custClient = text.match(
+    /\b(?:customer|client)(?:'s)?\s+(?:name\s+(?:is\s+)?)?(?!(?:need|needs|want|wants|would|has|have|require[sd]?|looking|asked)\b)([A-Za-z][A-Za-z'-]+(?:\s+(?!needs?\b|wants?\b|would\b|has\b|have\b|require[sd]?\b|looking\b|asked\b)[A-Za-z][A-Za-z'-]+){0,3})/i,
+  )
+  if (custClient) return custClient[1].trim()
 
   return undefined
 }
