@@ -7,6 +7,7 @@ export interface ParsedContractMessage {
   job_title_hint: string | null
   template_name_hint: string | null
   bundle_all: boolean
+  customer_level: boolean
 }
 
 export function parseContractMessage(text: string): ParsedContractMessage {
@@ -25,6 +26,11 @@ export function parseContractMessage(text: string): ParsedContractMessage {
     /\bcontract\s+bundle\b/.test(lower) ||
     /\bbundle\b/.test(lower) ||
     /\ball\s+contracts\b/.test(lower)
+
+  // Detect customer-level / general contract (no job required)
+  const customer_level =
+    /\bcustomer[- ]?level\b/.test(lower) ||
+    /\bgeneral\s+contract\b/.test(lower)
 
   // Extract template name hint: words between "send" and "contract[s]" that aren't articles
   let template_name_hint: string | null = null
@@ -79,5 +85,5 @@ export function parseContractMessage(text: string): ParsedContractMessage {
     }
   }
 
-  return { customer_name, job_title_hint, template_name_hint, bundle_all }
+  return { customer_name, job_title_hint, template_name_hint, bundle_all, customer_level }
 }

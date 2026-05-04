@@ -78,6 +78,7 @@ interface ContractData {
   template_name_hint?: string
   template_ids?: string[]
   bundle_all?: boolean
+  customer_level?: boolean
 }
 
 interface MessageBody {
@@ -770,9 +771,11 @@ async function handleSendContract(body: MessageBody) {
         } else if (filtered.length > 1) {
           // Multiple matches — let user pick
           return NextResponse.json({
-            intent:                  "send_contract",
-            needs_template_selection: true,
-            available_templates:     filtered.map((t) => ({ id: t.id, name: t.name })),
+            intent:                          "send_contract",
+            needs_template_selection:        true,
+            resolved_contract_customer_id:   customerId,
+            resolved_contract_job_id:        jobId ?? undefined,
+            available_templates:             filtered.map((t) => ({ id: t.id, name: t.name })),
           })
         } else {
           // No name match — show all templates
@@ -780,9 +783,11 @@ async function handleSendContract(body: MessageBody) {
             selectedTemplates = templates
           } else {
             return NextResponse.json({
-              intent:                  "send_contract",
-              needs_template_selection: true,
-              available_templates:     templates.map((t) => ({ id: t.id, name: t.name })),
+              intent:                          "send_contract",
+              needs_template_selection:        true,
+              resolved_contract_customer_id:   customerId,
+              resolved_contract_job_id:        jobId ?? undefined,
+              available_templates:             templates.map((t) => ({ id: t.id, name: t.name })),
             })
           }
         }
@@ -792,9 +797,11 @@ async function handleSendContract(body: MessageBody) {
       } else {
         // Multiple templates, no hint → let user pick
         return NextResponse.json({
-          intent:                  "send_contract",
-          needs_template_selection: true,
-          available_templates:     templates.map((t) => ({ id: t.id, name: t.name })),
+          intent:                          "send_contract",
+          needs_template_selection:        true,
+          resolved_contract_customer_id:   customerId,
+          resolved_contract_job_id:        jobId ?? undefined,
+          available_templates:             templates.map((t) => ({ id: t.id, name: t.name })),
         })
       }
     }
@@ -893,15 +900,23 @@ async function handleSendContract(body: MessageBody) {
     }
 
     if (jobs.length === 0) {
-      return buildApproval(customer.id, customer.name, customer.email ?? null, null, null)
+      if (contract_data?.customer_level) {
+        return buildApproval(customer.id, customer.name, customer.email ?? null, null, null)
+      }
+      return NextResponse.json({
+        intent:        "send_contract",
+        no_jobs:       true,
+        response_text: `I found ${customer.name}, but contracts must be connected to a job. Please create or select a job first, then try again.`,
+      })
     }
     if (jobs.length === 1) {
       return buildApproval(customer.id, customer.name, customer.email ?? null, jobs[0].id, jobs[0].title)
     }
     return NextResponse.json({
-      intent:                    "send_contract",
-      needs_contract_job_selection: true,
-      job_matches:               jobs.map((j) => ({ id: j.id, title: j.title })),
+      intent:                          "send_contract",
+      needs_contract_job_selection:    true,
+      resolved_contract_customer_id:   customer.id,
+      job_matches:                     jobs.map((j) => ({ id: j.id, title: j.title })),
     })
   }
 
@@ -950,15 +965,23 @@ async function handleSendContract(body: MessageBody) {
     }
 
     if (jobs2.length === 0) {
-      return buildApproval(customer.id, customer.name, customer.email ?? null, null, null)
+      if (contract_data?.customer_level) {
+        return buildApproval(customer.id, customer.name, customer.email ?? null, null, null)
+      }
+      return NextResponse.json({
+        intent:        "send_contract",
+        no_jobs:       true,
+        response_text: `I found ${customer.name}, but contracts must be connected to a job. Please create or select a job first, then try again.`,
+      })
     }
     if (jobs2.length === 1) {
       return buildApproval(customer.id, customer.name, customer.email ?? null, jobs2[0].id, jobs2[0].title)
     }
     return NextResponse.json({
-      intent:                    "send_contract",
-      needs_contract_job_selection: true,
-      job_matches:               jobs2.map((j) => ({ id: j.id, title: j.title })),
+      intent:                          "send_contract",
+      needs_contract_job_selection:    true,
+      resolved_contract_customer_id:   customer.id,
+      job_matches:                     jobs2.map((j) => ({ id: j.id, title: j.title })),
     })
   }
 

@@ -354,6 +354,7 @@ async function handleSendContract(
           job_title_hint:     parsed.job_title_hint     ?? undefined,
           template_name_hint: parsed.template_name_hint ?? undefined,
           bundle_all:         parsed.bundle_all,
+          customer_level:     parsed.customer_level || undefined,
         },
       })
     }
@@ -366,6 +367,7 @@ async function handleSendContract(
     job_title_hint:     parsed.job_title_hint ?? undefined,
     template_name_hint: parsed.template_name_hint ?? undefined,
     bundle_all:         parsed.bundle_all,
+    customer_level:     parsed.customer_level || undefined,
   }
 
   const result = await sendMessage({
@@ -419,9 +421,13 @@ async function handleContractResult(
 
   // Job disambiguation
   if (result.needs_contract_job_selection && result.job_matches?.length) {
-    pendingContractJobPicks.set(senderKey, { contractData, matches: result.job_matches })
+    const enrichedForJob: ContractData = {
+      ...contractData,
+      ...(result.resolved_contract_customer_id ? { customer_id: result.resolved_contract_customer_id } : {}),
+    }
+    pendingContractJobPicks.set(senderKey, { contractData: enrichedForJob, matches: result.job_matches })
     if (userChatKey) {
-      pendingContractMissingJob.set(userChatKey, { contractData, matches: result.job_matches })
+      pendingContractMissingJob.set(userChatKey, { contractData: enrichedForJob, matches: result.job_matches })
     }
     const buttons: InlineKeyboardButton[][] = result.job_matches.map((j, i) => [{
       text: `${i + 1}. ${j.title}`, callback_data: `pick_contract_job:${i}`,
@@ -436,7 +442,12 @@ async function handleContractResult(
 
   // Template selection
   if (result.needs_template_selection && result.available_templates?.length) {
-    pendingContractTemplatePicks.set(senderKey, { contractData, templates: result.available_templates })
+    const enrichedForTemplate: ContractData = {
+      ...contractData,
+      ...(result.resolved_contract_customer_id ? { customer_id: result.resolved_contract_customer_id } : {}),
+      ...(result.resolved_contract_job_id ? { job_id: result.resolved_contract_job_id } : {}),
+    }
+    pendingContractTemplatePicks.set(senderKey, { contractData: enrichedForTemplate, templates: result.available_templates })
     const buttons: InlineKeyboardButton[][] = result.available_templates.map((t, i) => [{
       text: `${i + 1}. ${t.name}`, callback_data: `pick_contract_template:${i}`,
     }])

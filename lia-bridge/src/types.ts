@@ -62,6 +62,7 @@ export interface ContractData {
   template_name_hint?: string
   template_ids?: string[]   // set after template selection
   bundle_all?: boolean
+  customer_level?: boolean  // explicitly customer-level — skip job requirement
 }
 
 export interface ContractTemplate {
@@ -165,6 +166,8 @@ export interface CrmMessageResponse {
   available_templates?: ContractTemplate[]
   no_email?: boolean
   no_templates?: boolean
+  resolved_contract_customer_id?: string
+  resolved_contract_job_id?: string
 }
 
 export interface EstimatePreview {
