@@ -1,11 +1,11 @@
 export const ROLES = [
-  'owner', 'admin', 'project_manager', 'office', 'field_worker', 'viewer',
+  'owner', 'admin', 'project_manager', 'office', 'field_worker', 'viewer', 'lead_operator',
 ] as const
 
 export type TeamRole = typeof ROLES[number]
 
 /** Roles that are currently active and have full app access. */
-export const ACTIVE_ROLES: TeamRole[] = ['owner', 'admin', 'project_manager']
+export const ACTIVE_ROLES: TeamRole[] = ['owner', 'admin', 'project_manager', 'lead_operator']
 
 /** Roles that have been retired. Members with these roles are blocked until upgraded. */
 export const LEGACY_ROLES: TeamRole[] = ['office', 'field_worker', 'viewer']
@@ -21,6 +21,7 @@ export const ROLE_LABELS: Record<TeamRole, string> = {
   office:          'Office',
   field_worker:    'Field Worker',
   viewer:          'Viewer',
+  lead_operator:   'Lead Operator',
 }
 
 export const ROLE_COLORS: Record<TeamRole, string> = {
@@ -30,11 +31,12 @@ export const ROLE_COLORS: Record<TeamRole, string> = {
   office:          'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
   field_worker:    'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
   viewer:          'bg-gray-100 text-gray-700 dark:bg-gray-800/60 dark:text-gray-300',
+  lead_operator:   'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300',
 }
 
 // Higher index = more power
 const ROLE_POWER: Record<TeamRole, number> = {
-  viewer: 0, field_worker: 1, project_manager: 2, office: 3, admin: 4, owner: 5,
+  viewer: 0, field_worker: 1, lead_operator: 1, project_manager: 2, office: 3, admin: 4, owner: 5,
 }
 
 export function roleAtLeast(role: TeamRole, minimum: TeamRole): boolean {
@@ -50,7 +52,7 @@ export function canManageRole(actor: TeamRole, target: TeamRole): boolean {
 
 /** Can `actor` invite someone into `targetRole`? Only active non-owner roles are invitable. */
 export function canInviteRole(actor: TeamRole, targetRole: TeamRole): boolean {
-  const invitable: TeamRole[] = ['admin', 'project_manager']
+  const invitable: TeamRole[] = ['admin', 'project_manager', 'lead_operator']
   if (!invitable.includes(targetRole)) return false
   if (actor === 'owner') return true
   if (actor === 'admin') return true
@@ -173,6 +175,18 @@ export function can(role: TeamRole, action: string): boolean {
       return true
     case 'scheduler:edit':
       return roleAtLeast(role, 'office')
+
+    // ── PropStream Lead Operating Center ─────────────────────────────────────
+    case 'propstream:view':
+      return role === 'lead_operator' || roleAtLeast(role, 'admin')
+    case 'propstream:call':
+      return role === 'lead_operator' || roleAtLeast(role, 'admin')
+    case 'propstream:import':
+      return roleAtLeast(role, 'admin')
+    case 'propstream:approve':
+      return role === 'lead_operator' || roleAtLeast(role, 'admin')
+    case 'propstream:manage':
+      return roleAtLeast(role, 'admin')
 
     default:
       return false

@@ -675,6 +675,49 @@ async function handleScheduleJob(body: MessageBody) {
   })
 }
 
+// ─── Robust customer name search ─────────────────────────────────────────────
+// Attempt 1: case-insensitive substring of the full normalised name.
+// Attempt 2: word-by-word OR fetch, then keep only rows matching ALL words.
+//            This handles names stored with non-breaking spaces, double spaces,
+//            or other whitespace variants that break a full-string ilike.
+
+async function findCustomersByName(
+  supabase: ReturnType<typeof createServiceClient>,
+  rawName: string,
+): Promise<Array<{ id: string; name: string; email: string | null }>> {
+  const normalized = rawName.trim().replace(/\s+/g, " ")
+
+  const { data: direct } = await supabase
+    .from("customers")
+    .select("id, name, email")
+    .ilike("name", `%${normalized}%`)
+    .order("name")
+    .limit(6)
+
+  if (direct && direct.length > 0) {
+    return direct.map((m) => ({ id: m.id, name: m.name, email: (m.email as string | null) ?? null }))
+  }
+
+  // Fallback: search each word separately then intersect client-side
+  const words = normalized.split(/\s+/).filter((w) => w.length >= 2)
+  if (words.length < 2) return []
+
+  const { data: candidates } = await supabase
+    .from("customers")
+    .select("id, name, email")
+    .or(words.map((w) => `name.ilike.%${w}%`).join(","))
+    .order("name")
+    .limit(20)
+
+  if (!candidates || candidates.length === 0) return []
+
+  const andMatches = candidates.filter((c) =>
+    words.every((w) => (c.name as string).toLowerCase().includes(w))
+  )
+  const result = andMatches.length > 0 ? andMatches : candidates
+  return result.slice(0, 6).map((m) => ({ id: m.id, name: m.name, email: (m.email as string | null) ?? null }))
+}
+
 // ─── Contract send approval creation ─────────────────────────────────────────
 
 async function handleSendContract(body: MessageBody) {
@@ -922,14 +965,7 @@ async function handleSendContract(body: MessageBody) {
 
   // ── customer_name provided → search ───────────────────────────────────────
   if (contract_data?.customer_name) {
-    const { data: customerMatches } = await supabase
-      .from("customers")
-      .select("id, name, email")
-      .ilike("name", `%${contract_data.customer_name}%`)
-      .order("name")
-      .limit(6)
-
-    const matches = customerMatches ?? []
+    const matches = await findCustomersByName(supabase, contract_data.customer_name)
 
     if (matches.length === 0) {
       return NextResponse.json({
@@ -941,9 +977,9 @@ async function handleSendContract(body: MessageBody) {
 
     if (matches.length > 1) {
       return NextResponse.json({
-        intent:                             "send_contract",
+        intent:                                 "send_contract",
         needs_contract_customer_disambiguation: true,
-        customer_matches:                   matches.map((m) => ({ id: m.id, name: m.name, email: m.email ?? null })),
+        customer_matches:                       matches,
       })
     }
 
