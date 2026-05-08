@@ -23,6 +23,7 @@ interface LeadPhone {
   is_active:       boolean
   is_wrong_number: boolean
   position:        number
+  is_completed:    boolean
 }
 
 interface Lead {
@@ -40,6 +41,7 @@ interface Lead {
   last_called_at:   string | null
   next_follow_up_at: string | null
   emails:           string[]
+  notes:            string | null
   propstream_lead_phones: LeadPhone[]
 }
 
@@ -149,8 +151,12 @@ export function LeadsDashboard({ lists, canCall, defaultStatus = "" }: Props) {
     fetchLeads(1)
   }, [fetchLeads])
 
-  function handleOutcome(leadId: string, newStatus: string) {
-    setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, status: newStatus } : l))
+  function handleOutcome(leadId: string, newStatus: string, leadDone = false) {
+    if (leadDone) {
+      setLeads((prev) => prev.filter((l) => l.id !== leadId))
+    } else {
+      setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, status: newStatus } : l))
+    }
   }
 
   function openSms(lead: Lead) {

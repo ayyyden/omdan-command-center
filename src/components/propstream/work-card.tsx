@@ -271,24 +271,32 @@ export function WorkCard({ listId }: Props) {
       callRef.current = null
     }
 
-    // Approved → navigate to customer creation with prefilled data
+    const phone = lead.propstream_lead_phones.find((p) => p.id === selectedPhoneId)
+
+    // Approved → record outcome then navigate to customer creation
     if (outcome === "approved") {
       setBusy(true)
-      await fetch("/api/propstream/work/phone-outcome", {
+      await fetch("/api/propstream/call/outcome", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lead_id: lead.id, phone_id: selectedPhoneId, outcome: "approved", call_log_id: callLogId, notes }),
+        body: JSON.stringify({
+          lead_id:      lead.id,
+          phone_id:     selectedPhoneId,
+          to_phone:     phone?.phone,
+          outcome:      "approved",
+          call_log_id:  callLogId ?? undefined,
+          notes,
+        }),
       })
       setBusy(false)
 
-      const selectedPhone = lead.propstream_lead_phones.find((p) => p.id === selectedPhoneId)
       const address = [lead.property_address, lead.property_city, lead.property_state, lead.property_zip]
         .filter(Boolean).join(", ")
 
       const params = new URLSearchParams({
         from_propstream: lead.id,
         phone_id:        selectedPhoneId,
-        phone:           selectedPhone?.phone ?? "",
+        phone:           phone?.phone ?? "",
         name:            lead.owner_name ?? "",
         email:           lead.emails[0] ?? "",
         address,
@@ -303,15 +311,17 @@ export function WorkCard({ listId }: Props) {
     setOutcomeMsg(null)
     setOutcomeError(null)
 
-    const res  = await fetch("/api/propstream/work/phone-outcome", {
+    const res  = await fetch("/api/propstream/call/outcome", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         lead_id:      lead.id,
         phone_id:     selectedPhoneId,
+        to_phone:     phone?.phone,
         outcome,
         call_log_id:  callLogId ?? undefined,
         notes,
+        send_no_answer_sms: true,
       }),
     })
     const data = await res.json()
