@@ -12,7 +12,7 @@ export async function GET(_req: Request, { params }: RouteCtx) {
     .from("propstream_leads")
     .select(`
       *,
-      propstream_lead_phones(
+      propstream_lead_phones!propstream_lead_phones_lead_id_fkey(
         id, phone, phone_type, is_active, is_wrong_number, position,
         is_completed, attempt_count, last_outcome, last_called_at
       ),

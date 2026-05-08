@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     .from("propstream_leads")
     .select(`
       id, owner_name, status, list_id, created_at,
-      propstream_lead_phones(id, is_active, is_wrong_number, is_completed)
+      propstream_lead_phones!propstream_lead_phones_lead_id_fkey(id, is_active, is_wrong_number, is_completed)
     `)
     .in("status", WORKABLE_STATUSES)
     .order("created_at", { ascending: true })

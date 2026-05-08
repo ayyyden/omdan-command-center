@@ -59,7 +59,20 @@ export function canInviteRole(actor: TeamRole, targetRole: TeamRole): boolean {
   return false
 }
 
+/** Returns true when the role is the owner. Owner is the superuser role and must always pass all permission checks. */
+export function isOwner(role: TeamRole | string): boolean {
+  return role === 'owner'
+}
+
+/**
+ * Central permission check. Use this (or requirePermission) in all API routes and pages.
+ *
+ * Owner is the superuser role and must always pass all permission checks.
+ * Any role-specific logic below is irrelevant for owner — the early return guarantees it.
+ */
 export function can(role: TeamRole, action: string): boolean {
+  // Owner is the superuser role and must always pass all permission checks.
+  if (isOwner(role)) return true
   if (isLegacyRole(role)) return false
   switch (action) {
     // ── Team ─────────────────────────────────────────────────────────────────

@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
        property_state, property_zip, status, next_follow_up_at, last_called_at,
        last_contacted_phone, notes, estimated_value, estimated_equity, emails,
        created_at, updated_at,
-       propstream_lead_phones(id, phone, phone_type, is_active, is_wrong_number, position)`,
+       propstream_lead_phones!propstream_lead_phones_lead_id_fkey(id, phone, phone_type, is_active, is_wrong_number, position)`,
       { count: "exact" }
     )
     .order("created_at", { ascending: false })
