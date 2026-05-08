@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   const caller_phone = (member as any)?.caller_phone as string | null
   if (!caller_phone) {
     return Response.json(
-      { error: "No caller phone configured for your account. Ask an admin to set your caller phone in team settings." },
+      { error: "No caller phone is configured for your CRM user. Go to Settings → Team → edit your user → set Caller Phone." },
       { status: 400 }
     )
   }

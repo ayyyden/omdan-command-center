@@ -101,6 +101,25 @@ export async function PATCH(req: Request, { params }: RouteCtx) {
   if (status) updates.status = status
   if ("project_manager_id" in body) updates.project_manager_id = project_manager_id ?? null
 
+  if ("caller_phone" in body) {
+    const raw = (body as Record<string, unknown>).caller_phone as string | null | undefined
+    if (!raw) {
+      updates.caller_phone = null
+    } else {
+      const digits = raw.replace(/\D/g, "")
+      let normalized: string | null = null
+      if (digits.length === 10) normalized = `+1${digits}`
+      else if (digits.length === 11 && digits.charAt(0) === "1") normalized = `+${digits}`
+      if (!normalized) {
+        return NextResponse.json(
+          { error: "caller_phone must be a valid US phone number (10 digits) or E.164 format (+18508607028)" },
+          { status: 400 }
+        )
+      }
+      updates.caller_phone = normalized
+    }
+  }
+
   const { error } = await service.from("team_members").update(updates).eq("id", id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

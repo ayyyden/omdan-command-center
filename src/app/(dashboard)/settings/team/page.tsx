@@ -24,7 +24,7 @@ export default async function TeamSettingsPage() {
   const [{ data: members }, { data: projectManagers }] = await Promise.all([
     supabase
       .from("team_members")
-      .select("id, user_id, email, name, role, status, created_at, invite_expires_at, project_manager_id, invite_token")
+      .select("id, user_id, email, name, role, status, created_at, invite_expires_at, project_manager_id, invite_token, caller_phone")
       .order("created_at", { ascending: true }),
     supabase
       .from("project_managers")

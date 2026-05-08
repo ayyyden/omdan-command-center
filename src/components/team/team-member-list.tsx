@@ -16,13 +16,23 @@ import {
 } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import {
-  MoreHorizontal, Loader2, RefreshCw, ShieldCheck, UserX, UserCheck, Trash2, Copy, ChevronRight, BarChart2,
+  MoreHorizontal, Loader2, RefreshCw, ShieldCheck, UserX, UserCheck, Trash2, Copy, ChevronRight, BarChart2, Phone,
 } from "lucide-react"
+import { Input } from "@/components/ui/input"
 import { RoleBadge } from "@/components/team/role-badge"
 import { InviteMemberDialog } from "@/components/team/invite-member-dialog"
 import { canManageRole, ACTIVE_ROLES, ROLE_LABELS } from "@/lib/permissions"
 import type { TeamRole } from "@/lib/permissions"
 import Link from "next/link"
+
+function normalizeE164(raw: string): { value: string; error?: string } {
+  const trimmed = raw.trim()
+  if (!trimmed) return { value: "" }
+  const digits = trimmed.replace(/\D/g, "")
+  if (digits.length === 10) return { value: `+1${digits}` }
+  if (digits.length === 11 && digits.charAt(0) === "1") return { value: `+${digits}` }
+  return { value: "", error: "Enter a valid US phone number (10 digits) or E.164 format (+18508607028)" }
+}
 
 interface TeamMember {
   id: string
@@ -35,6 +45,7 @@ interface TeamMember {
   invite_expires_at: string | null
   invite_token: string | null
   project_manager_id: string | null
+  caller_phone: string | null
 }
 
 interface ProjectManager {
@@ -58,6 +69,9 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
   const [newRole, setNewRole] = useState<TeamRole>("project_manager")
   const [newPmId, setNewPmId] = useState<string>("none")
   const [deleteTarget, setDeleteTarget] = useState<TeamMember | null>(null)
+  const [callerPhoneTarget, setCallerPhoneTarget] = useState<TeamMember | null>(null)
+  const [newCallerPhone, setNewCallerPhone] = useState<string>("")
+  const [callerPhoneError, setCallerPhoneError] = useState<string>("")
 
   async function safeJson(res: Response): Promise<Record<string, unknown>> {
     const ct = res.headers.get("content-type") ?? ""
@@ -145,6 +159,27 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
     })
   }
 
+  function openCallerPhoneDialog(member: TeamMember) {
+    setCallerPhoneTarget(member)
+    setNewCallerPhone(member.caller_phone ?? "")
+    setCallerPhoneError("")
+  }
+
+  async function handleSetCallerPhone() {
+    if (!callerPhoneTarget) return
+    const { value, error } = normalizeE164(newCallerPhone)
+    if (error) { setCallerPhoneError(error); return }
+    const id = callerPhoneTarget.id
+    setCallerPhoneTarget(null)
+    await withBusy(id, async () => {
+      const res = await api("PATCH", `/api/team/members/${id}`, { caller_phone: value || null })
+      const data = await safeJson(res)
+      if (!res.ok) { toast({ title: "Error", description: data.error as string, variant: "destructive" }); return }
+      toast({ title: value ? "Caller phone saved" : "Caller phone cleared" })
+      router.refresh()
+    })
+  }
+
   function copyInviteLink(token: string) {
     const url = `${window.location.origin}/invite/${token}`
     navigator.clipboard.writeText(url).then(() => {
@@ -175,6 +210,8 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
           const isSelf = member.user_id === currentUserId
           const canManage = canManageRole(currentUserRole, member.role as TeamRole) && !isSelf
           const isLoading = busy === member.id
+          // Owner and admin can set caller_phone for members they manage, or for their own account
+          const canSetCallerPhone = (currentUserRole === "owner" || currentUserRole === "admin") && (canManage || isSelf)
 
           const perfHref = `/settings/team/${member.id}`
 
@@ -228,6 +265,21 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
                     {canViewPerformance && !isSelf && !canManage && (
                       <ChevronRight className="w-4 h-4 text-muted-foreground" />
                     )}
+                    {/* Self-edit phone button: shown when owner/admin is viewing their own row */}
+                    {!canManage && canSetCallerPhone && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        disabled={isLoading}
+                        onClick={() => openCallerPhoneDialog(member)}
+                        title="Set Caller Phone"
+                      >
+                        {isLoading
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Phone className={`w-4 h-4 ${member.caller_phone ? "text-primary" : "text-muted-foreground"}`} />}
+                      </Button>
+                    )}
                     {canManage && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -244,6 +296,9 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onSelect={() => { setChangeRoleTarget(member); setNewRole(member.role as TeamRole); setNewPmId(member.project_manager_id ?? "none") }}>
                             <ShieldCheck className="w-4 h-4 mr-2" />Change Role
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => openCallerPhoneDialog(member)}>
+                            <Phone className="w-4 h-4 mr-2" />Set Caller Phone
                           </DropdownMenuItem>
                           {member.status === "invited" && (
                             <DropdownMenuItem onSelect={() => handleResend(member)}>
@@ -338,6 +393,37 @@ export function TeamMemberList({ members, currentUserId, currentUserRole, projec
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setChangeRoleTarget(null)}>Cancel</Button>
             <Button onClick={handleRoleChange} disabled={!!busy}>
+              {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Caller Phone dialog */}
+      <Dialog open={!!callerPhoneTarget} onOpenChange={(v) => !v && setCallerPhoneTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Set Caller Phone</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            For <span className="font-semibold text-foreground">{callerPhoneTarget?.name}</span>
+          </p>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium">Caller Phone</p>
+            <Input
+              value={newCallerPhone}
+              onChange={(e) => { setNewCallerPhone(e.target.value); setCallerPhoneError("") }}
+              placeholder="+18508607028"
+              autoComplete="tel"
+            />
+            <p className="text-xs text-muted-foreground">
+              Phone number Twilio calls first before connecting to the customer.
+            </p>
+            {callerPhoneError && (
+              <p className="text-xs text-destructive">{callerPhoneError}</p>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setCallerPhoneTarget(null)}>Cancel</Button>
+            <Button onClick={handleSetCallerPhone} disabled={!!busy}>
               {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save
             </Button>
           </DialogFooter>
