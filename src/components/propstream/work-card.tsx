@@ -185,6 +185,14 @@ export function WorkCard({ listId }: Props) {
 
   // ── Browser calling ────────────────────────────────────────────────────────
 
+  function normalizeToE164(raw: string): string {
+    if (raw.startsWith("+")) return raw
+    const digits = raw.replace(/\D/g, "")
+    if (digits.length === 10) return `+1${digits}`
+    if (digits.length === 11 && digits[0] === "1") return `+${digits}`
+    return raw
+  }
+
   async function getDevice(): Promise<TwilioDevice> {
     if (deviceRef.current) return deviceRef.current
 
@@ -222,7 +230,8 @@ export function WorkCard({ listId }: Props) {
     // Connect via Twilio Voice SDK
     try {
       const device = await getDevice()
-      const call   = await device.connect({ params: { To: phone.phone } })
+      const toNumber = normalizeToE164(phone.phone)
+      const call   = await device.connect({ params: { To: toNumber } })
       callRef.current = call
 
       call.on("ringing",     () => setCallStatus("ringing"))

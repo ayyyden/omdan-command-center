@@ -88,6 +88,14 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
   const selectedPhone = phones.find((p) => p.id === selectedPhoneId) ?? phones[0]
   const callActive    = callStatus === "ringing" || callStatus === "connected"
 
+  function normalizeToE164(raw: string): string {
+    if (raw.startsWith("+")) return raw
+    const digits = raw.replace(/\D/g, "")
+    if (digits.length === 10) return `+1${digits}`
+    if (digits.length === 11 && digits[0] === "1") return `+${digits}`
+    return raw
+  }
+
   async function getDevice(): Promise<TwilioDevice> {
     if (deviceRef.current) return deviceRef.current
     const { Device } = await import("@twilio/voice-sdk")
@@ -125,7 +133,8 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
     // Connect via Twilio Voice SDK
     try {
       const device = await getDevice()
-      const call   = await device.connect({ params: { To: selectedPhone.phone } })
+      const toNumber = normalizeToE164(selectedPhone.phone)
+      const call   = await device.connect({ params: { To: toNumber } })
       callRef.current = call
 
       call.on("ringing",    () => setCallStatus("ringing"))
