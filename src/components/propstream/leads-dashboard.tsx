@@ -8,8 +8,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import {
-  Phone, MessageSquare, Search, RefreshCw, ChevronLeft, ChevronRight,
+  Phone, MessageSquare, Search, RefreshCw, ChevronLeft, ChevronRight, PlayCircle,
 } from "lucide-react"
+import Link from "next/link"
 import { CallWorkspace } from "./call-workspace"
 import { SmsModal }      from "./sms-modal"
 
@@ -58,16 +59,17 @@ interface Props {
 // ─── Status config ─────────────────────────────────────────────────────────────
 
 const ALL_STATUSES = [
-  { value: "",                label: "All statuses" },
-  { value: "new",             label: "New" },
-  { value: "called_no_answer",label: "No Answer" },
-  { value: "callback_later",  label: "Call Back Later" },
-  { value: "not_interested",  label: "Not Interested" },
-  { value: "warm_lead",       label: "Warm Lead" },
-  { value: "approved",        label: "Approved" },
-  { value: "converted",       label: "Converted" },
-  { value: "do_not_call",     label: "Do Not Call" },
-  { value: "wrong_number",    label: "Wrong Number" },
+  { value: "",                  label: "All statuses" },
+  { value: "new",               label: "New" },
+  { value: "called_no_answer",  label: "No Answer" },
+  { value: "callback_later",    label: "Call Back Later" },
+  { value: "not_interested",    label: "Not Interested" },
+  { value: "warm_lead",         label: "Warm Lead" },
+  { value: "need_follow_up",    label: "Need Follow-Up" },
+  { value: "approved",          label: "Approved" },
+  { value: "converted",         label: "Converted" },
+  { value: "do_not_call",       label: "Do Not Call" },
+  { value: "wrong_number",      label: "Wrong Number" },
   { value: "no_callable_phone", label: "No Phone" },
 ]
 
@@ -77,7 +79,8 @@ const STATUS_BADGE: Record<string, string> = {
   callback_later:    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
   not_interested:    "bg-gray-100 text-gray-600 dark:bg-gray-800/60 dark:text-gray-400",
   warm_lead:         "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  approved:          "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
+  need_follow_up:    "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
+  approved:          "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
   converted:         "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300",
   do_not_call:       "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
   wrong_number:      "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400",
@@ -90,6 +93,7 @@ const STATUS_LABEL: Record<string, string> = {
   callback_later:    "Call Back",
   not_interested:    "Not Interested",
   warm_lead:         "Warm Lead",
+  need_follow_up:    "Follow-Up",
   approved:          "Approved",
   converted:         "Converted",
   do_not_call:       "DNC",
@@ -162,8 +166,28 @@ export function LeadsDashboard({ lists, canCall, defaultStatus = "" }: Props) {
 
   const totalPages = Math.ceil(total / LIMIT)
 
+  const workUrl = `/propstream-leads/work${listId ? `?list_id=${listId}` : ""}`
+
   return (
     <div className="flex flex-col gap-4 h-full">
+      {/* Start Work CTA */}
+      {canCall && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border bg-card p-4 shadow-sm">
+          <div>
+            <p className="font-semibold text-sm">Ready to start calling?</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              One lead at a time — big buttons, no table.
+            </p>
+          </div>
+          <Button asChild size="sm" className="shrink-0">
+            <Link href={workUrl}>
+              <PlayCircle className="w-4 h-4 mr-1.5" />
+              Start Work
+            </Link>
+          </Button>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         <Select value={listId || "__all__"} onValueChange={(v) => setListId(v === "__all__" ? "" : v)}>

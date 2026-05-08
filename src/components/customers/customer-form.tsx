@@ -25,12 +25,25 @@ const LEAD_STATUSES = [
 
 interface LeadSource { value: string; label: string; is_default: boolean }
 
-interface CustomerFormProps {
-  customer?: Customer
-  userId: string
+interface PropStreamPrefill {
+  name?:        string
+  phone?:       string
+  email?:       string
+  address?:     string
+  notes?:       string
+  lead_source?: string
 }
 
-export function CustomerForm({ customer, userId }: CustomerFormProps) {
+interface CustomerFormProps {
+  customer?:           Customer
+  userId:              string
+  prefill?:            PropStreamPrefill
+  propstreamLeadId?:   string
+  propstreamPhoneId?:  string
+  returnTo?:           string
+}
+
+export function CustomerForm({ customer, userId, prefill, propstreamLeadId, propstreamPhoneId, returnTo }: CustomerFormProps) {
   const router = useRouter()
   const { toast } = useToast()
   const [sources, setSources] = useState<LeadSource[]>([])
@@ -49,14 +62,14 @@ export function CustomerForm({ customer, userId }: CustomerFormProps) {
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
-      name: customer?.name ?? "",
-      phone: customer?.phone ?? "",
-      email: customer?.email ?? "",
-      address: customer?.address ?? "",
+      name:         customer?.name        ?? prefill?.name        ?? "",
+      phone:        customer?.phone       ?? prefill?.phone       ?? "",
+      email:        customer?.email       ?? prefill?.email       ?? "",
+      address:      customer?.address     ?? prefill?.address     ?? "",
       service_type: customer?.service_type ?? "",
-      lead_source: customer?.lead_source ?? undefined,
-      status: customer?.status ?? "New Lead",
-      notes: customer?.notes ?? "",
+      lead_source:  customer?.lead_source ?? prefill?.lead_source ?? undefined,
+      status:       customer?.status      ?? "New Lead",
+      notes:        customer?.notes       ?? prefill?.notes       ?? "",
     },
   })
 
@@ -65,10 +78,19 @@ export function CustomerForm({ customer, userId }: CustomerFormProps) {
     const payload = { ...values, user_id: userId }
 
     let error
+    let insertedId: string | undefined
+
     if (customer) {
       ;({ error } = await supabase.from("customers").update(payload).eq("id", customer.id))
+      insertedId = customer.id
     } else {
-      ;({ error } = await supabase.from("customers").insert(payload))
+      const { data: inserted, error: insertError } = await supabase
+        .from("customers")
+        .insert(payload)
+        .select("id")
+        .single()
+      error = insertError
+      insertedId = inserted?.id
     }
 
     if (error) {
@@ -76,18 +98,27 @@ export function CustomerForm({ customer, userId }: CustomerFormProps) {
       return
     }
 
-    if (!customer) {
+    if (!customer && insertedId) {
       await supabase.from("activity_log").insert({
-        user_id: userId,
+        user_id:     userId,
         entity_type: "customer",
-        entity_id: "new",
-        action: "created",
+        entity_id:   insertedId,
+        action:      "created",
         description: `New lead added: ${values.name}`,
       })
+
+      // If this came from the PropStream work flow, mark the PropStream lead as converted
+      if (propstreamLeadId) {
+        await fetch(`/api/propstream/leads/${propstreamLeadId}/convert`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ customer_id: insertedId }),
+        }).catch(() => {})  // non-fatal — CRM lead is already created
+      }
     }
 
     toast({ title: customer ? "Customer updated" : "Lead added", description: values.name })
-    router.push("/customers")
+    router.push(returnTo ?? "/customers")
     router.refresh()
   }
 

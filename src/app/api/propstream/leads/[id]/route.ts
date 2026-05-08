@@ -12,7 +12,10 @@ export async function GET(_req: Request, { params }: RouteCtx) {
     .from("propstream_leads")
     .select(`
       *,
-      propstream_lead_phones(id, phone, phone_type, is_active, is_wrong_number, position),
+      propstream_lead_phones(
+        id, phone, phone_type, is_active, is_wrong_number, position,
+        is_completed, attempt_count, last_outcome, last_called_at
+      ),
       propstream_call_logs(id, to_phone, outcome, duration_seconds, notes, started_at, ended_at, status),
       propstream_sms_logs(id, direction, to_phone, from_phone, body, is_auto, created_at)
     `)

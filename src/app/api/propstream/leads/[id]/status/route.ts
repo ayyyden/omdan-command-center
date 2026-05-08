@@ -6,7 +6,7 @@ interface RouteCtx { params: Promise<{ id: string }> }
 const VALID_STATUSES = [
   "new", "called_no_answer", "not_interested", "warm_lead",
   "approved", "converted", "do_not_call", "wrong_number",
-  "callback_later", "no_callable_phone",
+  "callback_later", "no_callable_phone", "need_follow_up",
 ] as const
 
 export async function POST(req: NextRequest, { params }: RouteCtx) {
