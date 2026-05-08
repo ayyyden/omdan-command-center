@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -9,9 +9,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge }    from "@/components/ui/badge"
 import {
   Phone, PhoneCall, PhoneOff, MessageSquare, ThumbsUp, ThumbsDown,
-  AlertTriangle, Clock, Ban, CheckCircle2, PhoneForwarded,
+  AlertTriangle, Clock, Ban, CheckCircle2, PhoneForwarded, Loader2,
+  Mic, MicOff,
 } from "lucide-react"
 import { SmsModal } from "./sms-modal"
+import type { Device as TwilioDevice, Call as TwilioCall } from "@twilio/voice-sdk"
 
 interface LeadPhone {
   id:             string
@@ -42,6 +44,7 @@ interface Props {
 }
 
 type OutcomeType = "no_answer" | "not_interested" | "warm_lead" | "approved" | "do_not_call" | "wrong_number" | "callback_later"
+type CallStatus  = "idle" | "connecting" | "ringing" | "connected" | "ended" | "error"
 
 const OUTCOME_BUTTONS: { outcome: OutcomeType; label: string; icon: React.ReactNode; variant: "default" | "outline" | "destructive" | "secondary" }[] = [
   { outcome: "no_answer",      label: "No Answer",      icon: <PhoneOff className="w-4 h-4" />,       variant: "outline" },
@@ -70,21 +73,39 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
   const phones = lead.propstream_lead_phones.filter((p) => p.is_active && !p.is_wrong_number)
 
   const [selectedPhoneId, setSelectedPhoneId] = useState<string>(phones[0]?.id ?? "")
-  const [callLogId, setCallLogId]             = useState<string | null>(null)
-  const [calling,   setCalling]               = useState(false)
-  const [callError, setCallError]             = useState<string | null>(null)
-  const [outcome,   setOutcome]               = useState<OutcomeType | null>(null)
-  const [notes,     setNotes]                 = useState("")
-  const [saving,    setSaving]                = useState(false)
-  const [smsOpen,   setSmsOpen]               = useState(false)
+  const [callLogId,  setCallLogId]  = useState<string | null>(null)
+  const [callStatus, setCallStatus] = useState<CallStatus>("idle")
+  const [isMuted,    setIsMuted]    = useState(false)
+  const [callError,  setCallError]  = useState<string | null>(null)
+  const [outcome,    setOutcome]    = useState<OutcomeType | null>(null)
+  const [notes,      setNotes]      = useState("")
+  const [saving,     setSaving]     = useState(false)
+  const [smsOpen,    setSmsOpen]    = useState(false)
+
+  const deviceRef = useRef<TwilioDevice | null>(null)
+  const callRef   = useRef<TwilioCall | null>(null)
 
   const selectedPhone = phones.find((p) => p.id === selectedPhoneId) ?? phones[0]
+  const callActive    = callStatus === "ringing" || callStatus === "connected"
+
+  async function getDevice(): Promise<TwilioDevice> {
+    if (deviceRef.current) return deviceRef.current
+    const { Device } = await import("@twilio/voice-sdk")
+    const res = await fetch("/api/propstream/voice-token")
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error ?? "Failed to get voice token")
+    const device = new Device(data.token as string, { logLevel: "error" })
+    deviceRef.current = device
+    return device
+  }
 
   async function handleCall() {
-    if (!selectedPhone) return
-    setCalling(true)
+    if (!selectedPhone || callStatus !== "idle") return
     setCallError(null)
-    const res = await fetch("/api/propstream/call", {
+    setCallStatus("connecting")
+
+    // Create call log row
+    const logRes  = await fetch("/api/propstream/call", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -93,14 +114,55 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
         to_phone: selectedPhone.phone,
       }),
     })
-    const data = await res.json()
-    setCalling(false)
-    if (!res.ok) { setCallError(data.error ?? "Call failed"); return }
-    setCallLogId(data.call_log_id)
+    const logData = await logRes.json()
+    if (!logRes.ok) {
+      setCallError(logData.error ?? "Call failed")
+      setCallStatus("error")
+      return
+    }
+    setCallLogId(logData.call_log_id)
+
+    // Connect via Twilio Voice SDK
+    try {
+      const device = await getDevice()
+      const call   = await device.connect({ params: { To: selectedPhone.phone } })
+      callRef.current = call
+
+      call.on("ringing",    () => setCallStatus("ringing"))
+      call.on("accept",     () => setCallStatus("connected"))
+      call.on("disconnect", () => { setCallStatus("idle"); setIsMuted(false); callRef.current = null })
+      call.on("error",      (err: Error) => {
+        setCallError(err.message ?? "Call error")
+        setCallStatus("error")
+        callRef.current = null
+      })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to connect call"
+      setCallError(msg)
+      setCallStatus("error")
+    }
+  }
+
+  function handleHangUp() {
+    callRef.current?.disconnect()
+  }
+
+  function toggleMute() {
+    if (!callRef.current) return
+    const next = !isMuted
+    callRef.current.mute(next)
+    setIsMuted(next)
   }
 
   async function handleOutcome(o: OutcomeType) {
     if (!selectedPhone) return
+
+    // Hang up any active call before recording outcome
+    if (callRef.current) {
+      callRef.current.disconnect()
+      callRef.current = null
+    }
+
     setOutcome(o)
     setSaving(true)
 
@@ -136,12 +198,17 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
   }
 
   function handleClose() {
+    if (callRef.current) {
+      callRef.current.disconnect()
+      callRef.current = null
+    }
     setCallLogId(null)
     setCallError(null)
+    setCallStatus("idle")
+    setIsMuted(false)
     setOutcome(null)
     setNotes("")
     setSaving(false)
-    setCalling(false)
     onClose()
   }
 
@@ -187,12 +254,13 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
                 {phones.map((p) => (
                   <button
                     key={p.id}
-                    onClick={() => setSelectedPhoneId(p.id)}
+                    onClick={() => callStatus === "idle" && setSelectedPhoneId(p.id)}
                     className={[
                       "px-3 py-1.5 rounded-md border text-sm transition-colors",
                       p.id === selectedPhoneId
                         ? "border-primary bg-primary/10 text-primary font-medium"
                         : "border-border hover:bg-muted",
+                      callStatus !== "idle" ? "cursor-not-allowed opacity-60" : "",
                     ].join(" ")}
                   >
                     {formatPhone(p.phone)}
@@ -207,17 +275,20 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
             <p className="text-sm text-muted-foreground text-center py-2">No callable phones available</p>
           )}
 
-          {/* Call button */}
-          {phones.length > 0 && !callLogId && (
+          {/* Call button — shown when idle or error */}
+          {phones.length > 0 && !callActive && !outcome && (
             <div className="space-y-2">
               <Button
                 className="w-full"
                 size="lg"
                 onClick={handleCall}
-                disabled={calling || !selectedPhone}
+                disabled={callStatus === "connecting" || !selectedPhone}
               >
-                <PhoneCall className="w-4 h-4 mr-2" />
-                {calling ? "Dialing…" : `Call ${selectedPhone ? formatPhone(selectedPhone.phone) : ""}`}
+                {callStatus === "connecting" ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Connecting…</>
+                ) : (
+                  <><PhoneCall className="w-4 h-4 mr-2" />{callLogId ? "Call Again" : `Call ${selectedPhone ? formatPhone(selectedPhone.phone) : ""}`}</>
+                )}
               </Button>
               {callError && (
                 <p className="text-xs text-destructive text-center">{callError}</p>
@@ -225,12 +296,67 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
             </div>
           )}
 
-          {/* Call in progress — outcome buttons */}
-          {callLogId && !outcome && (
+          {/* Active call controls */}
+          {callActive && !outcome && (
+            <div className="rounded-lg border border-green-300 bg-green-50 dark:bg-green-900/20 p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-medium text-green-700 dark:text-green-400">
+                  <Phone className="w-4 h-4 animate-pulse" />
+                  {callStatus === "ringing" ? "Ringing…" : "Call connected"}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={toggleMute}
+                    disabled={callStatus !== "connected"}
+                    className="gap-1.5 h-8"
+                  >
+                    {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                    {isMuted ? "Unmute" : "Mute"}
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={handleHangUp} className="gap-1.5 h-8">
+                    <PhoneOff className="w-3.5 h-3.5" />
+                    Hang Up
+                  </Button>
+                </div>
+              </div>
+
+              {/* Outcome buttons shown during active call */}
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">Select outcome:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {OUTCOME_BUTTONS.map((btn) => (
+                    <Button
+                      key={btn.outcome}
+                      variant={btn.variant}
+                      size="sm"
+                      onClick={() => handleOutcome(btn.outcome)}
+                      disabled={saving}
+                      className="justify-start"
+                    >
+                      {btn.icon}
+                      <span className="ml-1.5">{btn.label}</span>
+                    </Button>
+                  ))}
+                </div>
+                <Textarea
+                  placeholder="Notes (optional)"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={2}
+                  className="resize-none text-sm mt-2"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Call initiated (idle after call) — outcome buttons without active call */}
+          {callLogId && callStatus === "idle" && !outcome && (
             <div className="space-y-3">
               <p className="text-xs text-center text-muted-foreground">
                 <Phone className="w-3 h-3 inline mr-1" />
-                Call initiated — select outcome
+                Call ended — select outcome
               </p>
 
               <div className="grid grid-cols-2 gap-2">

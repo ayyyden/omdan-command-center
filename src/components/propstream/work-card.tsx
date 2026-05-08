@@ -7,8 +7,9 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   ChevronLeft, ChevronRight, Phone, PhoneCall, PhoneOff,
   ThumbsDown, Star, CheckCircle2, ArrowLeft, Loader2,
-  AlertCircle, RefreshCw, Home,
+  AlertCircle, RefreshCw, Home, Mic, MicOff,
 } from "lucide-react"
+import type { Device as TwilioDevice, Call as TwilioCall } from "@twilio/voice-sdk"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,8 @@ interface FullLead {
   status:           string
   propstream_lead_phones: LeadPhone[]
 }
+
+type CallStatus = "idle" | "connecting" | "ringing" | "connected" | "ended" | "error"
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -103,12 +106,17 @@ export function WorkCard({ listId }: Props) {
   // Call / interaction state
   const [selectedPhoneId, setSelectedPhoneId] = useState<string | null>(null)
   const [callLogId,       setCallLogId]       = useState<string | null>(null)
-  const [calling,         setCalling]         = useState(false)
+  const [callStatus,      setCallStatus]      = useState<CallStatus>("idle")
+  const [isMuted,         setIsMuted]         = useState(false)
   const [callError,       setCallError]       = useState<string | null>(null)
   const [notes,           setNotes]           = useState("")
   const [busy,            setBusy]            = useState(false)
   const [outcomeMsg,      setOutcomeMsg]      = useState<string | null>(null)
   const [outcomeError,    setOutcomeError]    = useState<string | null>(null)
+
+  // Browser calling refs
+  const deviceRef = useRef<TwilioDevice | null>(null)
+  const callRef   = useRef<TwilioCall | null>(null)
 
   // Track history for left-arrow navigation
   const historyRef = useRef<string[]>([])
@@ -154,6 +162,13 @@ export function WorkCard({ listId }: Props) {
   useEffect(() => {
     const current = queue[index]
     if (!current) return
+    // Hang up any in-progress call before navigating to a new lead
+    if (callRef.current) {
+      callRef.current.disconnect()
+      callRef.current = null
+    }
+    setCallStatus("idle")
+    setIsMuted(false)
     fetchLead(current.id)
   }, [queue, index, fetchLead])
 
@@ -161,36 +176,91 @@ export function WorkCard({ listId }: Props) {
 
   function goNext() {
     if (lead) historyRef.current.push(lead.id)
-    setIndex((i) => Math.min(i + 1, queue.length))  // go past end → "done" state
+    setIndex((i) => Math.min(i + 1, queue.length))
   }
 
   function goPrev() {
     if (index > 0) setIndex((i) => i - 1)
   }
 
-  // ── Call ───────────────────────────────────────────────────────────────────
+  // ── Browser calling ────────────────────────────────────────────────────────
+
+  async function getDevice(): Promise<TwilioDevice> {
+    if (deviceRef.current) return deviceRef.current
+
+    const { Device } = await import("@twilio/voice-sdk")
+    const res = await fetch("/api/propstream/voice-token")
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error ?? "Failed to get voice token")
+
+    const device = new Device(data.token as string, { logLevel: "error" })
+    deviceRef.current = device
+    return device
+  }
 
   async function handleCall(phone: LeadPhone) {
-    if (!lead || calling) return
+    if (!lead || callStatus !== "idle") return
     setSelectedPhoneId(phone.id)
     setCallLogId(null)
-    setCalling(true)
     setCallError(null)
-    const res  = await fetch("/api/propstream/call", {
+    setCallStatus("connecting")
+
+    // Create call log row
+    const logRes  = await fetch("/api/propstream/call", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lead_id: lead.id, phone_id: phone.id, to_phone: phone.phone }),
     })
-    const data = await res.json()
-    setCalling(false)
-    if (!res.ok) { setCallError(data.error ?? "Call failed"); return }
-    setCallLogId(data.call_log_id)
+    const logData = await logRes.json()
+    if (!logRes.ok) {
+      setCallError(logData.error ?? "Call failed")
+      setCallStatus("error")
+      return
+    }
+    setCallLogId(logData.call_log_id)
+
+    // Connect via Twilio Voice SDK
+    try {
+      const device = await getDevice()
+      const call   = await device.connect({ params: { To: phone.phone } })
+      callRef.current = call
+
+      call.on("ringing",     () => setCallStatus("ringing"))
+      call.on("accept",      () => setCallStatus("connected"))
+      call.on("disconnect",  () => { setCallStatus("idle"); setIsMuted(false); callRef.current = null })
+      call.on("error",       (err: Error) => {
+        setCallError(err.message ?? "Call error")
+        setCallStatus("error")
+        callRef.current = null
+      })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to connect call"
+      setCallError(msg)
+      setCallStatus("error")
+    }
+  }
+
+  function handleHangUp() {
+    callRef.current?.disconnect()
+  }
+
+  function toggleMute() {
+    if (!callRef.current) return
+    const next = !isMuted
+    callRef.current.mute(next)
+    setIsMuted(next)
   }
 
   // ── Outcome ────────────────────────────────────────────────────────────────
 
   async function handleOutcome(outcome: "no_answer" | "not_interested" | "need_follow_up" | "approved") {
     if (!lead || !selectedPhoneId || busy) return
+
+    // Hang up any active call before recording outcome
+    if (callRef.current) {
+      callRef.current.disconnect()
+      callRef.current = null
+    }
 
     // Approved → navigate to customer creation with prefilled data
     if (outcome === "approved") {
@@ -251,11 +321,8 @@ export function WorkCard({ listId }: Props) {
     setOutcomeMsg(messages[outcome] ?? "Saved")
 
     if (data.lead_done) {
-      // All phones handled — remove from queue and advance
       setQueue((prev) => prev.filter((_, i) => i !== index))
-      // index stays, next item slides into position
     } else {
-      // More phones left on this lead — refresh and auto-select next uncompleted
       await fetchLead(lead.id)
     }
   }
@@ -293,6 +360,7 @@ export function WorkCard({ listId }: Props) {
 
   const selectedPhone = workablePhones.find((p) => p.id === selectedPhoneId)
   const canOutcome    = !!selectedPhoneId && !busy
+  const callActive    = callStatus === "ringing" || callStatus === "connected"
 
   return (
     <PageShell>
@@ -431,14 +499,16 @@ export function WorkCard({ listId }: Props) {
                             {!isCompleted && (
                               <Button
                                 size="sm"
-                                variant={isSelected && callLogId ? "secondary" : "outline"}
+                                variant={isSelected && callActive ? "secondary" : "outline"}
                                 onClick={(e) => { e.stopPropagation(); handleCall(phone) }}
-                                disabled={calling}
+                                disabled={callStatus !== "idle"}
                                 className="shrink-0 gap-1.5"
                               >
-                                {calling && selectedPhoneId === phone.id ? (
-                                  <><Loader2 className="w-3.5 h-3.5 animate-spin" />Calling…</>
-                                ) : callLogId && isSelected ? (
+                                {isSelected && callStatus === "connecting" ? (
+                                  <><Loader2 className="w-3.5 h-3.5 animate-spin" />Connecting…</>
+                                ) : isSelected && callStatus === "ringing" ? (
+                                  <><Loader2 className="w-3.5 h-3.5 animate-spin" />Ringing…</>
+                                ) : isSelected && callStatus === "connected" ? (
                                   <><Phone className="w-3.5 h-3.5 text-green-600" />On Call</>
                                 ) : (
                                   <><PhoneCall className="w-3.5 h-3.5" />Call</>
@@ -466,6 +536,32 @@ export function WorkCard({ listId }: Props) {
                   )}
                 </div>
               </div>
+
+              {/* Active call controls bar */}
+              {callActive && (
+                <div className="px-5 py-3 border-t bg-green-50 dark:bg-green-900/20 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-green-700 dark:text-green-400">
+                    <Phone className="w-4 h-4 animate-pulse" />
+                    {callStatus === "ringing" ? "Ringing…" : "Call connected"}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={toggleMute}
+                      disabled={callStatus !== "connected"}
+                      className="gap-1.5"
+                    >
+                      {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                      {isMuted ? "Unmute" : "Mute"}
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={handleHangUp} className="gap-1.5">
+                      <PhoneOff className="w-3.5 h-3.5" />
+                      Hang Up
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* Notes row */}
               <div className="px-5 py-4 border-t bg-muted/20">
