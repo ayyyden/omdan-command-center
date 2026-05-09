@@ -216,6 +216,13 @@ export interface ExecuteResponse {
   // create_customer fields
   customer_url?: string
   customer_name?: string
+  // create_estimate_draft fields (send_approval_id also used by create_lead_estimate)
+  total?: number
+  // create_expense fields
+  expense_id?: string
+  amount?: number
+  vendor?: string | null
+  category?: string
 }
 
 export interface DailySummary {

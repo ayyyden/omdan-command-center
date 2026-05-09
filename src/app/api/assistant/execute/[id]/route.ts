@@ -1096,10 +1096,12 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     })
   }
 
-  // ─── create_estimate ─────────────────────────────────────────────────────
-  // Creates a draft estimate for an existing customer (no customer creation).
+  // ─── create_estimate_draft ───────────────────────────────────────────────
+  // Creates a draft estimate for an existing customer. Chains a send_estimate
+  // approval automatically so the user can review before emailing.
+  // Also handles legacy "create_estimate" action type for backwards compat.
 
-  if (approval.action_type === "create_estimate") {
+  if (approval.action_type === "create_estimate_draft" || approval.action_type === "create_estimate") {
     const {
       customer_id, customer_name, customer_email,
       services, total, scope_override, generated_title, generated_scope, payment_steps,
@@ -1155,16 +1157,46 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       )
     }
 
-    if (payment_steps?.length) {
+    const normalizedSteps = (payment_steps ?? []).map((s) => ({
+      ...s, name: normalizePaymentLabel(s.name),
+    }))
+
+    if (normalizedSteps.length) {
       await supabase.from("estimate_payment_steps").insert(
-        payment_steps.map((s, i) => ({
+        normalizedSteps.map((s, i) => ({
           estimate_id: estimate.id,
-          name:        normalizePaymentLabel(s.name),
+          name:        s.name,
           amount:      s.amount,
           sort_order:  i,
         }))
       )
     }
+
+    const estimateUrl = `${appUrl}/estimates/${estimate.id}`
+
+    // Chain a send_estimate approval so user can review before emailing
+    const { data: sendApproval } = await supabase
+      .from("assistant_approvals")
+      .insert({
+        channel:          approval.channel,
+        action_type:      "send_estimate",
+        action_summary:   `Send $${totalNum.toLocaleString()} estimate to ${customer_email ?? customer_name}`,
+        proposed_payload: {
+          estimate_id:    estimate.id,
+          customer_id,
+          to_email:       customer_email ?? null,
+          customer_name,
+          estimate_title: estTitle,
+          total:          totalNum,
+          services,
+          scope:          estScope,
+          payment_steps:  normalizedSteps,
+          estimate_url:   estimateUrl,
+        },
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      })
+      .select("id")
+      .single()
 
     await supabase.from("assistant_approvals")
       .update({ status: "executed", executed_at: now,
@@ -1172,13 +1204,71 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       .eq("id", id)
 
     return NextResponse.json({
-      action_type:   "create_estimate",
-      success:       true,
-      estimate_id:   estimate.id,
+      action_type:      "create_estimate_draft",
+      success:          true,
+      estimate_id:      estimate.id,
       customer_id,
-      title:         estTitle,
-      total:         totalNum,
-      estimate_url:  `${appUrl}/estimates/${estimate.id}`,
+      customer_name,
+      title:            estTitle,
+      total:            totalNum,
+      estimate_url:     estimateUrl,
+      send_approval_id: sendApproval?.id ?? null,
+    })
+  }
+
+  // ─── create_expense ──────────────────────────────────────────────────────
+
+  if (approval.action_type === "create_expense") {
+    const {
+      amount, vendor, category, date, notes, job_id,
+    } = payload as {
+      amount:   number
+      vendor:   string | null
+      category: string
+      date:     string
+      notes:    string | null
+      job_id:   string | null
+    }
+
+    const expenseType  = job_id ? "job" : "business"
+    const description  = vendor ?? `${(category ?? "misc").charAt(0).toUpperCase() + (category ?? "misc").slice(1).replace(/_/g, " ")} expense`
+
+    const { data: expense, error: expErr } = await supabase
+      .from("expenses")
+      .insert({
+        user_id:      ownerUserId,
+        job_id:       job_id ?? null,
+        expense_type: expenseType,
+        category:     category ?? "misc",
+        description,
+        amount:       Number(amount),
+        date:         date ?? new Date().toISOString().split("T")[0],
+        notes:        notes ?? null,
+      })
+      .select("id")
+      .single()
+
+    if (expErr || !expense) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: expErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json(
+        { error: `Failed to record expense: ${expErr?.message}` },
+        { status: 500 },
+      )
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now,
+        result: { expense_id: expense.id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type: "create_expense",
+      success:     true,
+      expense_id:  expense.id,
+      amount:      Number(amount),
+      vendor:      vendor ?? null,
+      category:    category ?? "misc",
     })
   }
 

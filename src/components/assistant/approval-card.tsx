@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
   CheckCircle, XCircle, AlertCircle, Loader2,
-  FileText, Calendar, StickyNote, Receipt, Send, UserPlus,
+  FileText, Calendar, StickyNote, Receipt, Send, UserPlus, Wallet,
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,13 +28,15 @@ interface ApprovalCardProps {
 // ─── Action config ────────────────────────────────────────────────────────────
 
 const ACTION_META: Record<string, { label: string; icon: React.ElementType; color: string }> = {
-  create_customer:     { label: "Add Customer",          icon: UserPlus,  color: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300" },
-  create_invoice:      { label: "Create Draft Invoice",  icon: Receipt,   color: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300" },
-  create_send_invoice: { label: "Send Invoice",          icon: Send,      color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300" },
-  create_estimate:     { label: "Create Draft Estimate", icon: FileText,  color: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300" },
-  schedule_job:        { label: "Schedule Job",          icon: Calendar,  color: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300" },
-  update_note:         { label: "Update Note",           icon: StickyNote, color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300" },
-  send_contracts:      { label: "Send Contracts",        icon: Send,      color: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300" },
+  create_customer:        { label: "Add Customer",          icon: UserPlus,   color: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300" },
+  create_invoice:         { label: "Create Draft Invoice",  icon: Receipt,    color: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300" },
+  create_send_invoice:    { label: "Send Invoice",          icon: Send,       color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300" },
+  create_estimate_draft:  { label: "Create Draft Estimate", icon: FileText,   color: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300" },
+  create_estimate:        { label: "Create Draft Estimate", icon: FileText,   color: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300" },
+  create_expense:         { label: "Record Expense",        icon: Wallet,     color: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300" },
+  schedule_job:           { label: "Schedule Job",          icon: Calendar,   color: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300" },
+  update_note:            { label: "Update Note",           icon: StickyNote, color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300" },
+  send_contracts:         { label: "Send Contracts",        icon: Send,       color: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300" },
 }
 
 const RISK_COLOR: Record<string, string> = {
@@ -78,23 +80,19 @@ function renderPayload(type: string, payload: Record<string, unknown>) {
     )
   }
 
-  if (type === "create_invoice" || type === "create_send_invoice") {
+  if (type === "create_expense") {
     return (
       <>
-        <PayloadRow label="Customer" value={payload.customer_name as string} />
-        <PayloadRow label="Job"      value={payload.job_title as string | null} />
-        <PayloadRow label="Amount"   value={fmt(payload.amount)} />
-        <PayloadRow label="Type"     value={payload.type as string} />
-        {type === "create_send_invoice" && (
-          <PayloadRow label="Send to" value={payload.customer_email as string | null} />
-        )}
-        <PayloadRow label="Due date" value={payload.due_date as string | null} />
-        <PayloadRow label="Payment"  value={(payload.payment_methods as string[] | null)?.join(", ")} />
+        <PayloadRow label="Amount"   value={payload.amount != null ? `$${Number(payload.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}` : null} />
+        <PayloadRow label="Vendor"   value={payload.vendor as string | null} />
+        <PayloadRow label="Category" value={payload.category ? String(payload.category).replace(/_/g, " ") : null} />
+        <PayloadRow label="Date"     value={payload.date as string | null} />
+        <PayloadRow label="Notes"    value={payload.notes as string | null} />
       </>
     )
   }
 
-  if (type === "create_estimate") {
+  if (type === "create_estimate_draft" || type === "create_estimate") {
     const steps = payload.payment_steps as Array<{ name: string; amount: number }> | null
     return (
       <>
@@ -107,6 +105,22 @@ function renderPayload(type: string, payload: Record<string, unknown>) {
             value={steps.map((s) => `${s.name}: ${fmt(s.amount)}`).join(" · ")}
           />
         ) : null}
+      </>
+    )
+  }
+
+  if (type === "create_invoice" || type === "create_send_invoice") {
+    return (
+      <>
+        <PayloadRow label="Customer" value={payload.customer_name as string} />
+        <PayloadRow label="Job"      value={payload.job_title as string | null} />
+        <PayloadRow label="Amount"   value={fmt(payload.amount)} />
+        <PayloadRow label="Type"     value={payload.type as string} />
+        {type === "create_send_invoice" && (
+          <PayloadRow label="Send to" value={payload.customer_email as string | null} />
+        )}
+        <PayloadRow label="Due date" value={payload.due_date as string | null} />
+        <PayloadRow label="Payment"  value={(payload.payment_methods as string[] | null)?.join(", ")} />
       </>
     )
   }
@@ -265,7 +279,7 @@ function ExecutedResult({ type, result }: { type: string; result: Record<string,
   if (type === "create_invoice" || type === "create_send_invoice") {
     if (result.invoice_id) links.push({ label: "View Invoice", href: `${appUrl}/invoices/${result.invoice_id}` })
   }
-  if (type === "create_estimate") {
+  if (type === "create_estimate_draft" || type === "create_estimate") {
     if (result.estimate_id) links.push({ label: "View Estimate", href: `${appUrl}/estimates/${result.estimate_id}` })
   }
   if (type === "schedule_job") {

@@ -677,7 +677,7 @@ function formatClaudeActionForTelegram(
     if (p.notes)         lines.push(`📝 Note: ${p.notes}`)
     if (Array.isArray(p.payment_methods) && (p.payment_methods as string[]).length)
       lines.push(`💳 Payment: ${(p.payment_methods as string[]).join(", ")}`)
-  } else if (action.type === "create_estimate") {
+  } else if (action.type === "create_estimate_draft" || action.type === "create_estimate") {
     lines.push("📋 Create Draft Estimate")
     lines.push("")
     if (p.customer_name) lines.push(`👤 Customer: ${p.customer_name}`)
@@ -689,6 +689,14 @@ function formatClaudeActionForTelegram(
         lines.push(`  • ${s.name}: ${fmt(s.amount)}`)
       }
     }
+  } else if (action.type === "create_expense") {
+    lines.push("💸 Record Expense")
+    lines.push("")
+    if (p.amount != null) lines.push(`💰 Amount: ${fmt(p.amount)}`)
+    if (p.vendor)         lines.push(`🏪 Vendor: ${p.vendor}`)
+    if (p.category)       lines.push(`📂 Category: ${cap(String(p.category).replace(/_/g, " "))}`)
+    if (p.date)           lines.push(`📅 Date: ${p.date}`)
+    if (p.notes)          lines.push(`📝 Notes: ${p.notes}`)
   } else if (action.type === "schedule_job") {
     lines.push("📅 Schedule Job")
     lines.push("")
@@ -1356,6 +1364,28 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       } else if (result.action_type === "create_customer") {
         const url = result.customer_url ? `\n${result.customer_url}` : ""
         await sendTelegramMessage(chatId, `✅ Customer added: ${result.customer_name ?? "New customer"}.${url}`)
+      } else if (result.action_type === "create_estimate_draft" || result.action_type === "create_estimate") {
+        const url  = result.estimate_url ? `\n${result.estimate_url}` : ""
+        const title = result.title ? `: ${result.title}` : ""
+        const base = `✅ Estimate draft created${title}.${url}`
+        if (result.send_approval_id) {
+          const totalFmt = result.total != null ? ` ($${Number(result.total).toLocaleString()})` : ""
+          await sendTelegramWithButtons(chatId,
+            `${base}\n\nReview the estimate above, then send it to ${result.customer_name ?? "the customer"}${totalFmt}?`,
+            [[
+              { text: "✅ Send to Customer", callback_data: `approve:${result.send_approval_id}` },
+              { text: "❌ Don't Send",       callback_data: `reject:${result.send_approval_id}` },
+            ]]
+          )
+        } else {
+          await sendTelegramMessage(chatId, base)
+        }
+      } else if (result.action_type === "create_expense") {
+        const amtFmt = result.amount != null
+          ? `$${Number(result.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+          : "expense"
+        const vendorPart = result.vendor ? ` at ${result.vendor}` : ""
+        await sendTelegramMessage(chatId, `✅ Expense recorded${vendorPart}: ${amtFmt}.`)
       } else if (result.action_type === "create_invoice") {
         const ref = result.invoice_number ? ` (${result.invoice_number})` : ""
         const url = result.invoice_url    ? `\n${result.invoice_url}` : ""
