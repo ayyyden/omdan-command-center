@@ -640,6 +640,64 @@ async function handleLeadEstimate(
   await send(previewText, buttons)
 }
 
+// ─── Claude action formatter for Telegram ────────────────────────────────────
+
+function formatClaudeActionForTelegram(
+  approvalId: string,
+  action: { type: string; summary: string; payload: Record<string, unknown> },
+): string {
+  const p   = action.payload
+  const fmt = (n: unknown) => n != null ? `$${Number(n).toLocaleString("en-US")}` : null
+  const cap = (s: string)  => s.charAt(0).toUpperCase() + s.slice(1)
+  const lines: string[] = []
+
+  if (action.type === "create_invoice" || action.type === "create_send_invoice") {
+    lines.push(action.type === "create_invoice" ? "📋 Create Draft Invoice" : "📋 Create & Send Invoice")
+    lines.push("")
+    if (p.customer_name) lines.push(`👤 Customer: ${p.customer_name}`)
+    if (p.job_title)     lines.push(`🔨 Job: ${p.job_title}`)
+    if (p.amount != null) lines.push(`💰 Amount: ${fmt(p.amount)}`)
+    if (p.type)          lines.push(`📂 Type: ${cap(String(p.type))}`)
+    if (action.type === "create_send_invoice" && p.customer_email)
+      lines.push(`📧 Send to: ${p.customer_email}`)
+    if (p.due_date)      lines.push(`📅 Due: ${p.due_date}`)
+    if (p.notes)         lines.push(`📝 Note: ${p.notes}`)
+    if (Array.isArray(p.payment_methods) && (p.payment_methods as string[]).length)
+      lines.push(`💳 Payment: ${(p.payment_methods as string[]).join(", ")}`)
+  } else if (action.type === "create_estimate") {
+    lines.push("📋 Create Draft Estimate")
+    lines.push("")
+    if (p.customer_name) lines.push(`👤 Customer: ${p.customer_name}`)
+    if (p.services)      lines.push(`🛠 Services: ${p.services}`)
+    if (p.total != null) lines.push(`💰 Total: ${fmt(p.total)}`)
+    if (Array.isArray(p.payment_steps) && (p.payment_steps as unknown[]).length) {
+      lines.push("", "Payment Schedule:")
+      for (const s of p.payment_steps as Array<{ name: string; amount: number }>) {
+        lines.push(`  • ${s.name}: ${fmt(s.amount)}`)
+      }
+    }
+  } else if (action.type === "schedule_job") {
+    lines.push("📅 Schedule Job")
+    lines.push("")
+    if (p.job_title)             lines.push(`🔨 Job: ${p.job_title}`)
+    if (p.new_scheduled_date)    lines.push(`📅 Date: ${p.new_scheduled_date}`)
+    if (p.new_scheduled_time)    lines.push(`🕐 Time: ${p.new_scheduled_time}`)
+  } else if (action.type === "update_note") {
+    lines.push("📝 Update Note")
+    lines.push("")
+    if (p.entity_name) lines.push(`📌 ${cap(String(p.entity_type ?? ""))} : ${p.entity_name}`)
+    if (p.notes) {
+      const preview = String(p.notes).slice(0, 200)
+      lines.push(`📝 ${preview}${String(p.notes).length > 200 ? "…" : ""}`)
+    }
+  } else {
+    lines.push(`⚡ ${action.summary}`)
+  }
+
+  lines.push("", `ID: ${approvalId}`)
+  return lines.join("\n")
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 const app = express()
@@ -1282,14 +1340,72 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
           await sendTelegramMessage(chatId,
             `✅ ${count === 1 ? "Contract" : `${count} contracts`} sent to ${result.sent_to}`)
         }
+      } else if (result.action_type === "create_invoice") {
+        const ref = result.invoice_number ? ` (${result.invoice_number})` : ""
+        const url = result.invoice_url    ? `\n${result.invoice_url}` : ""
+        await sendTelegramMessage(chatId, `✅ Draft invoice${ref} created.${url}`)
+      } else if (result.action_type === "create_estimate") {
+        const url = result.estimate_url ? `\n${result.estimate_url}` : ""
+        await sendTelegramMessage(chatId, `✅ Draft estimate created${result.title ? `: ${result.title}` : ""}.${url}`)
+      } else if (result.action_type === "update_note") {
+        await sendTelegramMessage(chatId, `✅ Notes updated for ${result.entity_name ?? "record"}.`)
+      } else {
+        await sendTelegramMessage(chatId, "✅ Done.")
       }
       return
     }
 
-    await sendTelegramMessage(
-      chatId,
-      "I didn't understand that.\n\nTry:\n• \"Lia, are you connected?\"\n• \"Lia, what needs my attention today?\"\n• \"Lia add this lead: name - John...\"\n• \"Lia invoice John Smith $2500 deposit\"\n• \"Lia, schedule John Smith paver job for Monday at 9am\"\n• \"Lia, send contract to John Smith for paver job\""
-    )
+    // ── Conversational AI fallback ────────────────────────────────────────────
+    // Any message that didn't match a structured intent (greetings, questions,
+    // natural-language CRM requests, etc.) goes to Claude.
+    const crmBaseUrl = (process.env.CRM_BASE_URL ?? "").replace(/\/+$/, "")
+    const crmSecret  = process.env.CRM_ASSISTANT_SECRET ?? ""
+
+    let aiText       = "I had trouble with that — please try again."
+    let aiApprovalId: string | null = null
+    let aiActionType: string | null = null
+    let aiActionSummary = ""
+    let aiActionPayload: Record<string, unknown> | null = null
+
+    try {
+      const aiRes = await fetch(`${crmBaseUrl}/api/assistant/telegram-chat`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "x-assistant-secret": crmSecret },
+        body:    JSON.stringify({
+          telegram_user_id: fromId,
+          telegram_chat_id: chatId,
+          message:          text,
+        }),
+      })
+      const aiData = await aiRes.json() as {
+        text?: string
+        approval_id?: string
+        action_type?: string
+        action_summary?: string
+        action_payload?: Record<string, unknown>
+      }
+      if (typeof aiData.text === "string") aiText = aiData.text
+      aiApprovalId    = aiData.approval_id    ?? null
+      aiActionType    = aiData.action_type    ?? null
+      aiActionSummary = aiData.action_summary ?? ""
+      aiActionPayload = aiData.action_payload ?? null
+    } catch (aiErr) {
+      console.error("[lia/telegram] AI fallback error:", aiErr)
+    }
+
+    if (aiApprovalId && aiActionType && aiActionPayload) {
+      const previewText = formatClaudeActionForTelegram(aiApprovalId, {
+        type:    aiActionType,
+        summary: aiActionSummary,
+        payload: aiActionPayload,
+      })
+      await sendTelegramWithButtons(chatId, `${aiText}\n\n${previewText}`, [[
+        { text: "✅ Approve", callback_data: `approve:${aiApprovalId}` },
+        { text: "❌ Reject",  callback_data: `reject:${aiApprovalId}` },
+      ]])
+    } else {
+      await sendTelegramMessage(chatId, aiText)
+    }
   } catch (err) {
     console.error("[lia/telegram] Error:", err)
     await sendTelegramMessage(chatId, "Something went wrong. Please try again.").catch(() => {})

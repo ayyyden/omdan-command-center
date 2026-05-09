@@ -205,6 +205,14 @@ export interface ExecuteResponse {
   // send_contracts fields
   count?: number
   bundle_link?: string
+  // create_invoice fields
+  invoice_url?: string
+  // create_estimate fields
+  title?: string
+  estimate_url?: string
+  // update_note fields
+  entity_type?: string
+  entity_name?: string
 }
 
 export interface DailySummary {
