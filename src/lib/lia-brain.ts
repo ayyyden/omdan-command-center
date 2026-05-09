@@ -132,27 +132,62 @@ export async function callLiaBrain(
 
   try {
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-    const messages = history
+
+    const conversationMessages = history
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
 
+    // Prefill the assistant turn with "{" to force Claude to output valid JSON.
+    // The SDK returns only the continuation; we prepend "{" to reconstruct the full object.
     const result = await anthropic.messages.create({
       model:      "claude-haiku-4-5-20251001",
-      max_tokens: 800,
+      max_tokens: 2000,
       system:     buildSystemPrompt(crmContext, today),
-      messages,
+      messages:   [
+        ...conversationMessages,
+        { role: "assistant", content: "{" },
+      ],
     })
 
-    const rawText = result.content[0]?.type === "text" ? result.content[0].text.trim() : ""
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+    const continuation = result.content[0]?.type === "text" ? result.content[0].text.trim() : ""
+    const rawText      = "{" + continuation
+    console.log("[lia-brain] raw response:", rawText.slice(0, 500))
 
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]) as BrainResponse
+    // Extract the first balanced JSON object from the response
+    const jsonStr = extractFirstJson(rawText)
+    if (jsonStr) {
+      const parsed = JSON.parse(jsonStr) as BrainResponse
+      if (parsed.action) {
+        console.log("[lia-brain] action:", JSON.stringify({ type: parsed.action.type, summary: parsed.action.summary }))
+      }
       return parsed
     }
-    return { message: rawText || "I didn't quite catch that. Could you rephrase?" }
+
+    console.warn("[lia-brain] no JSON found in response:", rawText.slice(0, 200))
+    return { message: rawText.replace(/^\{/, "").trim() || "I didn't quite catch that. Could you rephrase?" }
   } catch (err) {
-    console.error("[lia-brain] Claude error:", err)
+    console.error("[lia-brain] error:", err)
     return { message: "I hit an error. Please try again." }
   }
+}
+
+// ─── JSON extraction ──────────────────────────────────────────────────────────
+// Extracts the first balanced `{...}` from a string, ignoring any trailing text.
+
+function extractFirstJson(text: string): string | null {
+  const start = text.indexOf("{")
+  if (start === -1) return null
+  let depth = 0
+  let inString = false
+  let escape = false
+  for (let i = start; i < text.length; i++) {
+    const c = text[i]
+    if (escape)                    { escape = false; continue }
+    if (c === "\\" && inString)    { escape = true;  continue }
+    if (c === '"')                 { inString = !inString; continue }
+    if (inString)                  continue
+    if (c === "{")                 depth++
+    if (c === "}") { depth--; if (depth === 0) return text.slice(start, i + 1) }
+  }
+  return null
 }

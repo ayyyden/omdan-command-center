@@ -851,11 +851,16 @@ app.post("/webhook/message", async (req: Request, res: Response) => {
 })
 
 // ─── Incoming Telegram webhook ────────────────────────────────────────────────
+// Rolling deduplication: Telegram retries if we don't 200 fast enough.
+// We 200 immediately, so retries are rare — but guard anyway.
+
+const seenUpdateIds = new Set<number>()
 
 app.post("/webhook/telegram", async (req: Request, res: Response) => {
   res.json({ ok: true })
 
   const update = req.body as {
+    update_id?: number
     message?: {
       from?: { id: number; first_name?: string; username?: string }
       chat?: { id: number; type?: string; title?: string }
@@ -866,6 +871,17 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       from?: { id: number }
       message?: { chat?: { id: number; type?: string; title?: string } }
       data?: string
+    }
+  }
+
+  if (update.update_id != null) {
+    if (seenUpdateIds.has(update.update_id)) {
+      console.log(`[lia/telegram] duplicate update_id ${update.update_id} — skipped`)
+      return
+    }
+    seenUpdateIds.add(update.update_id)
+    if (seenUpdateIds.size > 200) {
+      seenUpdateIds.delete(seenUpdateIds.values().next().value as number)
     }
   }
 
