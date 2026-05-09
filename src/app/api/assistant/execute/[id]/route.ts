@@ -86,6 +86,62 @@ export async function POST(_req: Request, { params }: RouteCtx) {
   const now = new Date().toISOString()
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app").replace(/\/+$/, "")
 
+  // ─── create_customer ─────────────────────────────────────────────────────
+
+  if (approval.action_type === "create_customer") {
+    const {
+      name, phone, email, address, service_type, lead_source, notes,
+    } = payload as {
+      name:         string
+      phone:        string | null
+      email:        string | null
+      address:      string | null
+      service_type: string | null
+      lead_source:  string | null
+      notes:        string | null
+    }
+
+    if (!name) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "name is required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "Customer name is required" }, { status: 400 })
+    }
+
+    const { data: customer, error: custErr } = await supabase
+      .from("customers")
+      .insert({
+        name,
+        phone:        phone        ?? null,
+        email:        email        ?? null,
+        address:      address      ?? null,
+        service_type: service_type ?? null,
+        lead_source:  lead_source  ?? null,
+        notes:        notes        ?? null,
+        status:       "New Lead",
+        user_id:      ownerUserId,
+      })
+      .select("id")
+      .single()
+
+    if (custErr || !customer) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: custErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to create customer: ${custErr?.message}` }, { status: 500 })
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now, result: { customer_id: customer.id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:  "create_customer",
+      success:      true,
+      customer_id:  customer.id,
+      customer_name: name,
+      customer_url: `${appUrl}/customers/${customer.id}`,
+    })
+  }
+
   // ─── create_lead_estimate ─────────────────────────────────────────────────
 
   if (approval.action_type === "create_lead_estimate") {

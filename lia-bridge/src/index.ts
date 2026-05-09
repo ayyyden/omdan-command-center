@@ -651,7 +651,20 @@ function formatClaudeActionForTelegram(
   const cap = (s: string)  => s.charAt(0).toUpperCase() + s.slice(1)
   const lines: string[] = []
 
-  if (action.type === "create_invoice" || action.type === "create_send_invoice") {
+  if (action.type === "create_customer") {
+    lines.push("👤 Add New Customer")
+    lines.push("")
+    if (p.name)         lines.push(`👤 Name: ${p.name}`)
+    if (p.email)        lines.push(`📧 Email: ${p.email}`)
+    if (p.phone)        lines.push(`📞 Phone: ${p.phone}`)
+    if (p.address)      lines.push(`📍 Address: ${p.address}`)
+    if (p.service_type) lines.push(`🛠 Services: ${p.service_type}`)
+    if (p.lead_source)  lines.push(`📌 Source: ${p.lead_source}`)
+    if (p.notes) {
+      const preview = String(p.notes).slice(0, 200)
+      lines.push(`📝 Notes: ${preview}${String(p.notes).length > 200 ? "…" : ""}`)
+    }
+  } else if (action.type === "create_invoice" || action.type === "create_send_invoice") {
     lines.push(action.type === "create_invoice" ? "📋 Create Draft Invoice" : "📋 Create & Send Invoice")
     lines.push("")
     if (p.customer_name) lines.push(`👤 Customer: ${p.customer_name}`)
@@ -1340,6 +1353,9 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
           await sendTelegramMessage(chatId,
             `✅ ${count === 1 ? "Contract" : `${count} contracts`} sent to ${result.sent_to}`)
         }
+      } else if (result.action_type === "create_customer") {
+        const url = result.customer_url ? `\n${result.customer_url}` : ""
+        await sendTelegramMessage(chatId, `✅ Customer added: ${result.customer_name ?? "New customer"}.${url}`)
       } else if (result.action_type === "create_invoice") {
         const ref = result.invoice_number ? ` (${result.invoice_number})` : ""
         const url = result.invoice_url    ? `\n${result.invoice_url}` : ""

@@ -213,6 +213,9 @@ export interface ExecuteResponse {
   // update_note fields
   entity_type?: string
   entity_name?: string
+  // create_customer fields
+  customer_url?: string
+  customer_name?: string
 }
 
 export interface DailySummary {
