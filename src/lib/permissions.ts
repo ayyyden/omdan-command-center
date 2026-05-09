@@ -201,6 +201,10 @@ export function can(role: TeamRole, action: string): boolean {
     case 'propstream:manage':
       return roleAtLeast(role, 'admin')
 
+    // ── Lia CRM Chat ──────────────────────────────────────────────────────────
+    case 'lia:chat':
+      return roleAtLeast(role, 'admin')
+
     default:
       return false
   }

@@ -979,5 +979,191 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     })
   }
 
+  // ─── create_invoice ──────────────────────────────────────────────────────
+  // Draft-only: creates invoice without sending email.
+
+  if (approval.action_type === "create_invoice") {
+    const {
+      customer_id, customer_name, job_id,
+      amount, type, notes, due_date, payment_methods,
+    } = payload as {
+      customer_id: string; customer_name: string; job_id: string | null
+      amount: number; type: string; notes: string | null
+      due_date: string | null; payment_methods: string[]
+    }
+
+    if (!job_id) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "job_id is required", updated_at: now }).eq("id", id)
+      return NextResponse.json(
+        { error: "Invoice requires a job — job_id missing from approval payload." },
+        { status: 400 },
+      )
+    }
+
+    const { data: invoice, error: invErr } = await supabase
+      .from("invoices")
+      .insert({
+        customer_id,
+        job_id,
+        user_id:         ownerUserId,
+        type:            type ?? "deposit",
+        status:          "draft",
+        amount:          Number(amount),
+        due_date:        due_date ?? null,
+        notes:           notes   ?? null,
+        payment_methods: payment_methods ?? ["zelle", "cash", "check"],
+      })
+      .select("id, invoice_number")
+      .single()
+
+    if (invErr || !invoice) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: invErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json(
+        { error: `Failed to create invoice: ${invErr?.message}` },
+        { status: 500 },
+      )
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now,
+        result: { invoice_id: invoice.id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:    "create_invoice",
+      success:        true,
+      invoice_id:     invoice.id,
+      invoice_number: invoice.invoice_number ?? null,
+      invoice_url:    `${appUrl}/invoices/${invoice.id}`,
+    })
+  }
+
+  // ─── create_estimate ─────────────────────────────────────────────────────
+  // Creates a draft estimate for an existing customer (no customer creation).
+
+  if (approval.action_type === "create_estimate") {
+    const {
+      customer_id, customer_name, customer_email,
+      services, total, scope_override, generated_title, generated_scope, payment_steps,
+    } = payload as {
+      customer_id: string; customer_name: string; customer_email: string | null
+      services: string; total: number
+      scope_override?: string; generated_title?: string; generated_scope?: string
+      payment_steps?: Array<{ name: string; amount: number }>
+    }
+
+    let estTitle: string
+    let estScope: string | null
+
+    if (generated_title) {
+      estTitle = generated_title
+      estScope = generated_scope ?? null
+    } else {
+      const scopeResult = await generateEstimateScope(services, scope_override)
+      estTitle = scopeResult.title
+      estScope = scopeResult.scope
+    }
+
+    const totalNum      = Number(total)
+    const approvalToken = crypto.randomUUID()
+
+    const { data: estimate, error: estErr } = await supabase
+      .from("estimates")
+      .insert({
+        customer_id,
+        user_id:            ownerUserId,
+        title:              estTitle,
+        scope_of_work:      estScope || null,
+        manual_total_price: totalNum,
+        line_items:         [],
+        markup_percent:     0,
+        tax_percent:        0,
+        subtotal:           totalNum,
+        markup_amount:      0,
+        tax_amount:         0,
+        total:              totalNum,
+        status:             "draft",
+        approval_token:     approvalToken,
+      })
+      .select("id")
+      .single()
+
+    if (estErr || !estimate) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: estErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json(
+        { error: `Failed to create estimate: ${estErr?.message}` },
+        { status: 500 },
+      )
+    }
+
+    if (payment_steps?.length) {
+      await supabase.from("estimate_payment_steps").insert(
+        payment_steps.map((s, i) => ({
+          estimate_id: estimate.id,
+          name:        normalizePaymentLabel(s.name),
+          amount:      s.amount,
+          sort_order:  i,
+        }))
+      )
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now,
+        result: { estimate_id: estimate.id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:   "create_estimate",
+      success:       true,
+      estimate_id:   estimate.id,
+      customer_id,
+      title:         estTitle,
+      total:         totalNum,
+      estimate_url:  `${appUrl}/estimates/${estimate.id}`,
+    })
+  }
+
+  // ─── update_note ─────────────────────────────────────────────────────────
+
+  if (approval.action_type === "update_note") {
+    const { entity_type, entity_id, entity_name, notes } = payload as {
+      entity_type: "customer" | "job"
+      entity_id:   string
+      entity_name: string
+      notes:       string
+    }
+
+    const table = entity_type === "customer" ? "customers" : "jobs"
+    const { error: updateErr } = await supabase
+      .from(table)
+      .update({ notes, updated_at: now })
+      .eq("id", entity_id)
+
+    if (updateErr) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: updateErr.message, updated_at: now }).eq("id", id)
+      return NextResponse.json(
+        { error: `Failed to update notes: ${updateErr.message}` },
+        { status: 500 },
+      )
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now,
+        result: { entity_type, entity_id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:  "update_note",
+      success:      true,
+      entity_type,
+      entity_id,
+      entity_name,
+    })
+  }
+
   return NextResponse.json({ error: `Unknown action_type: ${approval.action_type}` }, { status: 400 })
 }
