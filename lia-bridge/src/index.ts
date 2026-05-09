@@ -1358,6 +1358,10 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
     // ── Conversational AI fallback ────────────────────────────────────────────
     // Any message that didn't match a structured intent (greetings, questions,
     // natural-language CRM requests, etc.) goes to Claude.
+    if (intent.type !== "unknown") return
+
+    console.log(`[lia/telegram/ai] fallback start — chat=${chatId} from=${fromId} text="${text.slice(0, 80)}"`)
+
     const crmBaseUrl = (process.env.CRM_BASE_URL ?? "").replace(/\/+$/, "")
     const crmSecret  = process.env.CRM_ASSISTANT_SECRET ?? ""
 
@@ -1377,6 +1381,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
           message:          text,
         }),
       })
+      console.log(`[lia/telegram/ai] response status ${aiRes.status}`)
       const aiData = await aiRes.json() as {
         text?: string
         approval_id?: string
@@ -1390,7 +1395,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       aiActionSummary = aiData.action_summary ?? ""
       aiActionPayload = aiData.action_payload ?? null
     } catch (aiErr) {
-      console.error("[lia/telegram] AI fallback error:", aiErr)
+      console.error("[lia/telegram/ai] error:", aiErr)
     }
 
     if (aiApprovalId && aiActionType && aiActionPayload) {
@@ -1403,8 +1408,10 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         { text: "✅ Approve", callback_data: `approve:${aiApprovalId}` },
         { text: "❌ Reject",  callback_data: `reject:${aiApprovalId}` },
       ]])
+      console.log(`[lia/telegram/ai] sent approval card — action=${aiActionType}`)
     } else {
       await sendTelegramMessage(chatId, aiText)
+      console.log(`[lia/telegram/ai] sent reply — "${aiText.slice(0, 80)}"`)
     }
   } catch (err) {
     console.error("[lia/telegram] Error:", err)
