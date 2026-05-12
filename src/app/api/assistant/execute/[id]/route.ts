@@ -1311,5 +1311,116 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     })
   }
 
+  // ─── create_lead_appointment ─────────────────────────────────────────────
+
+  if (approval.action_type === "create_lead_appointment") {
+    const {
+      name, phone, address, scheduled_date, start_time, end_time,
+      partner_reference, category_code, project_summary, notes, source,
+    } = payload as {
+      name:              string
+      phone:             string | null
+      address:           string | null
+      scheduled_date:    string | null
+      start_time:        string | null
+      end_time:          string | null
+      partner_reference: string | null
+      category_code:     string | null
+      project_summary:   string | null
+      notes:             string | null
+      source:            string
+    }
+
+    if (!name) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "name is required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "Customer name is required" }, { status: 400 })
+    }
+
+    if (!scheduled_date) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "scheduled_date is required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "Appointment date is required" }, { status: 400 })
+    }
+
+    // Find existing customer by phone, or create new one
+    let customerId: string | null = null
+
+    if (phone) {
+      const normalized = phone.replace(/[^0-9]/g, "")
+      const { data: existing } = await supabase
+        .from("customers")
+        .select("id")
+        .or(`phone.eq.${normalized},phone.eq.+1${normalized}`)
+        .limit(1)
+        .maybeSingle()
+      if (existing) customerId = existing.id as string
+    }
+
+    if (!customerId) {
+      const { data: created, error: custErr } = await supabase
+        .from("customers")
+        .insert({
+          name,
+          phone:       phone    ?? null,
+          address:     address  ?? null,
+          lead_source: source   ?? "partner",
+          status:      "New Lead",
+          user_id:     ownerUserId,
+        })
+        .select("id")
+        .single()
+
+      if (custErr || !created) {
+        await supabase.from("assistant_approvals")
+          .update({ status: "failed", error: custErr?.message, updated_at: now }).eq("id", id)
+        return NextResponse.json({ error: `Failed to create customer: ${custErr?.message}` }, { status: 500 })
+      }
+      customerId = created.id as string
+    }
+
+    const { data: appt, error: apptErr } = await supabase
+      .from("lead_appointments")
+      .insert({
+        customer_id:       customerId,
+        user_id:           ownerUserId,
+        scheduled_date,
+        start_time:        start_time        ?? null,
+        end_time:          end_time          ?? null,
+        status:            "scheduled",
+        source:            source            ?? "partner",
+        partner_reference: partner_reference ?? null,
+        project_summary:   project_summary   ?? null,
+        notes:             notes             ?? null,
+        category_code:     category_code     ?? null,
+      })
+      .select("id")
+      .single()
+
+    if (apptErr || !appt) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: apptErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to create appointment: ${apptErr?.message}` }, { status: 500 })
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({
+        status:      "executed",
+        executed_at: now,
+        result:      { appointment_id: appt.id, customer_id: customerId },
+        updated_at:  now,
+      })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:     "create_lead_appointment",
+      success:         true,
+      appointment_id:  appt.id,
+      customer_id:     customerId,
+      customer_name:   name,
+      appointment_url: `${appUrl}/customers/${customerId}`,
+    })
+  }
+
   return NextResponse.json({ error: `Unknown action_type: ${approval.action_type}` }, { status: 400 })
 }

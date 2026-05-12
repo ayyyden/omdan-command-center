@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
   CheckCircle, XCircle, AlertCircle, Loader2,
-  FileText, Calendar, StickyNote, Receipt, Send, UserPlus, Wallet,
+  FileText, Calendar, StickyNote, Receipt, Send, UserPlus, Wallet, MapPin,
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,7 +28,8 @@ interface ApprovalCardProps {
 // ─── Action config ────────────────────────────────────────────────────────────
 
 const ACTION_META: Record<string, { label: string; icon: React.ElementType; color: string }> = {
-  create_customer:        { label: "Add Customer",          icon: UserPlus,   color: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300" },
+  create_customer:           { label: "Add Customer",          icon: UserPlus,   color: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300" },
+  create_lead_appointment:   { label: "Lead Appointment",      icon: MapPin,     color: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300" },
   create_invoice:         { label: "Create Draft Invoice",  icon: Receipt,    color: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300" },
   create_send_invoice:    { label: "Send Invoice",          icon: Send,       color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300" },
   create_estimate_draft:  { label: "Create Draft Estimate", icon: FileText,   color: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300" },
@@ -60,6 +61,30 @@ function PayloadRow({ label, value }: { label: string; value: string | null | un
 function renderPayload(type: string, payload: Record<string, unknown>) {
   const fmt = (n: unknown) =>
     n == null ? null : `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 0 })}`
+
+  if (type === "create_lead_appointment") {
+    return (
+      <>
+        <PayloadRow label="Name"      value={payload.name as string} />
+        <PayloadRow label="Phone"     value={payload.phone as string | null} />
+        <PayloadRow label="Address"   value={payload.address as string | null} />
+        <PayloadRow label="Date"      value={payload.scheduled_date as string | null} />
+        <PayloadRow label="Time"      value={
+          payload.start_time
+            ? `${payload.start_time as string}${payload.end_time ? ` – ${payload.end_time as string}` : ""}`
+            : null
+        } />
+        <PayloadRow label="Project"   value={payload.project_summary as string | null} />
+        <PayloadRow label="Ref #"     value={payload.partner_reference as string | null} />
+        {payload.notes ? (
+          <div className="flex gap-2 text-xs">
+            <span className="text-muted-foreground w-28 shrink-0">Notes</span>
+            <span className="font-medium text-foreground line-clamp-3 whitespace-pre-wrap">{payload.notes as string}</span>
+          </div>
+        ) : null}
+      </>
+    )
+  }
 
   if (type === "create_customer") {
     return (
@@ -273,7 +298,7 @@ function ExecutedResult({ type, result }: { type: string; result: Record<string,
   const appUrl = ""  // relative links work fine in the browser
   const links: Array<{ label: string; href: string }> = []
 
-  if (type === "create_customer") {
+  if (type === "create_customer" || type === "create_lead_appointment") {
     if (result.customer_id) links.push({ label: "View Customer", href: `${appUrl}/customers/${result.customer_id}` })
   }
   if (type === "create_invoice" || type === "create_send_invoice") {

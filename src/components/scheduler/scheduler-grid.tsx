@@ -18,7 +18,9 @@ import { upsertJobReminders } from "@/lib/reminders"
 import { useToast } from "@/hooks/use-toast"
 import { JobBlock } from "./job-block"
 import { ReminderBlock } from "./reminder-block"
-import type { SchedulerJob, PmInfo, SchedulerReminder } from "./scheduler-client"
+import { LeadBlock } from "./lead-block"
+import type { SchedulerJob, PmInfo, SchedulerReminder, LeadAppointment } from "./scheduler-client"
+import { extractCity } from "@/lib/partner-lead-parser"
 import { Bell, Plus, GripVertical, X, Trash2, CalendarDays, CheckCircle2, Pencil, Loader2 } from "lucide-react"
 import {
   Dialog,
@@ -300,6 +302,7 @@ interface SchedulerGridProps {
   jobs: SchedulerJob[]
   pms: PmInfo[]
   reminders: SchedulerReminder[]
+  leadAppointments: LeadAppointment[]
   viewingDate: string
   userId: string
 }
@@ -308,11 +311,16 @@ export function SchedulerGrid({
   jobs: initialJobs,
   pms,
   reminders: initialReminders,
+  leadAppointments: initialLeadAppointments,
   viewingDate,
   userId,
 }: SchedulerGridProps) {
   const [jobs, setJobs] = useState(initialJobs)
   const [reminders, setReminders] = useState(initialReminders)
+  const leadAppointments = initialLeadAppointments.map((a) => ({
+    ...a,
+    city: extractCity(a.customer?.address ?? null),
+  }))
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [isMobile, setIsMobile] = useState(false)
 
@@ -695,6 +703,70 @@ export function SchedulerGrid({
               </div>
             )
           })
+        )}
+
+        {/* Lead Appointments section (mobile) */}
+        {leadAppointments.length > 0 && (
+          <div className="pt-1">
+            <div className="flex items-center gap-2 mb-2 px-0.5">
+              <span className="w-3.5 h-3.5 shrink-0 text-teal-600 font-bold text-xs flex items-center">LA</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-teal-700 dark:text-teal-400">
+                Lead Appointments
+              </span>
+              <span
+                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                style={{ backgroundColor: "rgba(13,148,136,0.12)", color: "#0D9488" }}
+              >
+                {leadAppointments.length}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {leadAppointments.map((appt) => {
+                const timeLabel = appt.start_time
+                  ? [appt.start_time, appt.end_time].filter(Boolean).join(" – ")
+                  : null
+                return (
+                  <a
+                    key={appt.id}
+                    href={appt.customer_id ? `/customers/${appt.customer_id}` : "#"}
+                    className="flex items-stretch gap-0 rounded-xl overflow-hidden active:opacity-70 transition-opacity"
+                    style={{
+                      border: "1px solid rgba(13,148,136,0.3)",
+                      backgroundColor: "rgba(13,148,136,0.06)",
+                    }}
+                  >
+                    <div className="w-1 shrink-0" style={{ backgroundColor: "#0D9488" }} />
+                    <div className="flex flex-col items-end justify-center shrink-0 w-16 px-2 py-2.5 border-r border-border/30">
+                      {timeLabel ? (
+                        <span className="text-xs font-bold tabular-nums" style={{ color: "#0D9488" }}>
+                          {timeLabel}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground italic">No time</span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 px-3 py-2.5 flex flex-col justify-center gap-0.5">
+                      <p className="text-sm font-semibold leading-tight truncate">
+                        {appt.customer?.name ?? "Lead"}
+                        {appt.partner_reference ? ` #${appt.partner_reference}` : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {[appt.project_summary, appt.city].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                    <div className="flex items-center pr-3 shrink-0">
+                      <span
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-full capitalize"
+                        style={{ backgroundColor: "rgba(13,148,136,0.12)", color: "#0D9488" }}
+                      >
+                        Lead
+                      </span>
+                    </div>
+                  </a>
+                )
+              })}
+            </div>
+          </div>
         )}
 
         {/* Reminders section */}
@@ -1125,6 +1197,84 @@ export function SchedulerGrid({
                 </PmDroppableRow>
               )
             })}
+
+            {/* ── Lead Appointments section header ── */}
+            <div
+              className="flex items-center gap-2 px-4"
+              style={{
+                height: 32,
+                borderTop: "2px solid var(--border)",
+                borderBottom: "1px solid var(--border)",
+                minWidth: PM_LABEL_WIDTH + TOTAL_GRID_WIDTH,
+                position: "sticky",
+                left: 0,
+                backgroundColor: "rgba(13,148,136,0.05)",
+              }}
+            >
+              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#0D9488" }}>
+                Lead Appointments
+              </span>
+              {leadAppointments.length > 0 && (
+                <span
+                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                  style={{ backgroundColor: "rgba(13,148,136,0.12)", color: "#0D9488" }}
+                >
+                  {leadAppointments.length}
+                </span>
+              )}
+              <a
+                href="/leads/import"
+                className="flex items-center gap-0.5 text-[11px] font-medium ml-1 transition-colors"
+                style={{ color: "#0D9488" }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Import
+              </a>
+            </div>
+
+            {/* ── Lead Appointments row ── */}
+            <div
+              className="flex"
+              style={{
+                height: leadAppointments.length > 0
+                  ? ROW_V_PADDING * 2 + Math.max(1, leadAppointments.length) * (SLIM_JOB_HEIGHT + JOB_GAP) - JOB_GAP
+                  : SLIM_JOB_HEIGHT + ROW_V_PADDING * 2,
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <div
+                className="sticky left-0 z-10 bg-card shrink-0 flex flex-col items-start justify-center px-4 gap-0.5"
+                style={{ width: PM_LABEL_WIDTH, borderRight: "1px solid var(--border)" }}
+              >
+                <span className="text-[11px] font-semibold" style={{ color: "#0D9488" }}>
+                  {leadAppointments.length === 0 ? "No leads" : `${leadAppointments.length} lead${leadAppointments.length !== 1 ? "s" : ""}`}
+                </span>
+              </div>
+              <div
+                className="relative"
+                style={{
+                  width: TOTAL_GRID_WIDTH,
+                  flexShrink: 0,
+                  overflow: "visible",
+                  height: leadAppointments.length > 0
+                    ? ROW_V_PADDING * 2 + Math.max(1, leadAppointments.length) * (SLIM_JOB_HEIGHT + JOB_GAP) - JOB_GAP
+                    : SLIM_JOB_HEIGHT + ROW_V_PADDING * 2,
+                }}
+              >
+                <GridColumns hours={hours} />
+                {leadAppointments.length === 0 && (
+                  <div className="absolute inset-0 flex items-center pl-4">
+                    <span className="text-xs text-muted-foreground/25 select-none italic">
+                      No lead appointments — click Import to add
+                    </span>
+                  </div>
+                )}
+                {leadAppointments.map((appt, idx) => (
+                  <LeadBlock key={appt.id} appt={appt} index={idx} />
+                ))}
+                {nowLineX !== null && <NowLine x={nowLineX} />}
+              </div>
+            </div>
 
             {/* ── Reminders section header ── */}
             <div

@@ -223,6 +223,9 @@ export interface ExecuteResponse {
   amount?: number
   vendor?: string | null
   category?: string
+  // create_lead_appointment fields
+  appointment_id?: string
+  appointment_url?: string
 }
 
 export interface DailySummary {

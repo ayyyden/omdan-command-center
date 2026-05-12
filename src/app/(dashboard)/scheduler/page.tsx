@@ -29,7 +29,7 @@ export default async function SchedulerPage({ searchParams }: PageProps) {
 
   if (hasJobScope(role)) jobsQuery = jobsQuery.eq("project_manager_id", pmId ?? NO_ROWS_ID)
 
-  const [{ data: pmsRaw }, { data: jobsRaw }, { data: remindersRaw }] = await Promise.all([
+  const [{ data: pmsRaw }, { data: jobsRaw }, { data: remindersRaw }, { data: leadApptsRaw }] = await Promise.all([
     supabase
       .from("project_managers")
       .select("id, name, color, phone, email")
@@ -41,6 +41,12 @@ export default async function SchedulerPage({ searchParams }: PageProps) {
       .select("id, title, due_date, due_time, type, completed_at, notes, duration_minutes")
       .eq("due_date", viewingDate)
       .order("due_time", { ascending: true, nullsFirst: false }),
+    supabase
+      .from("lead_appointments")
+      .select("id, customer_id, scheduled_date, start_time, end_time, status, source, partner_reference, project_summary, notes, category_code, customer:customers(id, name, address)")
+      .eq("scheduled_date", viewingDate)
+      .not("status", "in", "(cancelled)")
+      .order("start_time", { ascending: true, nullsFirst: false }),
   ])
 
   return (
@@ -50,6 +56,7 @@ export default async function SchedulerPage({ searchParams }: PageProps) {
         jobs={(jobsRaw ?? []) as any[]}
         pms={(pmsRaw ?? []) as any[]}
         reminders={(remindersRaw ?? []) as any[]}
+        leadAppointments={(leadApptsRaw ?? []) as any[]}
         date={viewingDate}
         todayLA={todayLA}
         userId={userId}

@@ -651,7 +651,24 @@ function formatClaudeActionForTelegram(
   const cap = (s: string)  => s.charAt(0).toUpperCase() + s.slice(1)
   const lines: string[] = []
 
-  if (action.type === "create_customer") {
+  if (action.type === "create_lead_appointment") {
+    lines.push("📍 Lead Appointment — Pending Approval")
+    lines.push("")
+    if (p.name)              lines.push(`👤 Name: ${p.name}`)
+    if (p.phone)             lines.push(`📞 Phone: ${p.phone}`)
+    if (p.address)           lines.push(`📍 Address: ${p.address}`)
+    if (p.scheduled_date)    lines.push(`📅 Date: ${p.scheduled_date}`)
+    if (p.start_time) {
+      const timeStr = p.end_time ? `${p.start_time} – ${p.end_time}` : String(p.start_time)
+      lines.push(`🕐 Time: ${timeStr}`)
+    }
+    if (p.project_summary)   lines.push(`🛠 Project: ${p.project_summary}`)
+    if (p.partner_reference) lines.push(`🔖 Ref #: ${p.partner_reference}`)
+    if (p.notes) {
+      const preview = String(p.notes).slice(0, 200)
+      lines.push(`📝 Notes: ${preview}${String(p.notes).length > 200 ? "…" : ""}`)
+    }
+  } else if (action.type === "create_customer") {
     lines.push("👤 Add New Customer")
     lines.push("")
     if (p.name)         lines.push(`👤 Name: ${p.name}`)
@@ -1377,6 +1394,9 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
           await sendTelegramMessage(chatId,
             `✅ ${count === 1 ? "Contract" : `${count} contracts`} sent to ${result.sent_to}`)
         }
+      } else if (result.action_type === "create_lead_appointment") {
+        const url = result.appointment_url ? `\n${result.appointment_url}` : ""
+        await sendTelegramMessage(chatId, `✅ Lead appointment saved for ${result.customer_name ?? "lead"}.${url}`)
       } else if (result.action_type === "create_customer") {
         const url = result.customer_url ? `\n${result.customer_url}` : ""
         await sendTelegramMessage(chatId, `✅ Customer added: ${result.customer_name ?? "New customer"}.${url}`)

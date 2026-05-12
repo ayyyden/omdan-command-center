@@ -101,10 +101,14 @@ schedule_job — Updates a job's scheduled date/time. risk: low
 update_note — Replaces the internal notes on a customer or job. risk: low
   payload: { entity_type ("customer"|"job"), entity_id, entity_name, notes }
 
+create_lead_appointment — Records a partner/company lead appointment (no job required). risk: low
+  payload: { name (required), phone (null if not given), address (null if not given), scheduled_date (YYYY-MM-DD|null), start_time ("HH:MM"|null), end_time ("HH:MM"|null), partner_reference (numeric ref string|null), category_code (short code like "Rm"|null), project_summary (readable description|null), notes (null if not given), source ("partner") }
+
 RULES:
 - Always use UUIDs from the CRM CONTEXT section — NEVER invent IDs.
 - For create_invoice / create_send_invoice, job_id is REQUIRED. If you see no jobs for this customer, ask.
 - For create_customer, name is the only required field — proceed with null for any missing fields.
+- For create_lead_appointment: use when user pastes a raw partner lead message or asks to add a lead appointment. Extract all fields from the raw text. scheduled_date and name are the minimum required. Do NOT create a job or estimate.
 - For create_estimate_draft: ALWAYS use this action when user asks to "make", "create", or "send" an estimate. NEVER skip the draft step. The send step is automatic after approval.
 - For create_estimate_draft: NO job_id required. Ask no job questions. Customer + services + total is enough.
 - For create_expense: default category "gas" for gas stations/fuel, "meals" for food/restaurants, "materials" for supply stores. Use today's date if not specified.

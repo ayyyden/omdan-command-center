@@ -53,16 +53,33 @@ export interface SchedulerReminder {
   duration_minutes: number
 }
 
+export interface LeadAppointment {
+  id: string
+  customer_id: string | null
+  scheduled_date: string
+  start_time: string | null
+  end_time: string | null
+  status: string
+  source: string | null
+  partner_reference: string | null
+  project_summary: string | null
+  notes: string | null
+  category_code: string | null
+  customer: { id: string; name: string; address: string | null } | null
+  city?: string | null
+}
+
 interface SchedulerClientProps {
   jobs: SchedulerJob[]
   pms: PmInfo[]
   reminders: SchedulerReminder[]
+  leadAppointments: LeadAppointment[]
   date: string
   todayLA: string
   userId: string
 }
 
-export function SchedulerClient({ jobs, pms, reminders, date, todayLA, userId }: SchedulerClientProps) {
+export function SchedulerClient({ jobs, pms, reminders, leadAppointments, date, todayLA, userId }: SchedulerClientProps) {
   const router = useRouter()
   const isToday = date === todayLA
   const carriedCount = jobs.filter((j) => j.scheduled_date < date).length
@@ -137,6 +154,7 @@ export function SchedulerClient({ jobs, pms, reminders, date, todayLA, userId }:
         jobs={jobs}
         pms={pms}
         reminders={reminders}
+        leadAppointments={leadAppointments}
         viewingDate={date}
         userId={userId}
       />
