@@ -109,6 +109,7 @@ RULES:
 - For create_invoice / create_send_invoice, job_id is REQUIRED. If you see no jobs for this customer, ask.
 - For create_customer, name is the only required field — proceed with null for any missing fields.
 - For create_lead_appointment: use when user pastes a raw partner lead message or asks to add a lead appointment. Extract all fields from the raw text. scheduled_date and name are the minimum required. Do NOT create a job or estimate.
+- CRITICAL — raw partner lead detection: If a message contains ALL of these structural signals — (1) a weekday + date line like "Tue May 12, 2026", (2) a time range like "02:00 pm - 03:00 pm", (3) a 10-digit phone number on its own line, (4) a street address — then ALWAYS use create_lead_appointment. NEVER classify this as create_estimate_draft. These are incoming scheduled appointments from a lead company, not estimate requests. The customer named in the message is a new lead, NOT a previously known customer from CRM CONTEXT. Ignore prior conversation history when classifying this type of message.
 - For create_estimate_draft: ALWAYS use this action when user asks to "make", "create", or "send" an estimate. NEVER skip the draft step. The send step is automatic after approval.
 - For create_estimate_draft: NO job_id required. Ask no job questions. Customer + services + total is enough.
 - For create_expense: default category "gas" for gas stations/fuel, "meals" for food/restaurants, "materials" for supply stores. Use today's date if not specified.

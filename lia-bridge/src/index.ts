@@ -9,7 +9,8 @@ import { parseContractMessage } from "./contract-parser"
 import { formatDailySummary }       from "./format-response"
 import { sendWhatsAppText }         from "./openclaw-client"
 import { sendTelegramMessage, sendTelegramWithButtons, type InlineKeyboardButton } from "./telegram-client"
-import { checkHealth, sendMessage, updateApproval, executeApproval } from "./crm-client"
+import { checkHealth, sendMessage, updateApproval, executeApproval, createApproval } from "./crm-client"
+import { isRawPartnerLead, parseRawPartnerLead, formatLeadApptPreview } from "./partner-lead-detector"
 import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch, ScheduleData, SchedulePreview, ContractData, ContractTemplate, ContractPreview, CrmMessageResponse } from "./types"
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -640,6 +641,62 @@ async function handleLeadEstimate(
   await send(previewText, buttons)
 }
 
+// ─── Raw partner lead handler ─────────────────────────────────────────────────
+// Called BEFORE the AI fallback whenever a message matches the partner lead
+// signature (date + time range + phone + address). Bypasses Claude entirely
+// so prior conversation context cannot corrupt the classification.
+
+async function handleRawPartnerLead(
+  rawText:  string,
+  channel:  string,
+  send:     SendFn,
+): Promise<void> {
+  const parsed = parseRawPartnerLead(rawText)
+
+  if (!parsed.name && !parsed.phone) {
+    // Not enough structured data — let the AI fallback handle it
+    console.log("[lia/partner-lead] too little data, skipping to AI fallback")
+    return
+  }
+
+  const namePart = parsed.name ?? "Lead"
+  const datePart = parsed.scheduled_date ? ` on ${parsed.scheduled_date}` : ""
+  const summary  = `Lead appointment: ${namePart}${datePart}`
+
+  let approvalId: string
+  try {
+    const { id } = await createApproval({
+      channel,
+      action_type:    "create_lead_appointment",
+      action_summary: summary,
+      proposed_payload: {
+        name:              parsed.name,
+        phone:             parsed.phone,
+        address:           parsed.address,
+        scheduled_date:    parsed.scheduled_date,
+        start_time:        parsed.start_time,
+        end_time:          parsed.end_time,
+        partner_reference: parsed.partner_reference,
+        category_code:     parsed.category_code,
+        project_summary:   parsed.project_summary,
+        notes:             parsed.notes,
+        source:            "partner",
+      },
+    })
+    approvalId = id
+  } catch (err) {
+    console.error("[lia/partner-lead] createApproval failed:", err)
+    await send("Failed to create lead approval. Please try again.")
+    return
+  }
+
+  console.log(`[lia/partner-lead] created approval ${approvalId} for ${namePart}`)
+  await send(formatLeadApptPreview(approvalId, parsed), [[
+    { text: "✅ Approve", callback_data: `approve:${approvalId}` },
+    { text: "❌ Reject",  callback_data: `reject:${approvalId}` },
+  ]])
+}
+
 // ─── Claude action formatter for Telegram ────────────────────────────────────
 
 function formatClaudeActionForTelegram(
@@ -854,6 +911,13 @@ app.post("/webhook/message", async (req: Request, res: Response) => {
       } else if (result.action_type === "send_estimate") {
         await sendWhatsAppText(from, `✅ Estimate sent to ${result.sent_to}`)
       }
+      return
+    }
+
+    // Partner lead detection before the fallback reply
+    if (intent.type === "unknown" && isRawPartnerLead(text)) {
+      console.log(`[lia/whatsapp] raw partner lead detected`)
+      await handleRawPartnerLead(text, "whatsapp", sendWA)
       return
     }
 
@@ -1434,6 +1498,16 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       } else {
         await sendTelegramMessage(chatId, "✅ Done.")
       }
+      return
+    }
+
+    // ── Raw partner lead detection (HIGHEST PRIORITY before AI fallback) ────────
+    // Detects structured partner lead messages by pattern and creates
+    // create_lead_appointment approvals directly — bypasses Claude entirely
+    // to prevent prior conversation context from corrupting classification.
+    if (intent.type === "unknown" && isRawPartnerLead(text)) {
+      console.log(`[lia/telegram] raw partner lead detected — bypassing AI fallback`)
+      await handleRawPartnerLead(text, "telegram", sendTG)
       return
     }
 

@@ -87,3 +87,21 @@ export async function executeApproval(id: string): Promise<ExecuteResponse> {
   }
   return res.json() as Promise<ExecuteResponse>
 }
+
+export async function createApproval(body: {
+  channel:          string
+  action_type:      string
+  action_summary:   string
+  proposed_payload: unknown
+}): Promise<{ id: string }> {
+  const res = await crmFetch("/api/assistant/approvals", {
+    method: "POST",
+    body:   JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`CRM createApproval failed (${res.status}): ${text}`)
+  }
+  const data = await res.json() as { approval: { id: string } }
+  return { id: data.approval.id }
+}
