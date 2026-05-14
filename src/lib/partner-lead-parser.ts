@@ -79,6 +79,20 @@ const CATEGORY_LABELS: Record<string, string> = {
   DU: "Dumpster / Debris Removal",
 }
 
+// ─── Detection ────────────────────────────────────────────────────────────────
+// Returns true when ≥3 of 5 structural signals are present.
+// Mirrors the bridge's isRawPartnerLead so both paths use the same threshold.
+
+export function isRawPartnerLead(text: string): boolean {
+  const hasDate      = /\b(?:mon|tue|wed|thu|fri|sat|sun)\w*\s+\w{3,9}\s+\d{1,2},?\s+\d{4}/i.test(text)
+  const hasTimeRange = /\d{1,2}:\d{2}\s*(?:am|pm)\s*[-–—]\s*\d{1,2}:\d{2}\s*(?:am|pm)/i.test(text)
+  const hasPhone     = /(?:^|\n)\s*\d{10}\s*(?:\n|$)/.test(text)
+  const hasAddress   = /\d+\s+\w[^\n]*(?:st|ave|blvd|dr|rd|way|ln|ct|pl|cir|hwy|pkwy|terr?|trail)\b/i.test(text)
+  const hasRef       = /#\d{3,6}/.test(text)
+  const count        = [hasDate, hasTimeRange, hasPhone, hasAddress, hasRef].filter(Boolean).length
+  return count >= 3
+}
+
 // ─── Date parsing ─────────────────────────────────────────────────────────────
 // Parses "Tue May 12, 2026" or "May 12, 2026" → "2026-05-12"
 

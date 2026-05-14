@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { requirePermission } from "@/lib/auth-helpers"
 import { createServiceClient } from "@/lib/supabase/service"
 import { buildCrmContext, callLiaBrain } from "@/lib/lia-brain"
+import { isRawPartnerLead, parsePartnerLead } from "@/lib/partner-lead-parser"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -55,7 +56,39 @@ export async function POST(req: NextRequest, { params }: RouteCtx) {
 
   const today      = new Date().toISOString().split("T")[0]
   const crmContext = buildCrmContext(customers, jobs)
-  const parsed     = await callLiaBrain(history ?? [], crmContext, today)
+
+  // ── Raw partner lead detection (bypasses Claude entirely) ─────────────────
+  // Prevents prior conversation history from causing Claude to misclassify
+  // structured partner lead messages as estimate drafts for previous customers.
+  let parsed: Awaited<ReturnType<typeof callLiaBrain>>
+  if (isRawPartnerLead(userMessage)) {
+    const lead = parsePartnerLead(userMessage)
+    parsed = {
+      message: lead.name
+        ? `Got it — creating a lead appointment for **${lead.name}**${lead.scheduled_date ? ` on ${lead.scheduled_date}` : ""}. Pending your approval.`
+        : "Creating lead appointment — pending your approval.",
+      action: lead.name || lead.phone ? {
+        type:       "create_lead_appointment",
+        summary:    `Lead appointment: ${lead.name ?? "Lead"}${lead.scheduled_date ? ` on ${lead.scheduled_date}` : ""}`,
+        risk_level: "low" as const,
+        payload: {
+          name:              lead.name,
+          phone:             lead.phone,
+          address:           lead.address,
+          scheduled_date:    lead.scheduled_date,
+          start_time:        lead.start_time,
+          end_time:          lead.end_time,
+          partner_reference: lead.partner_reference,
+          category_code:     lead.category_code,
+          project_summary:   lead.project_summary,
+          notes:             lead.notes,
+          source:            "partner",
+        },
+      } : undefined,
+    }
+  } else {
+    parsed = await callLiaBrain(history ?? [], crmContext, today)
+  }
 
   // Create approval record if action proposed
   let approvalId: string | null = null
