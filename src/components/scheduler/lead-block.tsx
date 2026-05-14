@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { SLIM_JOB_HEIGHT, JOB_GAP, ROW_V_PADDING, HOUR_WIDTH, SLOT_WIDTH, GRID_START_HOUR, GRID_END_HOUR } from "./scheduler-grid"
+import { SLIM_JOB_HEIGHT, JOB_GAP, ROW_V_PADDING, HOUR_WIDTH, SLOT_WIDTH, GRID_START_HOUR, GRID_END_HOUR } from "./scheduler-constants"
 
 const TOTAL_GRID_WIDTH = (GRID_END_HOUR - GRID_START_HOUR) * HOUR_WIDTH
 import type { LeadAppointment } from "./scheduler-client"

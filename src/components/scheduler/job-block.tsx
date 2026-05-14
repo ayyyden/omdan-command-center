@@ -3,7 +3,7 @@
 import { useDraggable } from "@dnd-kit/core"
 import Link from "next/link"
 import { GripVertical } from "lucide-react"
-import { SLIM_JOB_HEIGHT, JOB_GAP, ROW_V_PADDING, hexToRgba } from "./scheduler-grid"
+import { SLIM_JOB_HEIGHT, JOB_GAP, ROW_V_PADDING, hexToRgba } from "./scheduler-constants"
 
 function formatTime12(time: string | null): string {
   if (!time) return ""

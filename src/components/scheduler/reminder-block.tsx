@@ -10,7 +10,7 @@ import {
   HOUR_WIDTH,
   SLOT_WIDTH,
   timeToX,
-} from "./scheduler-grid"
+} from "./scheduler-constants"
 import type { SchedulerReminder } from "./scheduler-client"
 
 function formatTime12(time: string | null): string {

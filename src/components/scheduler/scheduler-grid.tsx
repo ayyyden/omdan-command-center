@@ -39,29 +39,21 @@ import { Badge } from "@/components/ui/badge"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 // ─── Grid constants ───────────────────────────────────────────────────────────
-export const PM_LABEL_WIDTH = 180
-export const GRID_START_HOUR = 6
-export const GRID_END_HOUR = 21
-export const HOUR_WIDTH = 120
-export const SLOT_WIDTH = 30        // HOUR_WIDTH / 4 → one 15-min slot = 30px
-export const SLIM_JOB_HEIGHT = 38
-export const REMINDER_HEIGHT = 46
-export const JOB_GAP = 4
-export const ROW_V_PADDING = 8
-export const TIME_HEADER_HEIGHT = 44
-export const DRAG_OVERLAY_WIDTH = 220
+export {
+  PM_LABEL_WIDTH, GRID_START_HOUR, GRID_END_HOUR, HOUR_WIDTH, SLOT_WIDTH,
+  SLIM_JOB_HEIGHT, REMINDER_HEIGHT, JOB_GAP, ROW_V_PADDING, TIME_HEADER_HEIGHT,
+  DRAG_OVERLAY_WIDTH, timeToX, hexToRgba,
+} from "./scheduler-constants"
+import {
+  PM_LABEL_WIDTH, GRID_START_HOUR, GRID_END_HOUR, HOUR_WIDTH, SLOT_WIDTH,
+  SLIM_JOB_HEIGHT, REMINDER_HEIGHT, JOB_GAP, ROW_V_PADDING, TIME_HEADER_HEIGHT,
+  DRAG_OVERLAY_WIDTH, timeToX, hexToRgba,
+} from "./scheduler-constants"
 const TOTAL_HOURS = GRID_END_HOUR - GRID_START_HOUR
 const TOTAL_GRID_WIDTH = TOTAL_HOURS * HOUR_WIDTH
 const PM_COLORS = ["#F97316","#EF4444","#3B82F6","#22C55E","#A855F7","#EC4899","#F59E0B","#06B6D4","#6B7280"]
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-export function timeToX(time: string | null): number {
-  if (!time) return 0
-  const [h, m] = time.split(":").map(Number)
-  const minutesFromStart = h * 60 + m - GRID_START_HOUR * 60
-  return Math.max(0, minutesFromStart * (HOUR_WIDTH / 60))
-}
-
 export function xToTime(x: number): string {
   const clamped = Math.max(0, Math.min(TOTAL_GRID_WIDTH - SLOT_WIDTH, x))
   const slots = Math.round(clamped / SLOT_WIDTH)
@@ -69,13 +61,6 @@ export function xToTime(x: number): string {
   const h = Math.floor(totalMinutes / 60)
   const m = totalMinutes % 60
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
-}
-
-export function hexToRgba(hex: string, alpha: number): string {
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 function calcRowHeight(count: number): number {
