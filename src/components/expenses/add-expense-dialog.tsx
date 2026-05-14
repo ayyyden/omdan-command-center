@@ -57,7 +57,7 @@ export function AddExpenseDialog({ jobId, userId, size = "default" }: AddExpense
     category: "materials",
     description: "",
     amount: 0,
-    date: new Date().toISOString().split("T")[0],
+    date: new Date().toLocaleDateString("en-CA"),
   }
 
   const form = useForm<FormValues>({
