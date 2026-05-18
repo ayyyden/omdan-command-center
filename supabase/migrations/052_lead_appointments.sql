@@ -22,6 +22,7 @@ create table if not exists public.lead_appointments (
   updated_at        timestamptz not null default now()
 );
 
+drop trigger if exists on_lead_appointments_updated on public.lead_appointments;
 create trigger on_lead_appointments_updated
   before update on public.lead_appointments
   for each row execute procedure public.handle_updated_at();

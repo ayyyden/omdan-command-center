@@ -139,6 +139,45 @@ export function LiaChat({ conversationId }: Props) {
     if (data.id) router.push(`/lia?conv=${data.id}`)
   }
 
+  const handleEditSubmit = useCallback(async (correction: string) => {
+    setSending(true)
+    setErrMsg(null)
+    const tempId = `temp-edit-${Date.now()}`
+    const userMsg: Message = {
+      id: tempId, role: "user", content: correction,
+      action_id: null, action: null, created_at: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, userMsg])
+    try {
+      const res  = await fetch(`/api/assistant/conversations/${conversationId}/messages`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ message: correction }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        const assistantMsg: Message = {
+          id:         data.id ?? `a-${Date.now()}`,
+          role:       "assistant",
+          content:    data.content,
+          action_id:  data.action_id,
+          action:     data.action ?? null,
+          created_at: data.created_at,
+          approval:   null,
+        }
+        setMessages((prev) => [...prev, assistantMsg])
+      } else {
+        setErrMsg(data.error ?? "Failed to send correction")
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      }
+    } catch {
+      setErrMsg("Network error — please try again")
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+    } finally {
+      setSending(false)
+    }
+  }, [conversationId])
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -173,7 +212,12 @@ export function LiaChat({ conversationId }: Props) {
         )}
 
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} conversationId={conversationId} />
+          <MessageBubble
+            key={msg.id}
+            msg={msg}
+            conversationId={conversationId}
+            onEditSubmit={handleEditSubmit}
+          />
         ))}
 
         {sending && (
@@ -227,7 +271,15 @@ export function LiaChat({ conversationId }: Props) {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, conversationId }: { msg: Message; conversationId: string }) {
+function MessageBubble({
+  msg,
+  conversationId,
+  onEditSubmit,
+}: {
+  msg:            Message
+  conversationId: string
+  onEditSubmit:   (correction: string) => void
+}) {
   const isUser = msg.role === "user"
 
   return (
@@ -260,6 +312,7 @@ function MessageBubble({ msg, conversationId }: { msg: Message; conversationId: 
             action={msg.action}
             initialStatus={msg.approval?.status ?? "pending"}
             initialResult={msg.approval?.result ?? null}
+            onEditSubmit={onEditSubmit}
           />
         )}
       </div>

@@ -1422,5 +1422,87 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     })
   }
 
+  // ─── create_job ──────────────────────────────────────────────────────────────
+
+  if (approval.action_type === "create_job") {
+    const {
+      customer_id,
+      customer_name,
+      lead_appointment_id,
+      title,
+      description,
+      status: jobStatus,
+      scheduled_date,
+    } = payload as {
+      customer_id:          string
+      customer_name:        string
+      lead_appointment_id:  string | null
+      title:                string
+      description:          string | null
+      status:               string
+      scheduled_date:       string | null
+    }
+
+    if (!customer_id || !title) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "customer_id and title are required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "customer_id and title are required" }, { status: 400 })
+    }
+
+    const { data: job, error: jobErr } = await supabase
+      .from("jobs")
+      .insert({
+        customer_id,
+        user_id:        ownerUserId,
+        title,
+        description:    description ?? null,
+        status:         jobStatus ?? "scheduled",
+        scheduled_date: scheduled_date ?? null,
+      })
+      .select("id")
+      .single()
+
+    if (jobErr || !job) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: jobErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to create job: ${jobErr?.message}` }, { status: 500 })
+    }
+
+    if (lead_appointment_id) {
+      await supabase.from("lead_appointments")
+        .update({ status: "converted", updated_at: now })
+        .eq("id", lead_appointment_id)
+    }
+
+    try {
+      await supabase.from("activity_log").insert({
+        user_id:     ownerUserId,
+        entity_type: "job",
+        entity_id:   job.id,
+        job_id:      job.id,
+        action:      "created",
+        description: `Job created via Lia: ${title}`,
+      })
+    } catch { /* non-critical */ }
+
+    await supabase.from("assistant_approvals")
+      .update({
+        status:      "executed",
+        executed_at: now,
+        result:      { job_id: job.id, customer_id, customer_name, title },
+        updated_at:  now,
+      })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:   "create_job",
+      success:       true,
+      job_id:        job.id,
+      customer_name,
+      title,
+      job_url:       `${appUrl}/jobs/${job.id}`,
+    })
+  }
+
   return NextResponse.json({ error: `Unknown action_type: ${approval.action_type}` }, { status: 400 })
 }

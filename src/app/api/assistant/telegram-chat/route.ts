@@ -105,7 +105,8 @@ export async function POST(req: Request) {
     .limit(20)
 
   // ── Fetch CRM context ───────────────────────────────────────────────────────
-  const [{ data: customers }, { data: jobs }] = await Promise.all([
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+  const [{ data: customers }, { data: jobs }, { data: appointments }] = await Promise.all([
     service
       .from("customers")
       .select("id, name, phone, email, status")
@@ -117,10 +118,16 @@ export async function POST(req: Request) {
       .not("status", "eq", "archived")
       .order("created_at", { ascending: false })
       .limit(20),
+    service
+      .from("lead_appointments")
+      .select("id, customer_id, scheduled_date, project_summary, status, source")
+      .gte("scheduled_date", thirtyDaysAgo)
+      .order("scheduled_date", { ascending: true })
+      .limit(15),
   ])
 
   const today      = new Date().toISOString().split("T")[0]
-  const crmContext = buildCrmContext(customers, jobs)
+  const crmContext = buildCrmContext(customers, jobs, appointments)
   const parsed     = await callLiaBrain(history ?? [], crmContext, today)
 
   // ── Create approval if action proposed ─────────────────────────────────────

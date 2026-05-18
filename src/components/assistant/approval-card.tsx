@@ -3,9 +3,11 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Textarea } from "@/components/ui/textarea"
 import {
   CheckCircle, XCircle, AlertCircle, Loader2,
   FileText, Calendar, StickyNote, Receipt, Send, UserPlus, Wallet, MapPin,
+  Briefcase, Pencil,
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -23,6 +25,7 @@ interface ApprovalCardProps {
   action:         ActionDraft
   initialStatus?: string
   initialResult?: Record<string, unknown> | null
+  onEditSubmit?:  (correction: string) => void
 }
 
 // ─── Action config ────────────────────────────────────────────────────────────
@@ -38,6 +41,7 @@ const ACTION_META: Record<string, { label: string; icon: React.ElementType; colo
   schedule_job:           { label: "Schedule Job",          icon: Calendar,   color: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300" },
   update_note:            { label: "Update Note",           icon: StickyNote, color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300" },
   send_contracts:         { label: "Send Contracts",        icon: Send,       color: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300" },
+  create_job:             { label: "Create Job",            icon: Briefcase,  color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300" },
 }
 
 const RISK_COLOR: Record<string, string> = {
@@ -173,6 +177,23 @@ function renderPayload(type: string, payload: Record<string, unknown>) {
     )
   }
 
+  if (type === "create_job") {
+    return (
+      <>
+        <PayloadRow label="Customer"   value={payload.customer_name as string} />
+        <PayloadRow label="Job Title"  value={payload.title as string} />
+        <PayloadRow label="Status"     value={payload.status as string | null} />
+        <PayloadRow label="Start Date" value={payload.scheduled_date as string | null} />
+        {payload.description ? (
+          <div className="flex gap-2 text-xs">
+            <span className="text-muted-foreground w-28 shrink-0">Description</span>
+            <span className="font-medium text-foreground line-clamp-3 whitespace-pre-wrap">{payload.description as string}</span>
+          </div>
+        ) : null}
+      </>
+    )
+  }
+
   return null
 }
 
@@ -184,11 +205,15 @@ export function ApprovalCard({
   action,
   initialStatus = "pending",
   initialResult = null,
+  onEditSubmit,
 }: ApprovalCardProps) {
-  const [status, setStatus]     = useState(initialStatus)
-  const [result, setResult]     = useState<Record<string, unknown> | null>(initialResult)
-  const [loading, setLoading]   = useState(false)
-  const [errMsg,  setErrMsg]    = useState<string | null>(null)
+  const [status,      setStatus]      = useState(initialStatus)
+  const [result,      setResult]      = useState<Record<string, unknown> | null>(initialResult)
+  const [loading,     setLoading]     = useState(false)
+  const [errMsg,      setErrMsg]      = useState<string | null>(null)
+  const [editMode,    setEditMode]    = useState(false)
+  const [editText,    setEditText]    = useState("")
+  const [editSending, setEditSending] = useState(false)
 
   const meta = ACTION_META[action.type] ?? { label: action.type, icon: AlertCircle, color: "bg-gray-100 text-gray-700" }
   const Icon = meta.icon
@@ -216,6 +241,24 @@ export function ApprovalCard({
       setErrMsg("Network error — please try again")
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleEdit() {
+    const correction = editText.trim()
+    if (!correction || editSending) return
+    setEditSending(true)
+    setErrMsg(null)
+    try {
+      await fetch(`/api/assistant/conversations/${conversationId}/actions/${actionId}`, {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ action: "reject" }),
+      })
+      onEditSubmit?.(correction)
+    } catch {
+      setErrMsg("Edit failed — please try again")
+      setEditSending(false)
     }
   }
 
@@ -252,26 +295,71 @@ export function ApprovalCard({
 
       {/* Buttons */}
       {!isDone && (
-        <div className="flex gap-2 pt-1">
-          <Button
-            size="sm"
-            className="h-7 px-3 text-xs"
-            disabled={loading}
-            onClick={() => handleAction("approve")}
-          >
-            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5 mr-1" />}
-            Approve
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 px-3 text-xs"
-            disabled={loading}
-            onClick={() => handleAction("reject")}
-          >
-            <XCircle className="w-3.5 h-3.5 mr-1" />
-            Reject
-          </Button>
+        <div className="flex flex-col gap-2 pt-1">
+          {!editMode ? (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="h-7 px-3 text-xs"
+                disabled={loading}
+                onClick={() => handleAction("approve")}
+              >
+                {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5 mr-1" />}
+                Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-3 text-xs"
+                disabled={loading}
+                onClick={() => handleAction("reject")}
+              >
+                <XCircle className="w-3.5 h-3.5 mr-1" />
+                Reject
+              </Button>
+              {onEditSubmit && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-3 text-xs"
+                  disabled={loading}
+                  onClick={() => setEditMode(true)}
+                >
+                  <Pencil className="w-3.5 h-3.5 mr-1" />
+                  Edit
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <Textarea
+                rows={2}
+                className="text-xs resize-none"
+                placeholder="Describe the correction — Lia will re-propose with your changes…"
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="h-7 px-3 text-xs"
+                  disabled={editSending || !editText.trim()}
+                  onClick={handleEdit}
+                >
+                  {editSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Send Correction"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-3 text-xs"
+                  onClick={() => { setEditMode(false); setEditText("") }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -307,7 +395,7 @@ function ExecutedResult({ type, result }: { type: string; result: Record<string,
   if (type === "create_estimate_draft" || type === "create_estimate") {
     if (result.estimate_id) links.push({ label: "View Estimate", href: `${appUrl}/estimates/${result.estimate_id}` })
   }
-  if (type === "schedule_job") {
+  if (type === "schedule_job" || type === "create_job") {
     if (result.job_id) links.push({ label: "View Job", href: `${appUrl}/jobs/${result.job_id}` })
   }
 

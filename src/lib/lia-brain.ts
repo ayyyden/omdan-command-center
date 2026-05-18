@@ -18,8 +18,9 @@ export interface BrainResponse {
 // ─── CRM context builder ──────────────────────────────────────────────────────
 
 export function buildCrmContext(
-  customers: Array<{ id: string; name: string; phone: string | null; email: string | null; status: string | null }> | null,
-  jobs: Array<{ id: string; title: string; status: string; scheduled_date: string | null; customer_id: string }> | null,
+  customers:    Array<{ id: string; name: string; phone: string | null; email: string | null; status: string | null }> | null,
+  jobs:         Array<{ id: string; title: string; status: string; scheduled_date: string | null; customer_id: string }> | null,
+  appointments: Array<{ id: string; customer_id: string | null; scheduled_date: string; project_summary: string | null; status: string; source: string | null }> | null = null,
 ): string {
   const lines: string[] = []
 
@@ -50,6 +51,21 @@ export function buildCrmContext(
   } else {
     lines.push("")
     lines.push("ACTIVE JOBS: (none yet)")
+  }
+
+  if (appointments?.length) {
+    lines.push("")
+    lines.push("LEAD APPOINTMENTS (upcoming/recent):")
+    const custMap2 = Object.fromEntries((customers ?? []).map((c) => [c.id, c.name]))
+    for (const a of appointments) {
+      const custName = a.customer_id ? (custMap2[a.customer_id] ?? "?") : "?"
+      lines.push(
+        `  id=${a.id} | customer="${custName}" | customer_id=${a.customer_id ?? "none"} | date=${a.scheduled_date} | project=${a.project_summary ?? "?"} | status=${a.status}`,
+      )
+    }
+  } else {
+    lines.push("")
+    lines.push("LEAD APPOINTMENTS: (none)")
   }
 
   return lines.join("\n")
@@ -104,12 +120,39 @@ update_note — Replaces the internal notes on a customer or job. risk: low
 create_lead_appointment — Records a partner/company lead appointment (no job required). risk: low
   payload: { name (required), phone (null if not given), address (null if not given), scheduled_date (YYYY-MM-DD|null), start_time ("HH:MM"|null), end_time ("HH:MM"|null), partner_reference (numeric ref string|null), category_code (short code like "Rm"|null), project_summary (readable description|null), notes (null if not given), source ("partner") }
 
+create_job — Creates a new job for an existing customer. Use when user wants to formally start a job, convert a lead visit to a job, or the customer has confirmed they want to proceed. risk: low
+  payload: { customer_id (required — must be from CRM CONTEXT, never invented), customer_name, lead_appointment_id (null unless user says "convert this appointment"), title (required — derive from service type if not explicitly given), description (null if not given), status ("scheduled"|"in_progress"), scheduled_date (YYYY-MM-DD|null) }
+
+INTENT CLASSIFICATION GUIDE:
+Read every message and ask: what is the user trying to accomplish?
+
+NEW LEAD / APPOINTMENT — Someone is telling you about a new potential client, a scheduled site visit, or a booked appointment. Signals (none required individually — read the overall meaning): a person's name not in CRM CONTEXT, contact info (phone or email), a specific date and/or time, a location or address, notes about what the project involves. If a message includes these signals in any format — formal, emoji-heavy, forwarded from a marketing agency, copy-pasted from a text thread, with or without field labels — classify as create_lead_appointment. The person named is a NEW lead, not an existing CRM customer. Extract all fields you can find from the raw text.
+
+ESTIMATE REQUEST — User wants a price quote for work. Signals: "estimate", "quote", "price this", "what would X cost", "how much for". Classify as create_estimate_draft.
+
+INVOICE REQUEST — User wants to bill a customer. Signals: "invoice", "bill them", "charge". Classify as create_invoice or create_send_invoice (if email is given). Requires a job — if no job is mentioned, ask.
+
+JOB CREATION — User wants to formally create a job for a customer, often after a lead visit. Signals: "create a job", "add a job", "convert this lead to a job", "we're doing the work", "they confirmed". Classify as create_job.
+
+JOB SCHEDULING — Set or change a date for an existing job. Signals: "schedule", "when are we going", "move job to". Classify as schedule_job.
+
+EXPENSE — Recording a cost the business paid. Signals: "I spent", "bought", "paid for". Classify as create_expense.
+
+NOTE — Updating internal notes. Classify as update_note.
+
+CLASSIFICATION PRINCIPLES:
+- Read meaning, not format. A message that introduces a new person with contact info, a date, and a location is a lead appointment even if it has emojis, is forwarded from a WhatsApp thread, uses informal language, or comes from a marketing agency.
+- If a message has BOTH a new lead and a service description, classify by primary intent. A scheduled appointment with a new person = create_lead_appointment, not create_estimate_draft — even if the service type is mentioned. The estimate comes later after they meet the client.
+- If critical info is missing, ask ONE focused question. Do not propose an action with required fields blank. "scheduled_date" is required for create_lead_appointment — if not present in the message, ask for it before proposing.
+- NEVER invent IDs, phone numbers, dates, or addresses. Extract only what is written in the message.
+- Before proposing create_lead_appointment, check LEAD APPOINTMENTS in the CRM CONTEXT. If the same customer already has an appointment within 7 days of the requested date, mention it in your message field (e.g., "Note: you already have an appointment with this customer on [date]") — but still propose the create_lead_appointment action so the user can decide.
+
 RULES:
 - Always use UUIDs from the CRM CONTEXT section — NEVER invent IDs.
 - For create_invoice / create_send_invoice, job_id is REQUIRED. If you see no jobs for this customer, ask.
 - For create_customer, name is the only required field — proceed with null for any missing fields.
-- For create_lead_appointment: use when user pastes a raw partner lead message or asks to add a lead appointment. Extract all fields from the raw text. scheduled_date and name are the minimum required. Do NOT create a job or estimate.
-- CRITICAL — raw partner lead detection: If a message contains ALL of these structural signals — (1) a weekday + date line like "Tue May 12, 2026", (2) a time range like "02:00 pm - 03:00 pm", (3) a 10-digit phone number on its own line, (4) a street address — then ALWAYS use create_lead_appointment. NEVER classify this as create_estimate_draft. These are incoming scheduled appointments from a lead company, not estimate requests. The customer named in the message is a new lead, NOT a previously known customer from CRM CONTEXT. Ignore prior conversation history when classifying this type of message.
+- For create_lead_appointment: extract all fields from the raw text. scheduled_date and name are the minimum required. Do NOT create a job or estimate at the same time.
+- For create_job: customer_id is REQUIRED and must come from CRM CONTEXT. If the customer is not in CRM CONTEXT, ask the user to create the customer first. Derive a professional job title from the service type if the user didn't provide one explicitly. If user says "create job AND estimate", do create_job first and tell the user to ask for the estimate after.
 - For create_estimate_draft: ALWAYS use this action when user asks to "make", "create", or "send" an estimate. NEVER skip the draft step. The send step is automatic after approval.
 - For create_estimate_draft: NO job_id required. Ask no job questions. Customer + services + total is enough.
 - For create_expense: default category "gas" for gas stations/fuel, "meals" for food/restaurants, "materials" for supply stores. Use today's date if not specified.
@@ -145,8 +188,8 @@ export async function callLiaBrain(
     // Prefill the assistant turn with "{" to force Claude to output valid JSON.
     // The SDK returns only the continuation; we prepend "{" to reconstruct the full object.
     const result = await anthropic.messages.create({
-      model:      "claude-haiku-4-5-20251001",
-      max_tokens: 2000,
+      model:      "claude-sonnet-4-6",
+      max_tokens: 3000,
       system:     buildSystemPrompt(crmContext, today),
       messages:   [
         ...conversationMessages,
