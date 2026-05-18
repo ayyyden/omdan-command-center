@@ -214,8 +214,9 @@ export async function callLiaBrain(
     console.warn("[lia-brain] no JSON found in response:", rawText.slice(0, 200))
     return { message: rawText.replace(/^\{/, "").trim() || "I didn't quite catch that. Could you rephrase?" }
   } catch (err) {
-    console.error("[lia-brain] error:", err)
-    return { message: "I hit an error. Please try again." }
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error("[lia-brain] error:", msg)
+    return { message: `Error: ${msg}` }
   }
 }
 
