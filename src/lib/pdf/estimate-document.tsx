@@ -6,14 +6,13 @@ import type { EstimateLineItem } from "@/types"
 
 // ── Design tokens ────────────────────────────────────────────────────────────
 const C = {
-  dark:       "#1f5b48",
-  accent:     "#be9d4b",
-  accentDark: "#9e7d35",
-  muted:      "#64748b",
-  light:      "#f7f7f4",
-  border:     "#e2e8f0",
-  white:      "#ffffff",
-  text:       "#1a1a1a",
+  dark:   "#1f5b48",
+  accent: "#be9d4b",
+  muted:  "#8898aa",
+  light:  "#f7f7f4",
+  border: "#e2e8f0",
+  white:  "#ffffff",
+  text:   "#111111",
 }
 
 const styles = StyleSheet.create({
@@ -21,9 +20,9 @@ const styles = StyleSheet.create({
     fontFamily:        "Helvetica",
     fontSize:          9,
     color:             C.text,
-    paddingTop:        44,
-    paddingBottom:     68,
-    paddingHorizontal: 44,
+    paddingTop:        36,
+    paddingBottom:     56,
+    paddingHorizontal: 40,
     lineHeight:        1.4,
     backgroundColor:   C.white,
   },
@@ -33,53 +32,48 @@ const styles = StyleSheet.create({
     flexDirection:  "row",
     justifyContent: "space-between",
     alignItems:     "flex-start",
-    marginBottom:   20,
-  },
-  headerLeft: {
-    flexDirection: "column",
-    justifyContent: "flex-start",
+    marginBottom:   14,
   },
   estimateTitle: {
-    fontSize:    26,
-    fontFamily:  "Helvetica-Bold",
-    color:       C.dark,
+    fontSize:      28,
+    fontFamily:    "Helvetica-Bold",
+    color:         C.dark,
     letterSpacing: 2,
-    marginBottom: 0,
   },
   headerRight: {
     alignItems: "flex-end",
   },
   logo: {
-    width:     72,
-    height:    72,
-    objectFit: "contain",
-    marginBottom: 6,
+    width:        60,
+    height:       60,
+    objectFit:    "contain",
+    marginBottom: 5,
   },
   logoPlaceholder: {
-    width:           72,
-    height:          72,
+    width:           60,
+    height:          60,
     backgroundColor: C.dark,
     borderRadius:    4,
     alignItems:      "center",
     justifyContent:  "center",
-    marginBottom:    6,
+    marginBottom:    5,
   },
   logoPlaceholderText: {
     color:      C.white,
-    fontSize:   20,
+    fontSize:   18,
     fontFamily: "Helvetica-Bold",
   },
   companyName: {
-    fontSize:    11,
-    fontFamily:  "Helvetica-Bold",
-    color:       C.dark,
-    textAlign:   "right",
+    fontSize:     10,
+    fontFamily:   "Helvetica-Bold",
+    color:        C.dark,
+    textAlign:    "right",
     marginBottom: 2,
   },
   companyDetail: {
-    fontSize:  7.5,
-    color:     C.muted,
-    textAlign: "right",
+    fontSize:     7,
+    color:        C.muted,
+    textAlign:    "right",
     marginBottom: 1.5,
   },
 
@@ -87,15 +81,15 @@ const styles = StyleSheet.create({
   infoGrid: {
     borderWidth:  1,
     borderColor:  C.border,
-    marginBottom: 22,
+    marginBottom: 16,
   },
   infoGridRow: {
     flexDirection: "row",
   },
   infoGridCell: {
     flex:              1,
-    paddingVertical:   9,
-    paddingHorizontal: 12,
+    paddingVertical:   7,
+    paddingHorizontal: 11,
     borderRightWidth:  1,
     borderRightColor:  C.border,
     backgroundColor:   C.light,
@@ -108,62 +102,61 @@ const styles = StyleSheet.create({
     borderTopColor: C.border,
   },
   infoGridLabel: {
-    fontSize:      6.5,
+    fontSize:      6,
     fontFamily:    "Helvetica-Bold",
     color:         C.muted,
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    marginBottom:  4,
+    marginBottom:  3,
   },
   infoGridValue: {
-    fontSize:    9,
-    fontFamily:  "Helvetica-Bold",
-    color:       C.dark,
-    lineHeight:  1.4,
+    fontSize:   9,
+    fontFamily: "Helvetica-Bold",
+    color:      C.text,
+    lineHeight: 1.4,
   },
   infoGridSubValue: {
-    fontSize:  8,
-    color:     C.muted,
-    marginTop: 1.5,
+    fontSize:   7.5,
+    color:      C.muted,
+    marginTop:  1.5,
     lineHeight: 1.35,
   },
   totalPriceValue: {
-    fontSize:    12,
-    fontFamily:  "Helvetica-Bold",
-    color:       C.accent,
+    fontSize:   12,
+    fontFamily: "Helvetica-Bold",
+    color:      C.accent,
   },
 
   // ── Section heading ───────────────────────────────────────────────────────────
   sectionHeading: {
-    fontSize:      9,
+    fontSize:      8,
     fontFamily:    "Helvetica-Bold",
     color:         C.accent,
     textTransform: "uppercase",
     letterSpacing: 1,
-    marginBottom:  7,
-    marginTop:     2,
+    marginBottom:  5,
   },
   scopeText: {
-    fontSize:    8.5,
-    color:       C.text,
-    lineHeight:  1.65,
-    marginBottom: 22,
+    fontSize:     7.5,
+    color:        C.text,
+    lineHeight:   1.5,
+    marginBottom: 14,
   },
 
-  // ── Work items table ──────────────────────────────────────────────────────────
+  // ── Line items table ──────────────────────────────────────────────────────────
   tableContainer: {
-    marginBottom: 22,
+    marginBottom: 14,
   },
   tableHead: {
     flexDirection:     "row",
     backgroundColor:   C.accent,
-    paddingVertical:   7,
-    paddingHorizontal: 10,
+    paddingVertical:   6,
+    paddingHorizontal: 9,
   },
   tableRow: {
     flexDirection:     "row",
-    paddingVertical:   7,
-    paddingHorizontal: 10,
+    paddingVertical:   6,
+    paddingHorizontal: 9,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
   },
@@ -172,18 +165,18 @@ const styles = StyleSheet.create({
   },
   thText: {
     color:         C.white,
-    fontSize:      7.5,
+    fontSize:      7,
     fontFamily:    "Helvetica-Bold",
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   tdBold: {
-    fontSize:   8.5,
+    fontSize:   8,
     fontFamily: "Helvetica-Bold",
     color:      C.dark,
   },
   tdText: {
-    fontSize: 8.5,
+    fontSize: 8,
     color:    C.text,
   },
   tdMuted: {
@@ -200,68 +193,68 @@ const styles = StyleSheet.create({
   // ── Totals ───────────────────────────────────────────────────────────────────
   totalsSection: {
     alignItems:   "flex-end",
-    marginBottom: 22,
+    marginBottom: 14,
   },
   totalRow: {
     flexDirection:  "row",
     justifyContent: "flex-end",
-    marginBottom:   4,
-    minWidth:       220,
+    marginBottom:   3,
+    minWidth:       210,
   },
   totalLabel: {
-    fontSize:     8.5,
+    fontSize:     8,
     color:        C.muted,
-    width:        100,
+    width:        95,
     textAlign:    "right",
-    paddingRight: 16,
+    paddingRight: 14,
   },
   totalValue: {
-    fontSize:  8.5,
-    width:     90,
+    fontSize:  8,
+    width:     85,
     textAlign: "right",
   },
   grandTotalBand: {
     flexDirection:     "row",
     backgroundColor:   C.accent,
-    paddingVertical:   10,
-    paddingHorizontal: 16,
-    minWidth:          220,
-    marginTop:         6,
+    paddingVertical:   9,
+    paddingHorizontal: 14,
+    minWidth:          210,
+    marginTop:         5,
   },
   grandTotalLabel: {
     color:        C.white,
-    fontSize:     10,
+    fontSize:     9,
     fontFamily:   "Helvetica-Bold",
     flex:         1,
     textAlign:    "right",
-    paddingRight: 16,
+    paddingRight: 14,
   },
   grandTotalValue: {
     color:      C.white,
-    fontSize:   12,
+    fontSize:   11,
     fontFamily: "Helvetica-Bold",
-    width:      90,
+    width:      85,
     textAlign:  "right",
   },
 
   // ── Payment schedule ─────────────────────────────────────────────────────────
   paymentRow: {
-    flexDirection:   "row",
-    justifyContent:  "space-between",
-    paddingVertical: 5,
+    flexDirection:     "row",
+    justifyContent:    "space-between",
+    paddingVertical:   4,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
   },
   paymentLabel: {
-    fontSize:  8.5,
-    color:     C.text,
-    flex:      1,
+    fontSize: 8,
+    color:    C.text,
+    flex:     1,
   },
   paymentAmount: {
-    fontSize:   8.5,
+    fontSize:   8,
     fontFamily: "Helvetica-Bold",
     color:      C.dark,
-    width:      80,
+    width:      75,
     textAlign:  "right",
   },
 
@@ -270,9 +263,9 @@ const styles = StyleSheet.create({
     backgroundColor:   C.light,
     borderLeftWidth:   3,
     borderLeftColor:   C.accent,
-    paddingVertical:   10,
-    paddingHorizontal: 12,
-    marginBottom:      20,
+    paddingVertical:   8,
+    paddingHorizontal: 11,
+    marginBottom:      14,
   },
   notesLabel: {
     fontSize:      7,
@@ -280,48 +273,47 @@ const styles = StyleSheet.create({
     color:         C.accent,
     textTransform: "uppercase",
     letterSpacing: 1,
-    marginBottom:  5,
+    marginBottom:  4,
   },
   notesText: {
-    fontSize:   8.5,
+    fontSize:   7.5,
     color:      C.dark,
-    lineHeight: 1.6,
+    lineHeight: 1.5,
   },
 
   // ── Signature ────────────────────────────────────────────────────────────────
   signatureSection: {
-    marginTop:     10,
-    marginBottom:  24,
+    marginTop: 10,
   },
   signatureRow: {
     flexDirection: "row",
-    gap:           40,
+    gap:           32,
   },
   signatureField: {
-    flex:          1,
+    flex: 1,
   },
   signatureLine: {
     borderBottomWidth: 1,
     borderBottomColor: C.muted,
     marginBottom:      4,
-    height:            22,
+    height:            20,
   },
   signatureLabel: {
-    fontSize: 7.5,
+    fontSize: 7,
     color:    C.muted,
   },
 
   // ── Footer ───────────────────────────────────────────────────────────────────
   footer: {
     position:       "absolute",
-    bottom:         28,
-    left:           44,
-    right:          44,
+    bottom:         24,
+    left:           40,
+    right:          40,
     flexDirection:  "row",
     justifyContent: "space-between",
     borderTopWidth: 1,
     borderTopColor: C.border,
-    paddingTop:     7,
+    paddingTop:     6,
   },
   footerText: {
     fontSize: 7,
@@ -404,9 +396,7 @@ export function EstimatePDFDocument({ estimate, customer, company }: EstimatePDF
 
         {/* ── Header ─────────────────────────────────────────────────── */}
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.estimateTitle}>ESTIMATE</Text>
-          </View>
+          <Text style={styles.estimateTitle}>ESTIMATE</Text>
           <View style={styles.headerRight}>
             {company.logo_url ? (
               <Image src={company.logo_url} style={styles.logo} />
@@ -418,8 +408,8 @@ export function EstimatePDFDocument({ estimate, customer, company }: EstimatePDF
             {company.company_name && (
               <Text style={styles.companyName}>{company.company_name}</Text>
             )}
-            {company.phone && <Text style={styles.companyDetail}>{company.phone}</Text>}
-            {company.email && <Text style={styles.companyDetail}>{company.email}</Text>}
+            {company.phone    && <Text style={styles.companyDetail}>{company.phone}</Text>}
+            {company.email    && <Text style={styles.companyDetail}>{company.email}</Text>}
             {company.license_number && (
               <Text style={styles.companyDetail}>Lic# {company.license_number}</Text>
             )}
@@ -428,7 +418,6 @@ export function EstimatePDFDocument({ estimate, customer, company }: EstimatePDF
 
         {/* ── Info grid ──────────────────────────────────────────────── */}
         <View style={styles.infoGrid}>
-          {/* Row 1: Prepared For | Project Address | Phone / Email */}
           <View style={styles.infoGridRow}>
             <View style={styles.infoGridCell}>
               <Text style={styles.infoGridLabel}>Prepared For</Text>
@@ -436,25 +425,15 @@ export function EstimatePDFDocument({ estimate, customer, company }: EstimatePDF
             </View>
             <View style={styles.infoGridCell}>
               <Text style={styles.infoGridLabel}>Project Address</Text>
-              <Text style={styles.infoGridValue}>
-                {customer.address ?? "—"}
-              </Text>
+              <Text style={styles.infoGridValue}>{customer.address ?? "—"}</Text>
             </View>
             <View style={[styles.infoGridCell, styles.infoGridCellLast]}>
               <Text style={styles.infoGridLabel}>Phone / Email</Text>
-              {customer.phone && (
-                <Text style={styles.infoGridValue}>{customer.phone}</Text>
-              )}
-              {customer.email && (
-                <Text style={styles.infoGridSubValue}>{customer.email}</Text>
-              )}
-              {!customer.phone && !customer.email && (
-                <Text style={styles.infoGridValue}>—</Text>
-              )}
+              {customer.phone && <Text style={styles.infoGridValue}>{customer.phone}</Text>}
+              {customer.email && <Text style={styles.infoGridSubValue}>{customer.email}</Text>}
+              {!customer.phone && !customer.email && <Text style={styles.infoGridValue}>—</Text>}
             </View>
           </View>
-
-          {/* Row 2: Project | Estimate Date | Total Price */}
           <View style={styles.infoGridRow}>
             <View style={[styles.infoGridCell, styles.infoGridCellBottom]}>
               <Text style={styles.infoGridLabel}>Project</Text>
@@ -485,7 +464,7 @@ export function EstimatePDFDocument({ estimate, customer, company }: EstimatePDF
             <View style={styles.tableHead}>
               <Text style={[styles.thText, styles.colItem]}>Work Item</Text>
               <Text style={[styles.thText, { flex: 4 }]}>Description</Text>
-              <Text style={[styles.thText, styles.colQty, { textAlign: "right" }]}>Qty</Text>
+              <Text style={[styles.thText, styles.colQty,   { textAlign: "right" }]}>Qty</Text>
               <Text style={[styles.thText, styles.colPrice, { textAlign: "right" }]}>Unit Price</Text>
               <Text style={[styles.thText, styles.colTotal, { textAlign: "right" }]}>Amount</Text>
             </View>
@@ -500,7 +479,7 @@ export function EstimatePDFDocument({ estimate, customer, company }: EstimatePDF
                       <Text style={styles.tdMuted}>(NT)</Text>
                     )}
                   </View>
-                  <Text style={[styles.tdText, styles.colQty, { textAlign: "right" }]}>{item.quantity}</Text>
+                  <Text style={[styles.tdText, styles.colQty,   { textAlign: "right" }]}>{item.quantity}</Text>
                   <Text style={[styles.tdText, styles.colPrice, { textAlign: "right" }]}>{fmt(item.unit_price)}</Text>
                   <Text style={[styles.tdText, styles.colTotal, { textAlign: "right" }]}>{fmt(item.quantity * item.unit_price)}</Text>
                 </View>
@@ -509,96 +488,100 @@ export function EstimatePDFDocument({ estimate, customer, company }: EstimatePDF
           </View>
         )}
 
-        {/* ── Totals ─────────────────────────────────────────────────── */}
-        <View style={styles.totalsSection}>
-          {lineItems.length > 0 && (
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Subtotal</Text>
-              <Text style={styles.totalValue}>{fmt(Number(estimate.subtotal))}</Text>
-            </View>
-          )}
+        {/* ── Bottom block: totals + payment schedule + signatures ─────────
+             wrap={false} keeps these together — if they don't fit on the
+             current page they move as a unit to the next page.            */}
+        <View wrap={false}>
 
-          {Number(estimate.markup_percent) > 0 && (
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Markup ({estimate.markup_percent}%)</Text>
-              <Text style={styles.totalValue}>{fmt(Number(estimate.markup_amount))}</Text>
-            </View>
-          )}
-
-          {Number(estimate.tax_percent) > 0 && (
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>
-                Tax ({estimate.tax_percent}%){hasMixedTaxability ? " *" : ""}
-              </Text>
-              <Text style={styles.totalValue}>{fmt(Number(estimate.tax_amount))}</Text>
-            </View>
-          )}
-
-          {hasMixedTaxability && (
-            <View style={[styles.totalRow, { marginTop: 2 }]}>
-              <Text style={[styles.totalLabel, { fontSize: 7, color: C.muted, width: 200 }]}>
-                * Tax applies to taxable items only. NT = non-taxable.
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.grandTotalBand}>
-            <Text style={styles.grandTotalLabel}>TOTAL</Text>
-            <Text style={styles.grandTotalValue}>{fmt(Number(estimate.total))}</Text>
-          </View>
-        </View>
-
-        {/* ── Payment Schedule ─────────────────────────────────────────── */}
-        {sortedPaymentSteps.length > 0 && (
-          <View style={{ marginBottom: 24 }}>
-            <Text style={styles.sectionHeading}>Payment Schedule</Text>
-            {sortedPaymentSteps.map((step, i) => (
-              <View key={i} style={styles.paymentRow}>
-                <Text style={styles.paymentLabel}>{step.name}</Text>
-                <Text style={styles.paymentAmount}>{fmt(step.amount)}</Text>
+          {/* Totals */}
+          <View style={styles.totalsSection}>
+            {lineItems.length > 0 && (
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Subtotal</Text>
+                <Text style={styles.totalValue}>{fmt(Number(estimate.subtotal))}</Text>
               </View>
-            ))}
-          </View>
-        )}
-
-        {/* ── Notes ──────────────────────────────────────────────────── */}
-        {estimate.notes && (
-          <View style={styles.notesBox}>
-            <Text style={styles.notesLabel}>Notes</Text>
-            <Text style={styles.notesText}>{estimate.notes}</Text>
-          </View>
-        )}
-
-        {/* ── Approval link ───────────────────────────────────────────── */}
-        {estimate.approval_link && (
-          <View style={[styles.notesBox, { borderLeftColor: C.dark, marginBottom: 20 }]}>
-            <Text style={[styles.notesLabel, { color: C.dark }]}>Approve This Estimate</Text>
-            <Text style={[styles.notesText, { marginBottom: 4 }]}>
-              Review and approve your estimate online:
-            </Text>
-            <Link src={estimate.approval_link} style={{ fontSize: 8, color: C.dark }}>
-              {estimate.approval_link}
-            </Link>
-          </View>
-        )}
-
-        {/* ── Signature lines ─────────────────────────────────────────── */}
-        <View style={styles.signatureSection}>
-          <View style={styles.signatureRow}>
-            <View style={styles.signatureField}>
-              <View style={styles.signatureLine} />
-              <Text style={styles.signatureLabel}>Accepted By</Text>
-            </View>
-            <View style={styles.signatureField}>
-              <View style={styles.signatureLine} />
-              <Text style={styles.signatureLabel}>Date</Text>
-            </View>
-            <View style={styles.signatureField}>
-              <View style={styles.signatureLine} />
-              <Text style={styles.signatureLabel}>Authorized Signature</Text>
+            )}
+            {Number(estimate.markup_percent) > 0 && (
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Markup ({estimate.markup_percent}%)</Text>
+                <Text style={styles.totalValue}>{fmt(Number(estimate.markup_amount))}</Text>
+              </View>
+            )}
+            {Number(estimate.tax_percent) > 0 && (
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>
+                  Tax ({estimate.tax_percent}%){hasMixedTaxability ? " *" : ""}
+                </Text>
+                <Text style={styles.totalValue}>{fmt(Number(estimate.tax_amount))}</Text>
+              </View>
+            )}
+            {hasMixedTaxability && (
+              <View style={[styles.totalRow, { marginTop: 2 }]}>
+                <Text style={[styles.totalLabel, { fontSize: 6.5, color: C.muted, width: 200 }]}>
+                  * Tax applies to taxable items only. NT = non-taxable.
+                </Text>
+              </View>
+            )}
+            <View style={styles.grandTotalBand}>
+              <Text style={styles.grandTotalLabel}>TOTAL</Text>
+              <Text style={styles.grandTotalValue}>{fmt(Number(estimate.total))}</Text>
             </View>
           </View>
+
+          {/* Payment schedule */}
+          {sortedPaymentSteps.length > 0 && (
+            <View style={{ marginBottom: 14 }}>
+              <Text style={styles.sectionHeading}>Payment Schedule</Text>
+              {sortedPaymentSteps.map((step, i) => (
+                <View key={i} style={styles.paymentRow}>
+                  <Text style={styles.paymentLabel}>{step.name}</Text>
+                  <Text style={styles.paymentAmount}>{fmt(step.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Notes */}
+          {estimate.notes && (
+            <View style={styles.notesBox}>
+              <Text style={styles.notesLabel}>Notes</Text>
+              <Text style={styles.notesText}>{estimate.notes}</Text>
+            </View>
+          )}
+
+          {/* Approval link */}
+          {estimate.approval_link && (
+            <View style={[styles.notesBox, { borderLeftColor: C.dark, marginBottom: 14 }]}>
+              <Text style={[styles.notesLabel, { color: C.dark }]}>Approve This Estimate</Text>
+              <Text style={[styles.notesText, { marginBottom: 4 }]}>
+                Review and approve your estimate online:
+              </Text>
+              <Link src={estimate.approval_link} style={{ fontSize: 7.5, color: C.dark }}>
+                {estimate.approval_link}
+              </Link>
+            </View>
+          )}
+
+          {/* Signature lines */}
+          <View style={styles.signatureSection}>
+            <View style={styles.signatureRow}>
+              <View style={styles.signatureField}>
+                <View style={styles.signatureLine} />
+                <Text style={styles.signatureLabel}>Accepted By</Text>
+              </View>
+              <View style={styles.signatureField}>
+                <View style={styles.signatureLine} />
+                <Text style={styles.signatureLabel}>Date</Text>
+              </View>
+              <View style={styles.signatureField}>
+                <View style={styles.signatureLine} />
+                <Text style={styles.signatureLabel}>Authorized Signature</Text>
+              </View>
+            </View>
+          </View>
+
         </View>
+        {/* end wrap={false} bottom block */}
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
         <View style={styles.footer} fixed>

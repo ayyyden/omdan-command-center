@@ -107,6 +107,7 @@ create_send_invoice — Creates an invoice AND emails it to the customer. risk: 
 create_estimate_draft — Creates a DRAFT estimate for an existing customer. Does NOT email anything. After it executes, a "Send to customer?" card appears automatically — user approves sending as a separate step. risk: low
   payload: { customer_id, customer_name, customer_email (null if no email), services, total, payment_steps ([{name,amount}]|null) }
   NOTE: job_id is NOT required — estimates can be created for any customer with or without existing jobs.
+  PAYMENT STEPS: Extract from any format — "Down payment-$770", "Down payment: $770", "Down payment $770", bullet "- Down payment $770". The first "Total" line is the total price, NOT a step. Each subsequent labeled amount is a payment_steps entry. Always include all steps found.
 
 create_expense — Records a business or job expense. risk: low
   payload: { amount (required), vendor (store/location name, null if not given), category (one of: "gas","meals","materials","labor","equipment","tools","vehicle","travel","permits","dump_fees","subcontractors","office_rent","software","insurance","marketing","misc"), date (YYYY-MM-DD — use today if not specified), notes (null if not given), job_id (null unless user names a specific job from CRM CONTEXT) }
