@@ -65,6 +65,8 @@ export interface LeadAppointment {
   project_summary: string | null
   notes: string | null
   category_code: string | null
+  assigned_pm_id: string | null
+  assigned_pm: { id: string; name: string; color: string } | null
   customer: { id: string; name: string; address: string | null } | null
   city?: string | null
 }

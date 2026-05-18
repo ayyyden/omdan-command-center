@@ -17,6 +17,7 @@ export async function GET(req: Request) {
     .select(`
       id, customer_id, scheduled_date, start_time, end_time,
       status, source, partner_reference, project_summary, notes, category_code,
+      assigned_pm_id, assigned_pm:project_managers(id, name, color),
       customer:customers(id, name, address)
     `)
     .eq("scheduled_date", date)
@@ -46,6 +47,7 @@ export async function POST(req: Request) {
     notes?:            string | null
     raw_text?:         string | null
     category_code?:    string | null
+    assigned_pm_id?:   string | null
   }
 
   if (!body.scheduled_date) {
@@ -125,6 +127,7 @@ export async function POST(req: Request) {
       notes:             body.notes         ?? null,
       raw_text:          body.raw_text      ?? null,
       category_code:     body.category_code ?? null,
+      assigned_pm_id:    body.assigned_pm_id ?? null,
     })
     .select("id, customer_id, scheduled_date, start_time, end_time, status")
     .single()

@@ -43,7 +43,7 @@ export default async function SchedulerPage({ searchParams }: PageProps) {
       .order("due_time", { ascending: true, nullsFirst: false }),
     supabase
       .from("lead_appointments")
-      .select("id, customer_id, scheduled_date, start_time, end_time, status, source, partner_reference, project_summary, notes, category_code, customer:customers(id, name, address)")
+      .select("id, customer_id, scheduled_date, start_time, end_time, status, source, partner_reference, project_summary, notes, category_code, assigned_pm_id, assigned_pm:project_managers(id, name, color), customer:customers(id, name, address)")
       .eq("scheduled_date", viewingDate)
       .not("status", "in", "(cancelled)")
       .order("start_time", { ascending: true, nullsFirst: false }),

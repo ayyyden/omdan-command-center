@@ -1317,6 +1317,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     const {
       name, phone, address, scheduled_date, start_time, end_time,
       partner_reference, category_code, project_summary, notes, source,
+      assigned_pm_id,
     } = payload as {
       name:              string
       phone:             string | null
@@ -1329,6 +1330,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       project_summary:   string | null
       notes:             string | null
       source:            string
+      assigned_pm_id:    string | null
     }
 
     if (!name) {
@@ -1393,6 +1395,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         project_summary:   project_summary   ?? null,
         notes:             notes             ?? null,
         category_code:     category_code     ?? null,
+        assigned_pm_id:    assigned_pm_id    ?? null,
       })
       .select("id")
       .single()

@@ -24,11 +24,12 @@ function timeToX(time: string | null): number {
 }
 
 interface LeadBlockProps {
-  appt:  LeadAppointment
-  index: number
+  appt:       LeadAppointment
+  index:      number
+  onAssignPm: (appt: LeadAppointment) => void
 }
 
-export function LeadBlock({ appt, index }: LeadBlockProps) {
+export function LeadBlock({ appt, index, onAssignPm }: LeadBlockProps) {
   const xPos = timeToX(appt.start_time)
 
   // Width: span start→end if both present, else 2 slots (60min default)
@@ -59,10 +60,10 @@ export function LeadBlock({ appt, index }: LeadBlockProps) {
     cancelled:       "#6B7280",
   }
   const accent = STATUS_COLORS[appt.status] ?? LEAD_COLOR
+  const pmColor = appt.assigned_pm?.color ?? null
 
   return (
-    <Link
-      href={href}
+    <div
       title={[appt.customer?.name, appt.project_summary, appt.city].filter(Boolean).join(" · ")}
       style={{
         position: "absolute",
@@ -77,10 +78,13 @@ export function LeadBlock({ appt, index }: LeadBlockProps) {
         alignItems: "stretch",
         zIndex: 2,
         overflow: "hidden",
-        textDecoration: "none",
       }}
     >
-      <div className="flex-1 min-w-0 flex flex-col justify-center px-2 overflow-hidden">
+      {/* Main link area */}
+      <Link
+        href={href}
+        style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", paddingLeft: 8, paddingRight: pmColor ? 20 : 8, textDecoration: "none", overflow: "hidden" }}
+      >
         <span
           className="font-semibold truncate leading-tight"
           style={{ fontSize: isNarrow ? 9 : 11, color: "var(--foreground)" }}
@@ -96,7 +100,26 @@ export function LeadBlock({ appt, index }: LeadBlockProps) {
             {[appt.project_summary, timeLabel || appt.city].filter(Boolean).join(" · ")}
           </span>
         )}
-      </div>
-    </Link>
+      </Link>
+
+      {/* PM assignment dot — always visible, shows assigned PM color or gray */}
+      <button
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAssignPm(appt) }}
+        title={appt.assigned_pm ? `PM: ${appt.assigned_pm.name} — click to change` : "Assign PM"}
+        style={{
+          position: "absolute",
+          top: 3,
+          right: 4,
+          width: 10,
+          height: 10,
+          borderRadius: "50%",
+          backgroundColor: pmColor ?? "rgba(100,100,100,0.25)",
+          border: pmColor ? `2px solid ${pmColor}88` : "1.5px dashed rgba(100,100,100,0.4)",
+          cursor: "pointer",
+          padding: 0,
+          flexShrink: 0,
+        }}
+      />
+    </div>
   )
 }

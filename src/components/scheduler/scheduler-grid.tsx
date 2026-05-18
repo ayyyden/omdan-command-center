@@ -302,10 +302,9 @@ export function SchedulerGrid({
 }: SchedulerGridProps) {
   const [jobs, setJobs] = useState(initialJobs)
   const [reminders, setReminders] = useState(initialReminders)
-  const leadAppointments = initialLeadAppointments.map((a) => ({
-    ...a,
-    city: extractCity(a.customer?.address ?? null),
-  }))
+  const [leadAppointments, setLeadAppointments] = useState(() =>
+    initialLeadAppointments.map((a) => ({ ...a, city: extractCity(a.customer?.address ?? null) }))
+  )
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [isMobile, setIsMobile] = useState(false)
 
@@ -321,6 +320,10 @@ export function SchedulerGrid({
   const [selectedReminder, setSelectedReminder] = useState<SchedulerReminder | null>(null)
   const [deletingReminderId, setDeletingReminderId] = useState<string | null>(null)
   const [deletingLoading, setDeletingLoading] = useState(false)
+
+  // Lead appointment PM assignment state
+  const [assignPmLead, setAssignPmLead] = useState<LeadAppointment | null>(null)
+  const [assignPmLoading, setAssignPmLoading] = useState(false)
 
   // PM edit state
   const [editingPm, setEditingPm] = useState<PmInfo | null>(null)
@@ -551,6 +554,30 @@ export function SchedulerGrid({
     toast({ title: "PM updated" })
     setEditingPm(null)
     router.refresh()
+  }
+
+  async function handleAssignLeadPm(pmId: string | null) {
+    if (!assignPmLead) return
+    setAssignPmLoading(true)
+    const supabase = createClient()
+    const { error } = await supabase
+      .from("lead_appointments")
+      .update({ assigned_pm_id: pmId })
+      .eq("id", assignPmLead.id)
+    setAssignPmLoading(false)
+    if (error) {
+      toast({ title: "Error assigning PM", description: error.message, variant: "destructive" })
+      return
+    }
+    const pm = pmId ? (pms.find((p) => p.id === pmId) ?? null) : null
+    setLeadAppointments((prev) =>
+      prev.map((a) =>
+        a.id === assignPmLead.id
+          ? { ...a, assigned_pm_id: pmId, assigned_pm: pm }
+          : a
+      )
+    )
+    setAssignPmLead(null)
   }
 
   const hours = Array.from({ length: TOTAL_HOURS }, (_, i) => GRID_START_HOUR + i)
@@ -1008,6 +1035,53 @@ export function SchedulerGrid({
           </DialogContent>
         </Dialog>
 
+        {/* Assign PM to lead appointment dialog */}
+        <Dialog open={!!assignPmLead} onOpenChange={(v) => !v && setAssignPmLead(null)}>
+          <DialogContent className="max-w-xs">
+            <DialogHeader>
+              <DialogTitle>Assign PM</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground -mt-1 truncate">
+              {assignPmLead?.customer?.name ?? "Lead"}{assignPmLead?.partner_reference ? ` #${assignPmLead.partner_reference}` : ""}
+            </p>
+            <div className="flex flex-col gap-2 py-1">
+              {pms.map((pm) => (
+                <button
+                  key={pm.id}
+                  onClick={() => handleAssignLeadPm(pm.id)}
+                  disabled={assignPmLoading}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors text-left hover:bg-muted"
+                  style={{
+                    borderColor: assignPmLead?.assigned_pm_id === pm.id ? pm.color : "var(--border)",
+                    backgroundColor: assignPmLead?.assigned_pm_id === pm.id ? `${pm.color}18` : undefined,
+                  }}
+                >
+                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
+                  <span className="text-sm font-medium">{pm.name}</span>
+                  {assignPmLead?.assigned_pm_id === pm.id && (
+                    <span className="ml-auto text-[11px] font-semibold" style={{ color: pm.color }}>Current</span>
+                  )}
+                </button>
+              ))}
+              {assignPmLead?.assigned_pm_id && (
+                <button
+                  onClick={() => handleAssignLeadPm(null)}
+                  disabled={assignPmLoading}
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg border border-dashed text-left hover:bg-muted text-muted-foreground"
+                >
+                  <div className="w-3 h-3 rounded-full shrink-0 border border-muted-foreground/40" />
+                  <span className="text-sm">Unassign PM</span>
+                </button>
+              )}
+            </div>
+            {assignPmLoading && (
+              <div className="flex justify-center py-1">
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
         <ReminderNotifier reminders={reminders} />
       </>
     )
@@ -1255,7 +1329,7 @@ export function SchedulerGrid({
                   </div>
                 )}
                 {leadAppointments.map((appt, idx) => (
-                  <LeadBlock key={appt.id} appt={appt} index={idx} />
+                  <LeadBlock key={appt.id} appt={appt} index={idx} onAssignPm={setAssignPmLead} />
                 ))}
                 {nowLineX !== null && <NowLine x={nowLineX} />}
               </div>
@@ -1597,6 +1671,53 @@ export function SchedulerGrid({
               {savingPm && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Assign PM to lead appointment dialog ── */}
+      <Dialog open={!!assignPmLead} onOpenChange={(v) => !v && setAssignPmLead(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Assign PM</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground -mt-1 truncate">
+            {assignPmLead?.customer?.name ?? "Lead"}{assignPmLead?.partner_reference ? ` #${assignPmLead.partner_reference}` : ""}
+          </p>
+          <div className="flex flex-col gap-2 py-1">
+            {pms.map((pm) => (
+              <button
+                key={pm.id}
+                onClick={() => handleAssignLeadPm(pm.id)}
+                disabled={assignPmLoading}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors text-left hover:bg-muted"
+                style={{
+                  borderColor: assignPmLead?.assigned_pm_id === pm.id ? pm.color : "var(--border)",
+                  backgroundColor: assignPmLead?.assigned_pm_id === pm.id ? `${pm.color}18` : undefined,
+                }}
+              >
+                <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
+                <span className="text-sm font-medium">{pm.name}</span>
+                {assignPmLead?.assigned_pm_id === pm.id && (
+                  <span className="ml-auto text-[11px] font-semibold" style={{ color: pm.color }}>Current</span>
+                )}
+              </button>
+            ))}
+            {assignPmLead?.assigned_pm_id && (
+              <button
+                onClick={() => handleAssignLeadPm(null)}
+                disabled={assignPmLoading}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg border border-dashed text-left hover:bg-muted text-muted-foreground"
+              >
+                <div className="w-3 h-3 rounded-full shrink-0 border border-muted-foreground/40" />
+                <span className="text-sm">Unassign PM</span>
+              </button>
+            )}
+          </div>
+          {assignPmLoading && (
+            <div className="flex justify-center py-1">
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
