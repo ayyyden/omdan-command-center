@@ -226,6 +226,8 @@ export interface ExecuteResponse {
   // create_lead_appointment fields
   appointment_id?: string
   appointment_url?: string
+  // create_job fields
+  job_url?: string
 }
 
 export interface DailySummary {

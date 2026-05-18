@@ -785,6 +785,17 @@ function formatClaudeActionForTelegram(
       const preview = String(p.notes).slice(0, 200)
       lines.push(`📝 ${preview}${String(p.notes).length > 200 ? "…" : ""}`)
     }
+  } else if (action.type === "create_job") {
+    lines.push("🔨 Create Job")
+    lines.push("")
+    if (p.customer_name)  lines.push(`👤 Customer: ${p.customer_name}`)
+    if (p.title)          lines.push(`🔨 Job: ${p.title}`)
+    if (p.status)         lines.push(`📊 Status: ${cap(String(p.status))}`)
+    if (p.scheduled_date) lines.push(`📅 Date: ${p.scheduled_date}`)
+    if (p.description) {
+      const preview = String(p.description).slice(0, 150)
+      lines.push(`📝 ${preview}${String(p.description).length > 150 ? "…" : ""}`)
+    }
   } else {
     lines.push(`⚡ ${action.summary}`)
   }
@@ -1461,6 +1472,9 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       } else if (result.action_type === "create_lead_appointment") {
         const url = result.appointment_url ? `\n${result.appointment_url}` : ""
         await sendTelegramMessage(chatId, `✅ Lead appointment saved for ${result.customer_name ?? "lead"}.${url}`)
+      } else if (result.action_type === "create_job") {
+        const url = result.job_url ? `\n${result.job_url}` : ""
+        await sendTelegramMessage(chatId, `✅ Job created: ${result.title ?? "New job"} for ${result.customer_name ?? "customer"}.${url}`)
       } else if (result.action_type === "create_customer") {
         const url = result.customer_url ? `\n${result.customer_url}` : ""
         await sendTelegramMessage(chatId, `✅ Customer added: ${result.customer_name ?? "New customer"}.${url}`)
