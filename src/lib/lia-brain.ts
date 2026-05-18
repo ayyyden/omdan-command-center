@@ -185,20 +185,14 @@ export async function callLiaBrain(
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
 
-    // Prefill the assistant turn with "{" to force Claude to output valid JSON.
-    // The SDK returns only the continuation; we prepend "{" to reconstruct the full object.
     const result = await anthropic.messages.create({
       model:      "claude-sonnet-4-6",
       max_tokens: 3000,
       system:     buildSystemPrompt(crmContext, today),
-      messages:   [
-        ...conversationMessages,
-        { role: "assistant", content: "{" },
-      ],
+      messages:   conversationMessages,
     })
 
-    const continuation = result.content[0]?.type === "text" ? result.content[0].text.trim() : ""
-    const rawText      = "{" + continuation
+    const rawText = result.content[0]?.type === "text" ? result.content[0].text.trim() : ""
     console.log("[lia-brain] raw response:", rawText.slice(0, 500))
 
     // Extract the first balanced JSON object from the response
@@ -214,9 +208,8 @@ export async function callLiaBrain(
     console.warn("[lia-brain] no JSON found in response:", rawText.slice(0, 200))
     return { message: rawText.replace(/^\{/, "").trim() || "I didn't quite catch that. Could you rephrase?" }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error("[lia-brain] error:", msg)
-    return { message: `Error: ${msg}` }
+    console.error("[lia-brain] error:", err)
+    return { message: "I hit an error. Please try again." }
   }
 }
 
