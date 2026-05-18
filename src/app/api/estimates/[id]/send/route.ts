@@ -49,12 +49,19 @@ export async function POST(
     }
   }
 
-  const { data: company } = await supabase
-    .from("company_settings")
-    .select("company_name, phone, email, license_number, logo_url, address")
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  const [{ data: company }, { data: paymentSteps }] = await Promise.all([
+    supabase
+      .from("company_settings")
+      .select("company_name, phone, email, license_number, logo_url, address")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("estimate_payment_steps")
+      .select("name, amount, sort_order")
+      .eq("estimate_id", id)
+      .order("sort_order", { ascending: true }),
+  ])
 
   const customer = estimate.customer as { id: string; name: string; address: string | null; phone: string | null; email: string | null }
 
@@ -73,6 +80,7 @@ export async function POST(
       tax_amount:     Number(estimate.tax_amount),
       total:          Number(estimate.total),
       notes:          estimate.notes,
+      payment_steps:  (paymentSteps ?? []).map((s, i) => ({ ...s, sort_order: s.sort_order ?? i })),
     },
     customer: {
       name:    customer?.name    ?? "",

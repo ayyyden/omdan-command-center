@@ -321,8 +321,8 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       return NextResponse.json({ error: "SMTP not configured" }, { status: 500 })
     }
 
-    // Fetch company name and approval token
-    const [{ data: company }, { data: est }, { data: customerRow }] = await Promise.all([
+    // Fetch company name, approval token, payment steps
+    const [{ data: company }, { data: est }, { data: customerRow }, { data: dbPaymentSteps }] = await Promise.all([
       supabase.from("company_settings")
         .select("company_name, email, phone")
         .eq("user_id", ownerUserId)
@@ -335,6 +335,10 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         .select("name, phone, email, address")
         .eq("id", customer_id)
         .single(),
+      supabase.from("estimate_payment_steps")
+        .select("name, amount, sort_order")
+        .eq("estimate_id", estimate_id)
+        .order("sort_order", { ascending: true }),
     ])
 
     const companyName   = company?.company_name ?? "Omdan"
@@ -354,7 +358,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
           created_at:    est?.created_at ?? now,
           scope_of_work: scopeOfWork,
           total:         Number(total),
-          payment_steps: (payment_steps ?? []).map((s, i) => ({ ...s, sort_order: i })),
+          payment_steps: (dbPaymentSteps?.length ? dbPaymentSteps : (payment_steps ?? [])).map((s, i) => ({ name: s.name, amount: s.amount, sort_order: (s as { sort_order?: number }).sort_order ?? i })),
           approval_link: approvalLink,
         },
         customer: {
