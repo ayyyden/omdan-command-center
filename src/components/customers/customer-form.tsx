@@ -15,7 +15,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Loader2, Plus, Trash2 } from "lucide-react"
+import { CalendarDays, Clock, Loader2, Plus, Trash2, UserCircle } from "lucide-react"
 import type { Customer } from "@/types"
 
 const LEAD_STATUSES = [
@@ -34,6 +34,8 @@ interface PropStreamPrefill {
   lead_source?: string
 }
 
+interface PmOption { id: string; name: string; color: string }
+
 interface CustomerFormProps {
   customer?:           Customer
   userId:              string
@@ -41,9 +43,10 @@ interface CustomerFormProps {
   propstreamLeadId?:   string
   propstreamPhoneId?:  string
   returnTo?:           string
+  pms?:                PmOption[]
 }
 
-export function CustomerForm({ customer, userId, prefill, propstreamLeadId, propstreamPhoneId, returnTo }: CustomerFormProps) {
+export function CustomerForm({ customer, userId, prefill, propstreamLeadId, propstreamPhoneId, returnTo, pms = [] }: CustomerFormProps) {
   const router = useRouter()
   const { toast } = useToast()
   const [sources, setSources] = useState<LeadSource[]>([])
@@ -51,6 +54,12 @@ export function CustomerForm({ customer, userId, prefill, propstreamLeadId, prop
   const [newSourceLabel, setNewSourceLabel] = useState("")
   const [addingSource, setAddingSource] = useState(false)
   const [deletingSource, setDeletingSource] = useState<string | null>(null)
+
+  // Appointment scheduling (new leads only)
+  const [apptDate, setApptDate] = useState("")
+  const [apptStartTime, setApptStartTime] = useState("")
+  const [apptEndTime, setApptEndTime] = useState("")
+  const [apptPmId, setApptPmId] = useState("")
 
   useEffect(() => {
     fetch("/api/lead-sources")
@@ -114,6 +123,22 @@ export function CustomerForm({ customer, userId, prefill, propstreamLeadId, prop
           headers: { "Content-Type": "application/json" },
           body:    JSON.stringify({ customer_id: insertedId }),
         }).catch(() => {})  // non-fatal — CRM lead is already created
+      }
+
+      // Schedule appointment if date was provided (non-blocking)
+      if (apptDate) {
+        await fetch("/api/lead-appointments", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customer_id:     insertedId,
+            scheduled_date:  apptDate,
+            start_time:      apptStartTime || null,
+            end_time:        apptEndTime   || null,
+            assigned_pm_id:  apptPmId      || null,
+            project_summary: values.service_type || null,
+          }),
+        }).catch(() => {})
       }
     }
 
@@ -296,6 +321,77 @@ export function CustomerForm({ customer, userId, prefill, propstreamLeadId, prop
               )} />
             </CardContent>
           </Card>
+
+          {/* Schedule Appointment — new leads only */}
+          {!customer && (
+            <Card>
+              <CardContent className="pt-6 space-y-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <CalendarDays className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-semibold">Schedule Appointment</span>
+                  <span className="text-xs text-muted-foreground ml-1">(optional)</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="sm:col-span-1">
+                    <label className="text-sm font-medium mb-1.5 block">Date</label>
+                    <Input
+                      type="date"
+                      value={apptDate}
+                      onChange={(e) => setApptDate(e.target.value)}
+                      className="dark:[color-scheme:dark]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium mb-1.5 block flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" /> Start Time
+                    </label>
+                    <Input
+                      type="time"
+                      value={apptStartTime}
+                      onChange={(e) => setApptStartTime(e.target.value)}
+                      disabled={!apptDate}
+                      className="dark:[color-scheme:dark]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium mb-1.5 block">End Time</label>
+                    <Input
+                      type="time"
+                      value={apptEndTime}
+                      onChange={(e) => setApptEndTime(e.target.value)}
+                      disabled={!apptDate}
+                      className="dark:[color-scheme:dark]"
+                    />
+                  </div>
+                </div>
+
+                {pms.length > 0 && (
+                  <div>
+                    <label className="text-sm font-medium mb-1.5 block flex items-center gap-1">
+                      <UserCircle className="w-3.5 h-3.5" /> Assign PM
+                    </label>
+                    <Select value={apptPmId} onValueChange={setApptPmId} disabled={!apptDate}>
+                      <SelectTrigger className="w-full sm:w-64">
+                        <SelectValue placeholder="No PM assigned" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No PM assigned</SelectItem>
+                        {pms.map((pm) => (
+                          <SelectItem key={pm.id} value={pm.id}>
+                            <div className="flex items-center gap-2">
+                              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
+                              {pm.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <div className="flex items-center gap-3">
             <Button type="submit" disabled={form.formState.isSubmitting}>

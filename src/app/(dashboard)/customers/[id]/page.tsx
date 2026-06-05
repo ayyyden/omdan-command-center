@@ -12,6 +12,7 @@ import { CustomerActions } from "@/components/customers/customer-actions"
 import { CommunicationLogSection } from "@/components/shared/communication-log-section"
 import { FileSection } from "@/components/shared/file-section"
 import { CustomerMobileActions } from "@/components/customers/customer-mobile-actions"
+import { CopyButtons } from "@/components/customers/copy-buttons"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -23,11 +24,13 @@ export default async function CustomerDetailPage({ params }: PageProps) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const [{ data: customer }, { data: estimates }, { data: jobs }, { data: commLogs }] = await Promise.all([
+  const [{ data: customer }, { data: estimates }, { data: jobs }, { data: commLogs }, { data: upcomingAppt }, { data: company }] = await Promise.all([
     supabase.from("customers").select("*").eq("id", id).single(),
     supabase.from("estimates").select("*, jobs(id)").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("customer_id", id).order("created_at", { ascending: false }),
+    supabase.from("lead_appointments").select("id, scheduled_date, start_time, end_time, project_summary, assigned_pm:project_managers(id, name, color, phone)").eq("customer_id", id).not("status", "in", "(cancelled,no_show)").order("scheduled_date", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("company_settings").select("company_name, phone").eq("user_id", user.id).maybeSingle(),
   ])
 
   if (!customer) notFound()
@@ -93,6 +96,11 @@ export default async function CustomerDetailPage({ params }: PageProps) {
           <>
             {/* Mobile: icon-only primary actions + consolidated more menu */}
             <div className="flex items-center gap-1.5 sm:hidden">
+              <CopyButtons
+                customer={{ name: customer.name, phone: customer.phone ?? null, address: customer.address ?? null, service_type: customer.service_type ?? null }}
+                appointment={upcomingAppt as Parameters<typeof CopyButtons>[0]["appointment"]}
+                company={company ?? null}
+              />
               <Button variant="outline" size="sm" className="px-2.5" asChild aria-label="Edit">
                 <Link href={`/customers/${customer.id}/edit`}><Pencil className="w-4 h-4" /></Link>
               </Button>
@@ -107,6 +115,11 @@ export default async function CustomerDetailPage({ params }: PageProps) {
             </div>
             {/* Desktop: all actions */}
             <div className="hidden sm:flex items-center gap-2">
+              <CopyButtons
+                customer={{ name: customer.name, phone: customer.phone ?? null, address: customer.address ?? null, service_type: customer.service_type ?? null }}
+                appointment={upcomingAppt as Parameters<typeof CopyButtons>[0]["appointment"]}
+                company={company ?? null}
+              />
               <CustomerActions customerId={customer.id} customerName={customer.name} isArchived={customer.is_archived ?? false} />
               <Button variant="outline" asChild>
                 <Link href={`/customers/${customer.id}/edit`}><Pencil className="w-4 h-4 mr-2" />Edit</Link>

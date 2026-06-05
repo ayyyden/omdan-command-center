@@ -27,6 +27,14 @@ export default async function NewCustomerPage({ searchParams }: PageProps) {
 
   const params = await searchParams
 
+  const [{ data: pms }] = await Promise.all([
+    supabase
+      .from("project_managers")
+      .select("id, name, color")
+      .eq("is_active", true)
+      .order("name"),
+  ])
+
   const prefill = params.from_propstream
     ? {
         name:        params.name,
@@ -51,6 +59,7 @@ export default async function NewCustomerPage({ searchParams }: PageProps) {
           propstreamLeadId={params.from_propstream}
           propstreamPhoneId={params.phone_id}
           returnTo={params.return_to}
+          pms={pms ?? []}
         />
       </div>
     </div>
