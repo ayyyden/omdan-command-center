@@ -122,16 +122,17 @@ export function AppointmentCard({ appointments, pms, customerId, projectSummary 
     if (!newAppt.scheduled_date) return
     setAddSaving(true)
     try {
+      const pmId = (newAppt.assigned_pm_id && newAppt.assigned_pm_id !== "none") ? newAppt.assigned_pm_id : null
       const res = await fetch("/api/lead-appointments", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customer_id:     customerId,
           scheduled_date:  newAppt.scheduled_date,
-          start_time:      newAppt.start_time      || null,
-          end_time:        newAppt.end_time         || null,
-          assigned_pm_id:  newAppt.assigned_pm_id  || null,
-          project_summary: projectSummary           ?? null,
+          start_time:      newAppt.start_time || null,
+          end_time:        newAppt.end_time   || null,
+          assigned_pm_id:  pmId,
+          project_summary: projectSummary     ?? null,
         }),
       })
       if (!res.ok) {
@@ -142,6 +143,7 @@ export function AppointmentCard({ appointments, pms, customerId, projectSummary 
       setAdding(false)
       setNewAppt({ scheduled_date: "", start_time: "", end_time: "", assigned_pm_id: "" })
       router.refresh()
+      toast({ title: "Appointment scheduled", description: `Saved for ${newAppt.scheduled_date} — visible in Scheduler` })
     } finally {
       setAddSaving(false)
     }

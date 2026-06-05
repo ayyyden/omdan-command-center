@@ -2,6 +2,8 @@ import { getSessionMember, hasJobScope, NO_ROWS_ID } from "@/lib/auth-helpers"
 import { Topbar } from "@/components/shared/topbar"
 import { SchedulerClient } from "@/components/scheduler/scheduler-client"
 
+export const dynamic = "force-dynamic"
+
 interface PageProps {
   searchParams: Promise<{ date?: string }>
 }

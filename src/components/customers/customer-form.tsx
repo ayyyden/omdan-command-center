@@ -135,14 +135,15 @@ export function CustomerForm({ customer, userId, prefill, propstreamLeadId, prop
             scheduled_date:  apptDate,
             start_time:      apptStartTime || null,
             end_time:        apptEndTime   || null,
-            assigned_pm_id:  apptPmId      || null,
+            assigned_pm_id:  (apptPmId && apptPmId !== "none") ? apptPmId : null,
             project_summary: values.service_type || null,
           }),
         }).catch(() => {})
       }
     }
 
-    toast({ title: customer ? "Customer updated" : "Lead added", description: values.name })
+    const apptNote = (!customer && apptDate) ? ` · Appointment: ${apptDate}` : ""
+    toast({ title: customer ? "Customer updated" : "Lead added", description: `${values.name}${apptNote}` })
     router.push(returnTo ?? "/customers")
     router.refresh()
   }
