@@ -13,6 +13,7 @@ import { CommunicationLogSection } from "@/components/shared/communication-log-s
 import { FileSection } from "@/components/shared/file-section"
 import { CustomerMobileActions } from "@/components/customers/customer-mobile-actions"
 import { CopyButtons } from "@/components/customers/copy-buttons"
+import { AppointmentCard } from "@/components/customers/appointment-card"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -24,16 +25,20 @@ export default async function CustomerDetailPage({ params }: PageProps) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const [{ data: customer }, { data: estimates }, { data: jobs }, { data: commLogs }, { data: upcomingAppt }, { data: company }] = await Promise.all([
+  const [{ data: customer }, { data: estimates }, { data: jobs }, { data: commLogs }, { data: allAppts }, { data: company }, { data: pms }] = await Promise.all([
     supabase.from("customers").select("*").eq("id", id).single(),
     supabase.from("estimates").select("*, jobs(id)").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("customer_id", id).order("created_at", { ascending: false }),
-    supabase.from("lead_appointments").select("id, scheduled_date, start_time, end_time, project_summary, assigned_pm:project_managers(id, name, color, phone)").eq("customer_id", id).not("status", "in", "(cancelled,no_show)").order("scheduled_date", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("lead_appointments").select("id, scheduled_date, start_time, end_time, status, project_summary, assigned_pm_id, assigned_pm:project_managers(id, name, color, phone)").eq("customer_id", id).order("scheduled_date", { ascending: false }),
     supabase.from("company_settings").select("company_name, phone").eq("user_id", user.id).maybeSingle(),
+    supabase.from("project_managers").select("id, name, color").eq("is_active", true).order("name"),
   ])
 
   if (!customer) notFound()
+
+  // Most recent non-cancelled appointment for copy buttons
+  const upcomingAppt = (allAppts ?? []).find(a => a.status !== "cancelled" && a.status !== "no_show") ?? null
 
   const totalEstimated = (estimates ?? []).filter(e => e.status === "approved").reduce((sum, e) => sum + Number(e.total), 0)
 
@@ -201,6 +206,14 @@ export default async function CustomerDetailPage({ params }: PageProps) {
             </CardContent>
           </Card>
         </div>
+
+        {/* Appointments */}
+        <AppointmentCard
+          appointments={(allAppts ?? []) as unknown as Parameters<typeof AppointmentCard>[0]["appointments"]}
+          pms={pms ?? []}
+          customerId={customer.id}
+          projectSummary={customer.service_type ?? null}
+        />
 
         {/* Estimates */}
         <Card>

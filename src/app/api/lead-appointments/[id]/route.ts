@@ -11,21 +11,23 @@ export async function PATCH(req: Request, { params }: RouteCtx) {
 
   const { id } = await params
   const body = await req.json() as {
-    status?:        string
-    start_time?:    string | null
-    end_time?:      string | null
-    assigned_pm_id?: string | null
-    notes?:         string | null
+    status?:          string
+    scheduled_date?:  string | null
+    start_time?:      string | null
+    end_time?:        string | null
+    assigned_pm_id?:  string | null
+    notes?:           string | null
   }
 
   const supabase = createServiceClient()
 
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  if (body.status        !== undefined) update.status        = body.status
-  if (body.start_time    !== undefined) update.start_time    = body.start_time
-  if (body.end_time      !== undefined) update.end_time      = body.end_time
-  if (body.assigned_pm_id !== undefined) update.assigned_pm_id = body.assigned_pm_id
-  if (body.notes         !== undefined) update.notes         = body.notes
+  if (body.status          !== undefined) update.status          = body.status
+  if (body.scheduled_date  !== undefined) update.scheduled_date  = body.scheduled_date
+  if (body.start_time      !== undefined) update.start_time      = body.start_time
+  if (body.end_time        !== undefined) update.end_time        = body.end_time
+  if (body.assigned_pm_id  !== undefined) update.assigned_pm_id  = body.assigned_pm_id
+  if (body.notes           !== undefined) update.notes           = body.notes
 
   const { error } = await supabase
     .from("lead_appointments")
