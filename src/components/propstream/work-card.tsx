@@ -10,6 +10,7 @@ import {
   AlertCircle, RefreshCw, Home, Mic, MicOff,
 } from "lucide-react"
 import type { Device as TwilioDevice, Call as TwilioCall } from "@twilio/voice-sdk"
+import { NewLeadModal } from "./new-lead-modal"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,9 @@ export function WorkCard({ listId }: Props) {
   const [busy,            setBusy]            = useState(false)
   const [outcomeMsg,      setOutcomeMsg]      = useState<string | null>(null)
   const [outcomeError,    setOutcomeError]    = useState<string | null>(null)
+  const [newLeadOpen,    setNewLeadOpen]    = useState(false)
+  const [newLeadPrefill, setNewLeadPrefill] = useState<{ name?: string; phone?: string; email?: string; address?: string; notes?: string; lead_source?: string }>({})
+  const [newLeadPhoneId, setNewLeadPhoneId] = useState("")
 
   // Browser calling refs
   const deviceRef = useRef<TwilioDevice | null>(null)
@@ -265,15 +269,9 @@ export function WorkCard({ listId }: Props) {
   async function handleOutcome(outcome: "no_answer" | "not_interested" | "need_follow_up" | "approved") {
     if (!lead || !selectedPhoneId || busy) return
 
-    // Hang up any active call before recording outcome
-    if (callRef.current) {
-      callRef.current.disconnect()
-      callRef.current = null
-    }
-
     const phone = lead.propstream_lead_phones.find((p) => p.id === selectedPhoneId)
 
-    // Approved → record outcome then navigate to customer creation
+    // Approved: keep call alive, open new lead modal
     if (outcome === "approved") {
       setBusy(true)
       await fetch("/api/propstream/call/outcome", {
@@ -293,18 +291,23 @@ export function WorkCard({ listId }: Props) {
       const address = [lead.property_address, lead.property_city, lead.property_state, lead.property_zip]
         .filter(Boolean).join(", ")
 
-      const params = new URLSearchParams({
-        from_propstream: lead.id,
-        phone_id:        selectedPhoneId,
-        phone:           phone?.phone ?? "",
-        name:            lead.owner_name ?? "",
-        email:           lead.emails[0] ?? "",
+      setNewLeadPrefill({
+        name:        lead.owner_name ?? "",
+        phone:       phone?.phone ? fmtPhone(phone.phone) : "",
+        email:       lead.emails[0] ?? "",
         address,
-        notes:           (notes || lead.notes || "").substring(0, 600),
-        return_to:       `/propstream-leads/work${listId ? `?list_id=${listId}` : ""}`,
+        notes:       (notes || lead.notes || "").substring(0, 600),
+        lead_source: "propstream",
       })
-      router.push(`/customers/new?${params}`)
+      setNewLeadPhoneId(selectedPhoneId)
+      setNewLeadOpen(true)
       return
+    }
+
+    // All other outcomes: hang up first
+    if (callRef.current) {
+      callRef.current.disconnect()
+      callRef.current = null
     }
 
     setBusy(true)
@@ -652,6 +655,16 @@ export function WorkCard({ listId }: Props) {
 
         </div>
       </div>
+
+      <NewLeadModal
+        open={newLeadOpen}
+        onClose={() => setNewLeadOpen(false)}
+        onSaved={goNext}
+        callActive={callActive}
+        prefill={newLeadPrefill}
+        propstreamLeadId={lead?.id}
+        propstreamPhoneId={newLeadPhoneId}
+      />
     </PageShell>
   )
 }

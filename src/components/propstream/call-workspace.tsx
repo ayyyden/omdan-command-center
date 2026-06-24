@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { useRouter } from "next/navigation"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -11,9 +10,10 @@ import { Badge }    from "@/components/ui/badge"
 import {
   Phone, PhoneCall, PhoneOff, MessageSquare, ThumbsUp, ThumbsDown,
   AlertTriangle, Clock, Ban, CheckCircle2, PhoneForwarded, Loader2,
-  Mic, MicOff, ArrowRight,
+  Mic, MicOff, ArrowRight, Star,
 } from "lucide-react"
-import { SmsModal } from "./sms-modal"
+import { SmsModal }      from "./sms-modal"
+import { NewLeadModal }  from "./new-lead-modal"
 import type { Device as TwilioDevice, Call as TwilioCall } from "@twilio/voice-sdk"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -53,7 +53,7 @@ interface Props {
 }
 
 type OutcomeType =
-  | "no_answer" | "not_interested" | "warm_lead" | "approved"
+  | "no_answer" | "not_interested" | "need_follow_up" | "warm_lead" | "approved"
   | "do_not_call" | "wrong_number" | "callback_later"
 
 type CallStatus = "idle" | "connecting" | "ringing" | "connected" | "error"
@@ -67,6 +67,7 @@ const OUTCOME_BUTTONS: {
   { outcome: "no_answer",      label: "No Answer",      icon: <PhoneOff className="w-4 h-4" />,       variant: "outline" },
   { outcome: "callback_later", label: "Call Back Later", icon: <Clock className="w-4 h-4" />,          variant: "outline" },
   { outcome: "not_interested", label: "Not Interested",  icon: <ThumbsDown className="w-4 h-4" />,    variant: "outline" },
+  { outcome: "need_follow_up", label: "Need Follow-Up",  icon: <Star className="w-4 h-4" />,          variant: "secondary" },
   { outcome: "warm_lead",      label: "Warm Lead",       icon: <ThumbsUp className="w-4 h-4" />,      variant: "secondary" },
   { outcome: "approved",       label: "Approved",        icon: <CheckCircle2 className="w-4 h-4" />,  variant: "default" },
   { outcome: "wrong_number",   label: "Wrong Number",    icon: <AlertTriangle className="w-4 h-4" />, variant: "outline" },
@@ -100,8 +101,6 @@ function getWorkablePhones(lead: Lead): LeadPhone[] {
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
-  const router = useRouter()
-
   // Local lead state — refreshed from API after each outcome when lead isn't done
   const [localLead,       setLocalLead]       = useState<Lead>(lead)
   const [refreshing,      setRefreshing]      = useState(false)
@@ -120,6 +119,9 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
   const [outcomeMsg,  setOutcomeMsg]  = useState<string | null>(null)
   const [warmOutcome, setWarmOutcome] = useState<OutcomeType | null>(null)  // warm_lead post-outcome state
   const [smsOpen,     setSmsOpen]     = useState(false)
+  const [newLeadOpen,    setNewLeadOpen]    = useState(false)
+  const [newLeadPrefill, setNewLeadPrefill] = useState<{ name?: string; phone?: string; email?: string; address?: string; notes?: string; lead_source?: string }>({})
+  const [newLeadPhoneId, setNewLeadPhoneId] = useState("")
 
   const deviceRef = useRef<TwilioDevice | null>(null)
   const callRef   = useRef<TwilioCall | null>(null)
@@ -232,7 +234,53 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
   async function handleOutcome(o: OutcomeType) {
     if (!selectedPhone || saving) return
 
-    // Hang up active call before recording outcome
+    // ── approved: keep call alive, open new lead modal ────────────────────────
+    if (o === "approved") {
+      setSaving(true)
+      const res = await fetch("/api/propstream/call/outcome", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lead_id:     localLead.id,
+          phone_id:    selectedPhone.id,
+          to_phone:    selectedPhone.phone,
+          outcome:     "approved",
+          call_log_id: callLogId ?? undefined,
+          notes:       notes.trim() || undefined,
+        }),
+      })
+      const data = await res.json()
+      setSaving(false)
+
+      if (!res.ok) {
+        setCallError(data.error ?? "Failed to save outcome")
+        return
+      }
+
+      const { lead_done, lead_status } = data as { lead_done: boolean; lead_status: string | null }
+      onOutcome(localLead.id, lead_status ?? "approved", lead_done)
+
+      const address = [
+        localLead.property_address,
+        localLead.property_city,
+        localLead.property_state,
+        localLead.property_zip,
+      ].filter(Boolean).join(", ")
+
+      setNewLeadPrefill({
+        name:        localLead.owner_name ?? "",
+        phone:       fmtPhone(selectedPhone.phone),
+        email:       localLead.emails?.[0] ?? "",
+        address,
+        notes:       (notes || localLead.notes || "").substring(0, 600),
+        lead_source: "propstream",
+      })
+      setNewLeadPhoneId(selectedPhone.id)
+      setNewLeadOpen(true)
+      return
+    }
+
+    // All other outcomes: hang up first
     if (callRef.current) { callRef.current.disconnect(); callRef.current = null }
 
     setSaving(true)
@@ -267,32 +315,7 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
       sms_error:     string | null
     }
 
-    // Notify parent of the status change
     onOutcome(localLead.id, lead_status ?? o, lead_done)
-
-    // ── approved: navigate to new customer page ──────────────────────────────
-    if (o === "approved") {
-      const address = [
-        localLead.property_address,
-        localLead.property_city,
-        localLead.property_state,
-        localLead.property_zip,
-      ].filter(Boolean).join(", ")
-
-      const params = new URLSearchParams({
-        from_propstream: localLead.id,
-        phone_id:        selectedPhone.id,
-        phone:           selectedPhone.phone,
-        name:            localLead.owner_name ?? "",
-        email:           localLead.emails?.[0] ?? "",
-        address,
-        notes:           (notes || localLead.notes || "").substring(0, 600),
-        return_to:       "/propstream-leads",
-      })
-      handleClose()
-      router.push(`/customers/new?${params}`)
-      return
-    }
 
     // ── warm_lead: show confirmation panel (keep open for SMS) ──────────────
     if (o === "warm_lead") {
@@ -559,6 +582,16 @@ export function CallWorkspace({ open, onClose, lead, onOutcome }: Props) {
           ownerName={localLead.owner_name ?? "Lead"}
         />
       )}
+
+      <NewLeadModal
+        open={newLeadOpen}
+        onClose={() => setNewLeadOpen(false)}
+        onSaved={handleClose}
+        callActive={callActive}
+        prefill={newLeadPrefill}
+        propstreamLeadId={localLead.id}
+        propstreamPhoneId={newLeadPhoneId}
+      />
     </>
   )
 }

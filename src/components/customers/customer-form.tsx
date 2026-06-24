@@ -44,9 +44,12 @@ interface CustomerFormProps {
   propstreamPhoneId?:  string
   returnTo?:           string
   pms?:                PmOption[]
+  onSuccess?:          () => void
+  onCancel?:           () => void
+  showStatus?:         boolean
 }
 
-export function CustomerForm({ customer, userId, prefill, propstreamLeadId, propstreamPhoneId, returnTo, pms = [] }: CustomerFormProps) {
+export function CustomerForm({ customer, userId, prefill, propstreamLeadId, propstreamPhoneId, returnTo, pms = [], onSuccess, onCancel, showStatus }: CustomerFormProps) {
   const router = useRouter()
   const { toast } = useToast()
   const [sources, setSources] = useState<LeadSource[]>([])
@@ -144,8 +147,13 @@ export function CustomerForm({ customer, userId, prefill, propstreamLeadId, prop
 
     const apptNote = (!customer && apptDate) ? ` · Appointment: ${apptDate}` : ""
     toast({ title: customer ? "Customer updated" : "Lead added", description: `${values.name}${apptNote}` })
-    router.push(returnTo ?? "/customers")
-    router.refresh()
+    if (onSuccess) {
+      router.refresh()
+      onSuccess()
+    } else {
+      router.push(returnTo ?? "/customers")
+      router.refresh()
+    }
   }
 
   async function handleAddSource() {
@@ -285,8 +293,8 @@ export function CustomerForm({ customer, userId, prefill, propstreamLeadId, prop
                 </FormItem>
               )} />
 
-              {/* Status: only shown when editing */}
-              {customer && (
+              {/* Status: shown when editing or explicitly requested */}
+              {(customer || showStatus) && (
                 <FormField control={form.control} name="status" render={({ field }) => (
                   <FormItem className="sm:col-span-2">
                     <FormLabel>Status</FormLabel>
@@ -399,7 +407,7 @@ export function CustomerForm({ customer, userId, prefill, propstreamLeadId, prop
               {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {customer ? "Save Changes" : "Add Lead"}
             </Button>
-            <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => onCancel ? onCancel() : router.back()}>Cancel</Button>
           </div>
         </form>
       </Form>
