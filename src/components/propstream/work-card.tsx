@@ -659,7 +659,7 @@ export function WorkCard({ listId }: Props) {
       <NewLeadModal
         open={newLeadOpen}
         onClose={() => setNewLeadOpen(false)}
-        onSaved={goNext}
+        onSaved={() => router.push("/propstream-leads")}
         callActive={callActive}
         prefill={newLeadPrefill}
         propstreamLeadId={lead?.id}
