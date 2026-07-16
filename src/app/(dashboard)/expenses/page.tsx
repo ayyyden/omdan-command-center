@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 import { Topbar } from "@/components/shared/topbar"
 import { formatCurrency } from "@/lib/utils"
 import { AddExpenseDialog } from "@/components/expenses/add-expense-dialog"
+import { ExpenseScreenshotDialog } from "@/components/expenses/expense-screenshot-dialog"
 import { ExpensesFilters } from "./expenses-filters"
 import { ExpensesBulkTable } from "@/components/expenses/expenses-bulk-table"
 import { ReceiptsSection } from "@/components/receipts/receipts-section"
@@ -61,7 +62,12 @@ export default async function ExpensesPage({ searchParams }: PageProps) {
       <Topbar
         title="Expenses"
         subtitle={`${rows.length} expense${rows.length !== 1 ? "s" : ""}${typeLabel} · ${formatCurrency(total)}`}
-        actions={<AddExpenseDialog userId={userId} />}
+        actions={
+          <div className="flex gap-2">
+            <ExpenseScreenshotDialog userId={userId} />
+            <AddExpenseDialog userId={userId} />
+          </div>
+        }
       />
 
       <div className="p-4 sm:p-6 space-y-4">
