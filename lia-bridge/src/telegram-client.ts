@@ -34,3 +34,30 @@ export async function sendTelegramWithButtons(
     reply_markup: { inline_keyboard: buttons },
   })
 }
+
+export async function downloadTelegramPhotoBase64(
+  fileId: string
+): Promise<{ base64: string; mediaType: string }> {
+  const res = await fetch(`https://api.telegram.org/bot${TOKEN}/getFile`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ file_id: fileId }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Telegram getFile failed (${res.status}): ${text}`)
+  }
+  const data = await res.json() as { ok: boolean; result?: { file_path?: string } }
+  const filePath = data.result?.file_path
+  if (!filePath) throw new Error("Telegram getFile returned no file_path")
+
+  const fileRes = await fetch(`https://api.telegram.org/file/bot${TOKEN}/${filePath}`)
+  if (!fileRes.ok) throw new Error(`Telegram file download failed (${fileRes.status})`)
+
+  const buffer = await fileRes.arrayBuffer()
+  const base64 = Buffer.from(buffer).toString("base64")
+  const ext    = filePath.split(".").pop()?.toLowerCase() ?? "jpg"
+  const mediaType = ext === "png" ? "image/png" : "image/jpeg"
+
+  return { base64, mediaType }
+}

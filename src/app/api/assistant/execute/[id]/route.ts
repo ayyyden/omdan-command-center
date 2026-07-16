@@ -1511,5 +1511,71 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     })
   }
 
+  // ─── save_expenses_batch ─────────────────────────────────────────────────
+  // Bulk-inserts expenses parsed from a credit card screenshot via Lia.
+
+  if (approval.action_type === "save_expenses_batch") {
+    const { expenses } = payload as {
+      expenses: Array<{
+        date:        string
+        description: string
+        amount:      number
+        card_last4:  string | null
+        category:    string
+        notes:       string | null
+      }>
+    }
+
+    if (!expenses?.length) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "No expenses in payload", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "No expenses to save" }, { status: 400 })
+    }
+
+    const rows = expenses.map((e) => ({
+      user_id:      ownerUserId,
+      expense_type: "business",
+      category:     e.category ?? "misc",
+      description:  e.description,
+      amount:       Number(e.amount),
+      date:         e.date ?? new Date().toISOString().split("T")[0],
+      notes:        e.notes ?? null,
+      card_last4:   e.card_last4 ?? null,
+      source:       "telegram_screenshot",
+    }))
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from("expenses")
+      .insert(rows)
+      .select("id")
+
+    if (insertErr) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: insertErr.message, updated_at: now }).eq("id", id)
+      return NextResponse.json(
+        { error: `Failed to save expenses: ${insertErr.message}` },
+        { status: 500 },
+      )
+    }
+
+    const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0)
+
+    await supabase.from("assistant_approvals")
+      .update({
+        status:      "executed",
+        executed_at: now,
+        result:      { count: inserted?.length ?? rows.length, total },
+        updated_at:  now,
+      })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type: "save_expenses_batch",
+      success:     true,
+      count:       inserted?.length ?? rows.length,
+      total,
+    })
+  }
+
   return NextResponse.json({ error: `Unknown action_type: ${approval.action_type}` }, { status: 400 })
 }

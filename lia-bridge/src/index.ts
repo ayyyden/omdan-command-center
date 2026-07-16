@@ -8,7 +8,7 @@ import { parseScheduleMessage, formatScheduledDate, formatScheduledTime } from "
 import { parseContractMessage } from "./contract-parser"
 import { formatDailySummary }       from "./format-response"
 import { sendWhatsAppText }         from "./openclaw-client"
-import { sendTelegramMessage, sendTelegramWithButtons, type InlineKeyboardButton } from "./telegram-client"
+import { sendTelegramMessage, sendTelegramWithButtons, downloadTelegramPhotoBase64, type InlineKeyboardButton } from "./telegram-client"
 import { checkHealth, sendMessage, updateApproval, executeApproval, createApproval } from "./crm-client"
 import { isRawPartnerLead, parseRawPartnerLead, formatLeadApptPreview } from "./partner-lead-detector"
 import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch, ScheduleData, SchedulePreview, ContractData, ContractTemplate, ContractPreview, CrmMessageResponse } from "./types"
@@ -954,9 +954,11 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
   const update = req.body as {
     update_id?: number
     message?: {
-      from?: { id: number; first_name?: string; username?: string }
-      chat?: { id: number; type?: string; title?: string }
-      text?: string
+      from?:    { id: number; first_name?: string; username?: string }
+      chat?:    { id: number; type?: string; title?: string }
+      text?:    string
+      caption?: string
+      photo?:   Array<{ file_id: string; file_unique_id: string; width: number; height: number; file_size?: number }>
     }
     callback_query?: {
       id?: string
@@ -994,7 +996,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
     )
   }
 
-  if (!fromId || !chatId || !text) return
+  if (!fromId || !chatId || (!text && !message?.photo?.length)) return
 
   // User must always be in the allowlist
   if (!TELEGRAM_ALLOWED_IDS.has(fromId)) {
@@ -1025,6 +1027,52 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
   }
 
   try {
+    // ── Photo: expense screenshot ────────────────────────────────────────────
+    if (message?.photo?.length && !message.text) {
+      const largest    = message.photo[message.photo.length - 1]
+      const crmBaseUrl = (process.env.CRM_BASE_URL ?? "").replace(/\/+$/, "")
+      const crmSecret  = process.env.CRM_ASSISTANT_SECRET ?? ""
+      try {
+        await sendTG("📷 Processing your transaction screenshot…")
+        const { base64, mediaType } = await downloadTelegramPhotoBase64(largest.file_id)
+        const crmRes = await fetch(`${crmBaseUrl}/api/assistant/expenses-screenshot`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", "x-assistant-secret": crmSecret },
+          body:    JSON.stringify({
+            image_base64:     base64,
+            media_type:       mediaType,
+            telegram_user_id: fromId,
+            telegram_chat_id: chatId,
+            caption:          message.caption ?? undefined,
+          }),
+        })
+        if (!crmRes.ok) {
+          const errText = await crmRes.text()
+          console.error("[lia/telegram] expenses-screenshot error:", errText)
+          await sendTG("❌ I couldn't parse the transactions. Make sure the image clearly shows the transaction list and try again.")
+          return
+        }
+        const data = await crmRes.json() as {
+          approval_id: string
+          preview:     string
+          count:       number
+          total:       number
+        }
+        const buttons: InlineKeyboardButton[][] = [[
+          { text: "✅ Save All", callback_data: `approve:${data.approval_id}` },
+          { text: "❌ Cancel",   callback_data: `reject:${data.approval_id}` },
+        ]]
+        await sendTG(
+          `${data.preview}\n\nSave all ${data.count} expense${data.count !== 1 ? "s" : ""} to your records?`,
+          buttons,
+        )
+      } catch (photoErr) {
+        console.error("[lia/telegram] photo handler error:", photoErr)
+        await sendTG("❌ Something went wrong processing the image. Please try again.")
+      }
+      return
+    }
+
     // ── Pending edit: route correction to the right handler ──
     const pendingEdit = pendingEdits.get(chatKey)
     if (pendingEdit && (intent.type === "unknown" || intent.type === "add_lead_estimate")) {
