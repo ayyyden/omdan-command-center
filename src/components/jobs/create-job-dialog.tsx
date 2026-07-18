@@ -15,16 +15,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Loader2, Briefcase } from "lucide-react"
-
-const SERVICE_TYPE_PRESETS = [
-  "Artificial Grass", "Pavers", "Concrete", "Bathroom", "Roof",
-  "Windows", "Gutters", "Gravel", "DG", "White Rocks", "Paint",
-  "Refinish", "Kitchen",
-] as const
-
-function isPreset(v: string) {
-  return SERVICE_TYPE_PRESETS.includes(v as (typeof SERVICE_TYPE_PRESETS)[number])
-}
+import { ServiceTypeMultiSelect } from "@/components/ui/service-type-multi-select"
 
 interface PmInfo { id: string; name: string; color: string }
 
@@ -37,17 +28,10 @@ interface Props {
 }
 
 export function CreateJobDialog({ customerId, customerName, serviceType, userId, pms }: Props) {
-  const initial = serviceType ?? ""
-  const [open, setOpen]           = useState(false)
+  const [open, setOpen]             = useState(false)
   const [submitting, setSubmitting] = useState(false)
-
-  const [selectedService, setSelectedService] = useState(
-    initial && isPreset(initial) ? initial : initial ? "__other__" : ""
-  )
-  const [customService, setCustomService] = useState(
-    initial && !isPreset(initial) ? initial : ""
-  )
-  const [pmId, setPmId]               = useState("")
+  const [selectedService, setSelectedService] = useState(serviceType ?? "")
+  const [pmId, setPmId]             = useState("")
   const [scheduledDate, setScheduledDate] = useState("")
   const [notes, setNotes]             = useState("")
 
@@ -55,16 +39,13 @@ export function CreateJobDialog({ customerId, customerName, serviceType, userId,
   const { toast } = useToast()
 
   function reset() {
-    setSelectedService(initial && isPreset(initial) ? initial : initial ? "__other__" : "")
-    setCustomService(initial && !isPreset(initial) ? initial : "")
+    setSelectedService(serviceType ?? "")
     setPmId(""); setScheduledDate(""); setNotes("")
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const resolvedService = selectedService === "__other__"
-      ? customService.trim()
-      : selectedService
+    const resolvedService = selectedService.trim()
 
     if (!resolvedService) {
       toast({ title: "Service type is required", variant: "destructive" }); return
@@ -131,31 +112,7 @@ export function CreateJobDialog({ customerId, customerName, serviceType, userId,
         <form onSubmit={handleSubmit} className="space-y-4 pt-1">
           <div className="space-y-1.5">
             <Label>Service Type *</Label>
-            <Select
-              value={selectedService}
-              onValueChange={(v) => {
-                setSelectedService(v)
-                if (v !== "__other__") setCustomService("")
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select service type…" />
-              </SelectTrigger>
-              <SelectContent>
-                {SERVICE_TYPE_PRESETS.map((t) => (
-                  <SelectItem key={t} value={t}>{t}</SelectItem>
-                ))}
-                <SelectItem value="__other__">Other (type your own)</SelectItem>
-              </SelectContent>
-            </Select>
-            {selectedService === "__other__" && (
-              <Input
-                placeholder="e.g. Pool, Driveway, Deck…"
-                value={customService}
-                onChange={(e) => setCustomService(e.target.value)}
-                className="mt-2"
-              />
-            )}
+            <ServiceTypeMultiSelect value={selectedService} onChange={setSelectedService} />
           </div>
 
           {pms.length > 0 && (

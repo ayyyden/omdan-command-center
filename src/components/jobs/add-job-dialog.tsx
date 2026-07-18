@@ -15,12 +15,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Loader2, Plus } from "lucide-react"
-
-const SERVICE_TYPE_PRESETS = [
-  "Artificial Grass", "Pavers", "Concrete", "Bathroom", "Roof",
-  "Windows", "Gutters", "Gravel", "DG", "White Rocks", "Paint",
-  "Refinish", "Kitchen",
-] as const
+import { ServiceTypeMultiSelect } from "@/components/ui/service-type-multi-select"
 
 interface PmInfo { id: string; name: string; color: string }
 
@@ -42,7 +37,6 @@ export function AddJobDialog({ userId, pms }: Props) {
 
   // Job fields
   const [serviceType, setServiceType] = useState("")
-  const [customService, setCustomService] = useState("")
   const [pmId, setPmId]               = useState("")
   const [scheduledDate, setScheduledDate] = useState("")
   const [notes, setNotes]             = useState("")
@@ -60,7 +54,7 @@ export function AddJobDialog({ userId, pms }: Props) {
 
   function reset() {
     setName(""); setPhone(""); setEmail(""); setLeadSource("")
-    setServiceType(""); setCustomService(""); setPmId(""); setScheduledDate(""); setNotes("")
+    setServiceType(""); setPmId(""); setScheduledDate(""); setNotes("")
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -69,9 +63,7 @@ export function AddJobDialog({ userId, pms }: Props) {
       toast({ title: "Full name is required", variant: "destructive" }); return
     }
 
-    const resolvedService = serviceType === "__other__"
-      ? customService.trim()
-      : serviceType
+    const resolvedService = serviceType.trim()
 
     setSubmitting(true)
     const supabase = createClient()
@@ -193,25 +185,7 @@ export function AddJobDialog({ userId, pms }: Props) {
 
             <div className="space-y-1.5">
               <Label>Service Type</Label>
-              <Select value={serviceType} onValueChange={(v) => { setServiceType(v); if (v !== "__other__") setCustomService("") }}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select service type…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {SERVICE_TYPE_PRESETS.map((t) => (
-                    <SelectItem key={t} value={t}>{t}</SelectItem>
-                  ))}
-                  <SelectItem value="__other__">Other (type your own)</SelectItem>
-                </SelectContent>
-              </Select>
-              {serviceType === "__other__" && (
-                <Input
-                  placeholder="e.g. Pool, Driveway, Deck…"
-                  value={customService}
-                  onChange={(e) => setCustomService(e.target.value)}
-                  className="mt-2"
-                />
-              )}
+              <ServiceTypeMultiSelect value={serviceType} onChange={setServiceType} />
             </div>
 
             {pms.length > 0 && (
