@@ -14,6 +14,7 @@ import { FileSection } from "@/components/shared/file-section"
 import { CustomerMobileActions } from "@/components/customers/customer-mobile-actions"
 import { CopyButtons } from "@/components/customers/copy-buttons"
 import { AppointmentCard } from "@/components/customers/appointment-card"
+import { CreateJobDialog } from "@/components/jobs/create-job-dialog"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -264,9 +265,18 @@ export default async function CustomerDetailPage({ params }: PageProps) {
         {/* Jobs */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Briefcase className="w-4 h-4" /> Jobs
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Briefcase className="w-4 h-4" /> Jobs
+              </CardTitle>
+              <CreateJobDialog
+                customerId={customer.id}
+                customerName={customer.name}
+                serviceType={customer.service_type ?? null}
+                userId={user.id}
+                pms={pms ?? []}
+              />
+            </div>
           </CardHeader>
           <CardContent>
             {!jobs || jobs.length === 0 ? (
