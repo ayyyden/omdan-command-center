@@ -18,6 +18,25 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { CalendarDays, Clock, Loader2, Plus, Trash2, UserCircle } from "lucide-react"
 import type { Customer } from "@/types"
 
+const SERVICE_TYPE_PRESETS = [
+  "Artificial Grass",
+  "Pavers",
+  "Concrete",
+  "Bathroom",
+  "Roof",
+  "Windows",
+  "Gutters",
+  "Gravel",
+  "DG",
+  "White Rocks",
+  "Paint",
+  "Refinish",
+  "Kitchen",
+] as const
+
+const isPreset = (v: string) =>
+  SERVICE_TYPE_PRESETS.includes(v as (typeof SERVICE_TYPE_PRESETS)[number])
+
 const LEAD_STATUSES = [
   "New Lead","Contacted","Estimate Sent","Follow-Up Needed",
   "Approved","Scheduled","In Progress","Completed","Paid","Closed Lost",
@@ -253,13 +272,42 @@ export function CustomerForm({ customer, userId, prefill, propstreamLeadId, prop
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="service_type" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Service Type</FormLabel>
-                  <FormControl><Input placeholder="Kitchen Remodel, Bathroom, Deck..." {...field} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
+              <FormField control={form.control} name="service_type" render={({ field }) => {
+                const selectVal = isPreset(field.value ?? "") ? field.value! : (field.value ? "__other__" : "")
+                return (
+                  <FormItem>
+                    <FormLabel>Service Type</FormLabel>
+                    <Select
+                      value={selectVal}
+                      onValueChange={(v) => {
+                        if (v !== "__other__") field.onChange(v)
+                        else if (!field.value || isPreset(field.value)) field.onChange("")
+                      }}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select service type…" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {SERVICE_TYPE_PRESETS.map((t) => (
+                          <SelectItem key={t} value={t}>{t}</SelectItem>
+                        ))}
+                        <SelectItem value="__other__">Other (type your own)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {selectVal === "__other__" && (
+                      <Input
+                        placeholder="e.g. Pool, Driveway, Deck…"
+                        value={field.value ?? ""}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        className="mt-2"
+                      />
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )
+              }} />
 
               {/* Lead Source */}
               <FormField control={form.control} name="lead_source" render={({ field }) => (

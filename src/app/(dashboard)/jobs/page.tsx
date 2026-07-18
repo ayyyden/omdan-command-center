@@ -5,15 +5,20 @@ import { JobsBulkTable } from "@/components/jobs/jobs-bulk-table"
 import Link from "next/link"
 import type { JobStatus } from "@/types"
 
-const JOB_STATUSES: JobStatus[] = ["scheduled", "in_progress", "completed", "on_hold", "cancelled"]
+const ACTIVE_STATUSES: JobStatus[] = ["scheduled", "in_progress"]
+const ALL_STATUSES: JobStatus[]    = ["scheduled", "in_progress", "completed", "on_hold", "cancelled"]
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; archived?: string }>
+  searchParams: Promise<{ status?: string; archived?: string; show?: string }>
 }
 
 export default async function JobsPage({ searchParams }: PageProps) {
-  const { status, archived } = await searchParams
-  const isArchived = archived === "true"
+  const { status, archived, show } = await searchParams
+  const isArchived  = archived === "true"
+  const showAll     = show === "all"
+  // Default view: only active jobs (scheduled + in_progress)
+  const isActiveTab = !isArchived && !showAll && !status
+
   const session = await getSessionMember()
   if (!session) return null
   const { userId, role, pmId, supabase } = session
@@ -34,26 +39,39 @@ export default async function JobsPage({ searchParams }: PageProps) {
     .order("scheduled_date", { ascending: false })
 
   if (hasJobScope(role)) query = query.eq("project_manager_id", pmId ?? NO_ROWS_ID)
-  if (!isArchived && status) query = query.eq("status", status)
+
+  if (isActiveTab) {
+    query = query.in("status", ACTIVE_STATUSES)
+  } else if (!isArchived && !showAll && status) {
+    query = query.eq("status", status)
+  }
 
   const { data: jobs } = await query
 
+  const tabLabel = isArchived ? " · Archived" : isActiveTab ? " · Active" : showAll ? " · All" : ""
+
   return (
     <div>
-      <Topbar title="Jobs" subtitle={`${jobs?.length ?? 0} jobs${isArchived ? " · Archived" : ""}`} />
+      <Topbar title="Jobs" subtitle={`${jobs?.length ?? 0} job${(jobs?.length ?? 0) !== 1 ? "s" : ""}${tabLabel}`} />
 
       <div className="p-4 sm:p-6 space-y-4">
         <div className="flex flex-wrap gap-2">
+          {/* Active = default tab */}
           <Link href="/jobs">
-            <Badge variant={!status && !isArchived ? "default" : "outline"} className="cursor-pointer">All</Badge>
+            <Badge variant={isActiveTab ? "default" : "outline"} className="cursor-pointer">Active</Badge>
           </Link>
-          {!isArchived && JOB_STATUSES.map((s) => (
+          {/* Individual status filters */}
+          {!isArchived && ALL_STATUSES.map((s) => (
             <Link key={s} href={`/jobs?status=${s}`}>
               <Badge variant={status === s ? "default" : "outline"} className="cursor-pointer capitalize">
                 {s.replace("_", " ")}
               </Badge>
             </Link>
           ))}
+          {/* Show all non-archived */}
+          <Link href="/jobs?show=all">
+            <Badge variant={showAll ? "default" : "outline"} className="cursor-pointer">All</Badge>
+          </Link>
           <Link href="/jobs?archived=true">
             <Badge variant={isArchived ? "default" : "outline"} className="cursor-pointer">Archived</Badge>
           </Link>
