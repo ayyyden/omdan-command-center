@@ -2,6 +2,7 @@ import { getSessionMember, hasJobScope, NO_ROWS_ID } from "@/lib/auth-helpers"
 import { Topbar } from "@/components/shared/topbar"
 import { Badge } from "@/components/ui/badge"
 import { JobsBulkTable } from "@/components/jobs/jobs-bulk-table"
+import { AddJobDialog } from "@/components/jobs/add-job-dialog"
 import Link from "next/link"
 import type { JobStatus } from "@/types"
 
@@ -48,11 +49,21 @@ export default async function JobsPage({ searchParams }: PageProps) {
 
   const { data: jobs } = await query
 
+  const { data: pms } = await supabase
+    .from("project_managers")
+    .select("id, name, color")
+    .eq("is_active", true)
+    .order("name")
+
   const tabLabel = isArchived ? " · Archived" : isActiveTab ? " · Active" : showAll ? " · All" : ""
 
   return (
     <div>
-      <Topbar title="Jobs" subtitle={`${jobs?.length ?? 0} job${(jobs?.length ?? 0) !== 1 ? "s" : ""}${tabLabel}`} />
+      <Topbar
+        title="Jobs"
+        subtitle={`${jobs?.length ?? 0} job${(jobs?.length ?? 0) !== 1 ? "s" : ""}${tabLabel}`}
+        actions={<AddJobDialog userId={userId} pms={pms ?? []} />}
+      />
 
       <div className="p-4 sm:p-6 space-y-4">
         <div className="flex flex-wrap gap-2">
