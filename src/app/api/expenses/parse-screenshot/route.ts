@@ -100,7 +100,18 @@ export async function POST(req: Request) {
 
   let transactions: RawTransaction[]
   try {
-    const parsed = JSON.parse(textBlock.text) as { transactions?: RawTransaction[] } | RawTransaction[]
+    // Strip markdown code fences Claude sometimes adds despite the prompt
+    let raw = textBlock.text.trim()
+    const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/)
+    if (fenceMatch) raw = fenceMatch[1].trim()
+
+    // If still no leading { or [, try to find the first JSON object in the text
+    if (!raw.startsWith("{") && !raw.startsWith("[")) {
+      const jsonStart = raw.search(/[{[]/)
+      if (jsonStart !== -1) raw = raw.slice(jsonStart)
+    }
+
+    const parsed = JSON.parse(raw) as { transactions?: RawTransaction[] } | RawTransaction[]
     transactions = (Array.isArray(parsed) ? parsed : (parsed as { transactions?: RawTransaction[] }).transactions) ?? []
     if (!Array.isArray(transactions)) throw new Error("not an array")
   } catch {
