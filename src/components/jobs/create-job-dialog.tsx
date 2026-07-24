@@ -17,17 +17,24 @@ import {
 import { Loader2, Briefcase } from "lucide-react"
 import { ServiceTypeMultiSelect } from "@/components/ui/service-type-multi-select"
 
+function streetFromAddress(address: string | null | undefined): string {
+  if (!address) return ""
+  const comma = address.indexOf(",")
+  return (comma > 0 ? address.slice(0, comma) : address).trim()
+}
+
 interface PmInfo { id: string; name: string; color: string }
 
 interface Props {
   customerId:   string
   customerName: string
+  address:      string | null
   serviceType:  string | null
   userId:       string
   pms:          PmInfo[]
 }
 
-export function CreateJobDialog({ customerId, customerName, serviceType, userId, pms }: Props) {
+export function CreateJobDialog({ customerId, customerName, address, serviceType, userId, pms }: Props) {
   const [open, setOpen]             = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [selectedService, setSelectedService] = useState(serviceType ?? "")
@@ -54,12 +61,15 @@ export function CreateJobDialog({ customerId, customerName, serviceType, userId,
     setSubmitting(true)
     const supabase = createClient()
 
+    const street = streetFromAddress(address)
+    const jobTitle = street || resolvedService
+
     const { data: job, error: jobErr } = await supabase
       .from("jobs")
       .insert({
         user_id:                    userId,
         customer_id:                customerId,
-        title:                      resolvedService,
+        title:                      jobTitle,
         status:                     scheduledDate ? "scheduled" : "in_progress",
         project_manager_id:         (pmId && pmId !== "none") ? pmId : null,
         scheduled_date:             scheduledDate || null,
@@ -85,11 +95,11 @@ export function CreateJobDialog({ customerId, customerName, serviceType, userId,
       entity_type: "job",
       entity_id:   job.id,
       action:      "created",
-      description: `Job created from lead: ${resolvedService}`,
+      description: `Job created from lead: ${jobTitle}`,
       job_id:      job.id,
     })
 
-    toast({ title: "Job created", description: `${resolvedService} for ${customerName}` })
+    toast({ title: "Job created", description: `${jobTitle} for ${customerName}` })
     setOpen(false)
     reset()
     router.push(`/jobs/${job.id}`)

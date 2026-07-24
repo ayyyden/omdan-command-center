@@ -272,6 +272,7 @@ export default async function CustomerDetailPage({ params }: PageProps) {
               <CreateJobDialog
                 customerId={customer.id}
                 customerName={customer.name}
+                address={customer.address ?? null}
                 serviceType={customer.service_type ?? null}
                 userId={user.id}
                 pms={pms ?? []}

@@ -16,6 +16,14 @@ import {
 } from "@/components/ui/select"
 import { Loader2, Plus } from "lucide-react"
 import { ServiceTypeMultiSelect } from "@/components/ui/service-type-multi-select"
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
+
+
+
+function streetFromAddress(address: string): string {
+  const comma = address.indexOf(",")
+  return (comma > 0 ? address.slice(0, comma) : address).trim()
+}
 
 interface PmInfo { id: string; name: string; color: string }
 
@@ -33,6 +41,7 @@ export function AddJobDialog({ userId, pms }: Props) {
   const [name, setName]               = useState("")
   const [phone, setPhone]             = useState("")
   const [email, setEmail]             = useState("")
+  const [address, setAddress]         = useState("")
   const [leadSource, setLeadSource]   = useState("")
 
   // Job fields
@@ -53,7 +62,7 @@ export function AddJobDialog({ userId, pms }: Props) {
   }, [open])
 
   function reset() {
-    setName(""); setPhone(""); setEmail(""); setLeadSource("")
+    setName(""); setPhone(""); setEmail(""); setAddress(""); setLeadSource("")
     setServiceType(""); setPmId(""); setScheduledDate(""); setNotes("")
   }
 
@@ -76,6 +85,7 @@ export function AddJobDialog({ userId, pms }: Props) {
         name:         name.trim(),
         phone:        phone.trim() || null,
         email:        email.trim() || null,
+        address:      address.trim() || null,
         service_type: resolvedService || null,
         lead_source:  leadSource || null,
         status:       "Scheduled",
@@ -88,8 +98,10 @@ export function AddJobDialog({ userId, pms }: Props) {
       setSubmitting(false); return
     }
 
-    // 2 — create job
-    const jobTitle = resolvedService || name.trim()
+    // 2 — create job; title = street portion of address, fallback to service type or name
+    const jobTitle = address.trim()
+      ? streetFromAddress(address.trim())
+      : resolvedService || name.trim()
     const { data: job, error: jobErr } = await supabase
       .from("jobs")
       .insert({
@@ -162,6 +174,16 @@ export function AddJobDialog({ userId, pms }: Props) {
                 <Label htmlFor="aj-email">Email</Label>
                 <Input id="aj-email" type="email" placeholder="john@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="aj-address">Address</Label>
+              <AddressAutocomplete
+                id="aj-address"
+                placeholder="123 Main St, City, State 00000"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+              />
             </div>
 
             <div className="space-y-1.5">
