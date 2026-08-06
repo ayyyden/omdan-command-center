@@ -6,7 +6,7 @@
 
 import { google } from "googleapis"
 
-const EVENT_DURATION_MINUTES = 30
+const EVENT_DURATION_MINUTES = 60
 
 export interface MetaLeadCalendarInfo {
   full_name: string
@@ -38,7 +38,7 @@ function getCalendarClient() {
 }
 
 /**
- * Creates a 30-minute event on the given calendar for the given lead at whenISO.
+ * Creates a 1-hour event on the given calendar for the given lead at whenISO.
  * Throws on any failure — callers should NOT update the DB row until this resolves.
  */
 export async function createCalendarEvent(

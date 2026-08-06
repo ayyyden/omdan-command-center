@@ -6,6 +6,7 @@ import { Sidebar } from "./sidebar"
 import { GlobalSearch } from "./global-search"
 import { NotificationBell } from "./notification-bell"
 import { UserRoleProvider } from "@/lib/user-role-context"
+import { can } from "@/lib/permissions"
 import type { TeamRole } from "@/lib/permissions"
 
 interface DashboardShellProps {
@@ -20,6 +21,7 @@ interface DashboardShellProps {
 export function DashboardShell({ children, logoUrl, companyName, userRole, userName, pmId }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [notifCount, setNotifCount] = useState(0)
+  const canSeeNotifications = can(userRole, "notifications:view")
 
   useEffect(() => {
     const handler = (e: Event) => setNotifCount((e as CustomEvent<number>).detail)
@@ -72,18 +74,20 @@ export function DashboardShell({ children, logoUrl, companyName, userRole, userN
             )}
 
             <div className="ml-auto flex items-center gap-1">
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent("open-notifications"))}
-                className="relative p-1.5 rounded-lg hover:bg-accent transition-colors"
-                aria-label="Notifications"
-              >
-                <Bell className="w-5 h-5" />
-                {notifCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[16px] h-4 px-0.5 text-[9px] font-bold bg-destructive text-destructive-foreground rounded-full leading-none">
-                    {notifCount > 99 ? "99+" : notifCount}
-                  </span>
-                )}
-              </button>
+              {canSeeNotifications && (
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent("open-notifications"))}
+                  className="relative p-1.5 rounded-lg hover:bg-accent transition-colors"
+                  aria-label="Notifications"
+                >
+                  <Bell className="w-5 h-5" />
+                  {notifCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[16px] h-4 px-0.5 text-[9px] font-bold bg-destructive text-destructive-foreground rounded-full leading-none">
+                      {notifCount > 99 ? "99+" : notifCount}
+                    </span>
+                  )}
+                </button>
+              )}
               <button
                 onClick={() => window.dispatchEvent(new CustomEvent("open-global-search"))}
                 className="p-1.5 rounded-lg hover:bg-accent transition-colors"
@@ -103,7 +107,7 @@ export function DashboardShell({ children, logoUrl, companyName, userRole, userN
         </div>
 
         <GlobalSearch />
-        <NotificationBell role={userRole} pmId={pmId ?? null} />
+        {canSeeNotifications && <NotificationBell role={userRole} pmId={pmId ?? null} />}
       </div>
     </UserRoleProvider>
   )

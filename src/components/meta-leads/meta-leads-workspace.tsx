@@ -7,7 +7,7 @@ import { MetaLeadColumn } from "@/components/meta-leads/meta-lead-column"
 import type { MetaLead, MetaLeadsGrouped } from "@/types"
 
 const EMPTY: MetaLeadsGrouped = {
-  call_list: [], second_call_list: [], schedule_call_list: [], scheduled: [],
+  call_list: [], second_call_list: [], schedule_call_list: [], scheduled: [], archive: [],
 }
 
 export function MetaLeadsWorkspace() {
@@ -47,6 +47,7 @@ export function MetaLeadsWorkspace() {
         second_call_list: prev.second_call_list.filter((l) => l.id !== updated.id),
         schedule_call_list: prev.schedule_call_list.filter((l) => l.id !== updated.id),
         scheduled: prev.scheduled.filter((l) => l.id !== updated.id),
+        archive: prev.archive.filter((l) => l.id !== updated.id),
       }
       next[updated.list].unshift(updated)
       return next
@@ -59,6 +60,7 @@ export function MetaLeadsWorkspace() {
       second_call_list: prev.second_call_list.filter((l) => l.id !== id),
       schedule_call_list: prev.schedule_call_list.filter((l) => l.id !== id),
       scheduled: prev.scheduled.filter((l) => l.id !== id),
+      archive: prev.archive.filter((l) => l.id !== id),
     }))
   }
 
@@ -80,6 +82,7 @@ export function MetaLeadsWorkspace() {
       <TabsList className="shrink-0 w-fit">
         <TabsTrigger value="active">Active</TabsTrigger>
         <TabsTrigger value="scheduled">Scheduled ({data.scheduled.length})</TabsTrigger>
+        <TabsTrigger value="archive">Archive ({data.archive.length})</TabsTrigger>
       </TabsList>
 
       <TabsContent value="active" className="flex-1 min-h-0 mt-3">
@@ -113,6 +116,16 @@ export function MetaLeadsWorkspace() {
           title="Scheduled"
           leads={data.scheduled}
           emptyLabel="No scheduled appointments yet."
+          onUpdated={handleUpdated}
+          onDeleted={handleDeleted}
+        />
+      </TabsContent>
+
+      <TabsContent value="archive" className="flex-1 min-h-0 mt-3">
+        <MetaLeadColumn
+          title="Archive"
+          leads={data.archive}
+          emptyLabel="No archived leads."
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
         />

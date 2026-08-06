@@ -6,8 +6,13 @@ interface RouteCtx { params: Promise<{ id: string }> }
 const SELECT_FIELDS = `
   id, full_name, email, phone, city, address, raw_paste,
   list, last_outcome, scheduled_at, calendar_event_id, calendar_id,
-  notes, created_at, updated_at
+  missed_call_count, notes, created_at, updated_at
 `
+
+// Only manual list moves this route allows — automatic progression (call →
+// second → archive-at-10, or → scheduled/schedule_call_list via a calendar
+// outcome) stays exclusively in POST .../outcome.
+const MANUAL_LIST_TRANSITIONS = ["call_list", "archive"] as const
 
 export async function PATCH(req: NextRequest, { params }: RouteCtx) {
   const { id } = await params
@@ -22,6 +27,7 @@ export async function PATCH(req: NextRequest, { params }: RouteCtx) {
     city?: string | null
     address?: string | null
     notes?: string | null
+    list?: string
   }
 
   const updates: Record<string, unknown> = {}
@@ -35,6 +41,12 @@ export async function PATCH(req: NextRequest, { params }: RouteCtx) {
   if (body.city    !== undefined) updates.city    = body.city?.trim() || null
   if (body.address !== undefined) updates.address = body.address?.trim() || null
   if (body.notes   !== undefined) updates.notes   = body.notes?.trim() || null
+  if (body.list    !== undefined) {
+    if (!MANUAL_LIST_TRANSITIONS.includes(body.list as typeof MANUAL_LIST_TRANSITIONS[number])) {
+      return Response.json({ error: `Invalid list: ${body.list}` }, { status: 400 })
+    }
+    updates.list = body.list
+  }
 
   if (Object.keys(updates).length === 0) {
     return Response.json({ error: "Nothing to update" }, { status: 400 })

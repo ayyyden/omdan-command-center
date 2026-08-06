@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/auth-helpers"
 const SELECT_FIELDS = `
   id, full_name, email, phone, city, address, raw_paste,
   list, last_outcome, scheduled_at, calendar_event_id, calendar_id,
-  notes, created_at, updated_at
+  missed_call_count, notes, created_at, updated_at
 `
 
 export async function GET(_req: NextRequest) {
@@ -25,6 +25,7 @@ export async function GET(_req: NextRequest) {
     second_call_list:   leads.filter((l) => l.list === "second_call_list"),
     schedule_call_list: leads.filter((l) => l.list === "schedule_call_list"),
     scheduled:          leads.filter((l) => l.list === "scheduled"),
+    archive:            leads.filter((l) => l.list === "archive"),
   }
 
   return Response.json(grouped)

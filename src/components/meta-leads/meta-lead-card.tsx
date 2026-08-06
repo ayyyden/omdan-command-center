@@ -1,8 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { Mail, MapPin, Pencil, Trash2, Home, CalendarClock } from "lucide-react"
+import { Mail, MapPin, Pencil, Trash2, Home, CalendarClock, Archive, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PhoneCopyButton } from "@/components/meta-leads/phone-copy-button"
 import { EditLeadDialog } from "@/components/meta-leads/edit-lead-dialog"
@@ -29,7 +30,32 @@ export function MetaLeadCard({ lead, onUpdated, onDeleted }: MetaLeadCardProps) 
   const [addressOpen, setAddressOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [movingList, setMovingList] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const isArchived = lead.list === "archive"
+
+  async function moveToList(list: "archive" | "call_list") {
+    setMovingList(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/meta-leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ list }),
+      })
+      const data = await res.json() as { lead?: MetaLead; error?: string }
+      if (!res.ok || !data.lead) {
+        setError(data.error ?? "Failed to update lead")
+        return
+      }
+      onUpdated(data.lead)
+    } catch {
+      setError("Network error — please try again")
+    } finally {
+      setMovingList(false)
+    }
+  }
 
   async function handleDelete() {
     setDeleting(true)
@@ -55,11 +81,27 @@ export function MetaLeadCard({ lead, onUpdated, onDeleted }: MetaLeadCardProps) 
   return (
     <div className="rounded-xl border bg-card shadow-sm p-3 space-y-2.5">
       <div className="flex items-start justify-between gap-2">
-        <p className="font-semibold text-sm text-foreground leading-tight">{lead.full_name}</p>
+        <div className="min-w-0">
+          <p className="font-semibold text-sm text-foreground leading-tight">{lead.full_name}</p>
+          {(isArchived || lead.missed_call_count >= 2) && (
+            <Badge variant="warning" className="mt-1 text-[10px]">
+              Missed {lead.missed_call_count}x
+            </Badge>
+          )}
+        </div>
         <div className="flex items-center gap-0.5 shrink-0">
           <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit" onClick={() => setEditOpen(true)}>
             <Pencil className="w-3.5 h-3.5" />
           </Button>
+          {!isArchived && (
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7" title="Archive"
+              disabled={movingList}
+              onClick={() => moveToList("archive")}
+            >
+              <Archive className="w-3.5 h-3.5" />
+            </Button>
+          )}
           <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" title="Delete" onClick={() => setConfirmDelete(true)}>
             <Trash2 className="w-3.5 h-3.5" />
           </Button>
@@ -98,7 +140,18 @@ export function MetaLeadCard({ lead, onUpdated, onDeleted }: MetaLeadCardProps) 
         {lead.address ? "Edit Address" : "Add Address"}
       </Button>
 
-      <OutcomeMenu lead={lead} onUpdated={onUpdated} onDeleted={onDeleted} />
+      {isArchived ? (
+        <Button
+          variant="outline" size="sm" className="w-full gap-1.5"
+          disabled={movingList}
+          onClick={() => moveToList("call_list")}
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Restore to Call List
+        </Button>
+      ) : (
+        <OutcomeMenu lead={lead} onUpdated={onUpdated} onDeleted={onDeleted} />
+      )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 

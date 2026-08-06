@@ -190,6 +190,7 @@ function formatJobTime(t: string | null): string | null {
 export default async function DashboardPage() {
   const session = await getSessionMember()
   if (!session) redirect("/login")
+  if (!can(session.role, "dashboard:view")) redirect("/access-denied")
   const { userId, role, supabase, pmId } = session
 
   const isAdmin = can(role, "dashboard:financials")

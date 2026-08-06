@@ -7,8 +7,10 @@ interface RouteCtx { params: Promise<{ id: string }> }
 const SELECT_FIELDS = `
   id, full_name, email, phone, city, address, raw_paste,
   list, last_outcome, scheduled_at, calendar_event_id, calendar_id,
-  notes, created_at, updated_at
+  missed_call_count, notes, created_at, updated_at
 `
+
+const MISSED_CALL_ARCHIVE_THRESHOLD = 10
 
 const OUTCOMES = ["answered_scheduled", "no_answer", "callback_later"] as const
 type Outcome = typeof OUTCOMES[number]
@@ -27,10 +29,26 @@ export async function POST(req: NextRequest, { params }: RouteCtx) {
   }
 
   // No Answer needs no calendar call — just relocate the card.
+  // missed_call_count is a lifetime counter (never auto-resets): every
+  // No Answer increments it, and hitting the threshold auto-archives the
+  // lead instead of sending it back to Second Call List.
   if (outcome === "no_answer") {
+    const { data: current, error: fetchErr } = await supabase
+      .from("meta_leads")
+      .select("missed_call_count")
+      .eq("id", id)
+      .single()
+
+    if (fetchErr || !current) {
+      return Response.json({ error: fetchErr?.message ?? "Lead not found" }, { status: 404 })
+    }
+
+    const newCount = (current.missed_call_count ?? 0) + 1
+    const nextList = newCount >= MISSED_CALL_ARCHIVE_THRESHOLD ? "archive" : "second_call_list"
+
     const { data, error } = await supabase
       .from("meta_leads")
-      .update({ list: "second_call_list", last_outcome: "no_answer" })
+      .update({ list: nextList, last_outcome: "no_answer", missed_call_count: newCount })
       .eq("id", id)
       .select(SELECT_FIELDS)
       .single()

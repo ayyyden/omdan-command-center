@@ -208,6 +208,14 @@ export function can(role: TeamRole, action: string): boolean {
     case 'meta_leads:manage':
       return role === 'meta_lead' || roleAtLeast(role, 'admin')
 
+    // ── Dashboard / Notifications ─────────────────────────────────────────────
+    // Restricted single-page roles (meta_lead, lead_operator) get neither —
+    // matches ALL_ROLES in sidebar.tsx, the roles that actually have Dashboard
+    // in their nav.
+    case 'dashboard:view':
+    case 'notifications:view':
+      return role === 'project_manager' || roleAtLeast(role, 'admin')
+
     // ── Lia CRM Chat ──────────────────────────────────────────────────────────
     case 'lia:chat':
       return roleAtLeast(role, 'admin')

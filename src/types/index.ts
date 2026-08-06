@@ -287,7 +287,7 @@ export interface JobProfitSummary {
 
 // ── Meta Lead Jobs (Facebook/Meta Lead Ads call-list workspace) ─────────────
 
-export type MetaLeadList = "call_list" | "second_call_list" | "schedule_call_list" | "scheduled"
+export type MetaLeadList = "call_list" | "second_call_list" | "schedule_call_list" | "scheduled" | "archive"
 
 export type MetaLeadOutcome = "answered_scheduled" | "no_answer" | "callback_later" | "not_interested"
 
@@ -304,6 +304,7 @@ export interface MetaLead {
   scheduled_at: string | null
   calendar_event_id: string | null
   calendar_id: string | null
+  missed_call_count: number
   notes: string | null
   created_at: string
   updated_at: string
@@ -314,4 +315,5 @@ export interface MetaLeadsGrouped {
   second_call_list: MetaLead[]
   schedule_call_list: MetaLead[]
   scheduled: MetaLead[]
+  archive: MetaLead[]
 }

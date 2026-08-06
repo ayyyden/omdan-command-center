@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
+import { can } from "@/lib/permissions"
 import type { TeamRole } from "@/lib/permissions"
 import { RoleBadge } from "@/components/team/role-badge"
 
@@ -170,19 +171,21 @@ export function Sidebar({ isOpen = false, onClose, logoUrl, companyName, userRol
             </div>
           )}
 
-          <button
-            onClick={() => window.dispatchEvent(new CustomEvent("open-notifications"))}
-            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
-            aria-label={`Notifications${notifCount > 0 ? ` (${notifCount})` : ""}`}
-          >
-            <Bell className="w-4 h-4 shrink-0" />
-            Notifications
-            {notifCount > 0 && (
-              <span className="ml-auto flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold bg-destructive text-destructive-foreground rounded-full leading-none">
-                {notifCount > 99 ? "99+" : notifCount}
-              </span>
-            )}
-          </button>
+          {userRole && can(userRole, "notifications:view") && (
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent("open-notifications"))}
+              className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
+              aria-label={`Notifications${notifCount > 0 ? ` (${notifCount})` : ""}`}
+            >
+              <Bell className="w-4 h-4 shrink-0" />
+              Notifications
+              {notifCount > 0 && (
+                <span className="ml-auto flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold bg-destructive text-destructive-foreground rounded-full leading-none">
+                  {notifCount > 99 ? "99+" : notifCount}
+                </span>
+              )}
+            </button>
+          )}
 
           <button
             onClick={handleLogout}

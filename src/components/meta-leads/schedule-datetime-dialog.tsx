@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { fromZonedTime } from "date-fns-tz"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -31,7 +32,12 @@ export function ScheduleDateTimeDialog({
 
   function handleConfirm() {
     if (!date) return
-    onConfirm(new Date(`${date}T${time}:00`).toISOString())
+    // The date/time picked always means Pacific wall-clock time, regardless of
+    // the employee's device timezone — convert explicitly rather than letting
+    // `new Date(...)` parse it in the browser's local timezone (which caused
+    // scheduled times to land hours off on the calendar).
+    const whenUTC = fromZonedTime(`${date}T${time}:00`, "America/Los_Angeles")
+    onConfirm(whenUTC.toISOString())
   }
 
   return (

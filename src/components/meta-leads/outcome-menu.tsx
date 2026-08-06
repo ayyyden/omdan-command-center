@@ -7,7 +7,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ScheduleDateTimeDialog } from "@/components/meta-leads/schedule-datetime-dialog"
-import { PhoneCall, ChevronDown } from "lucide-react"
+import { buildNoAnswerSms } from "@/lib/meta-lead-sms"
+import { PhoneCall, ChevronDown, Check } from "lucide-react"
 import type { MetaLead, MetaLeadOutcome } from "@/types"
 
 interface OutcomeMenuProps {
@@ -21,6 +22,7 @@ export function OutcomeMenu({ lead, onUpdated, onDeleted }: OutcomeMenuProps) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [copiedNotice, setCopiedNotice] = useState(false)
 
   async function postOutcome(outcome: MetaLeadOutcome, scheduled_at?: string) {
     setLoading(true)
@@ -43,6 +45,21 @@ export function OutcomeMenu({ lead, onUpdated, onDeleted }: OutcomeMenuProps) {
     } finally {
       setLoading(false)
     }
+  }
+
+  function handleNoAnswer() {
+    // First miss of this call cycle (not already sitting in Second Call List)
+    // — copy the follow-up text so it can be pasted into Google Voice.
+    // Pressing No Answer again on a lead already in Second Call List doesn't
+    // re-copy (they've already been texted once for this cycle).
+    const isFirstMiss = lead.list !== "second_call_list"
+    if (isFirstMiss) {
+      navigator.clipboard.writeText(buildNoAnswerSms(lead.full_name)).then(() => {
+        setCopiedNotice(true)
+        setTimeout(() => setCopiedNotice(false), 3000)
+      })
+    }
+    postOutcome("no_answer")
   }
 
   async function handleDelete() {
@@ -80,7 +97,7 @@ export function OutcomeMenu({ lead, onUpdated, onDeleted }: OutcomeMenuProps) {
           <DropdownMenuItem onClick={() => setPending("answered_scheduled")}>
             Answered &amp; Scheduled
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => postOutcome("no_answer")}>
+          <DropdownMenuItem onClick={handleNoAnswer}>
             No Answer
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setPending("callback_later")}>
@@ -95,6 +112,12 @@ export function OutcomeMenu({ lead, onUpdated, onDeleted }: OutcomeMenuProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {copiedNotice && (
+        <p className="text-xs text-green-600 dark:text-green-400 mt-1.5 flex items-center gap-1">
+          <Check className="w-3 h-3" />
+          Message copied — paste it in Google Voice
+        </p>
+      )}
       {error && <p className="text-xs text-destructive mt-1.5">{error}</p>}
 
       <ScheduleDateTimeDialog
