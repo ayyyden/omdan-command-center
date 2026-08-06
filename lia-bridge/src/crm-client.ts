@@ -88,6 +88,15 @@ export async function executeApproval(id: string): Promise<ExecuteResponse> {
   return res.json() as Promise<ExecuteResponse>
 }
 
+export async function rolloverMetaLeads(): Promise<{ moved: number }> {
+  const res = await crmFetch("/api/meta-leads/rollover", { method: "POST" })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`CRM meta-leads rollover failed (${res.status}): ${text}`)
+  }
+  return res.json() as Promise<{ moved: number }>
+}
+
 export async function createApproval(body: {
   channel:          string
   action_type:      string

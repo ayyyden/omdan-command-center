@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { redirect } from "next/navigation"
 import { Topbar } from "@/components/shared/topbar"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -7,11 +8,23 @@ import { TEMPLATE_TYPE_LABELS, ToggleTemplateButton, DeleteTemplateButton } from
 import { Pencil, Plus } from "lucide-react"
 import Link from "next/link"
 import type { MessageTemplate } from "@/types"
+import { can } from "@/lib/permissions"
+import type { TeamRole } from "@/lib/permissions"
 
 export default async function MessageTemplatesPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  if (!user) redirect("/login")
+
+  const { data: member } = await supabase
+    .from("team_members")
+    .select("role")
+    .eq("user_id", user.id)
+    .single()
+
+  if (!member || !can(member.role as TeamRole, "settings:templates")) {
+    redirect("/settings")
+  }
 
   const { data: templates } = await supabase
     .from("message_templates")

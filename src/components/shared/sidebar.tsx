@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Users, FileText, Briefcase, Calendar,
   Receipt, DollarSign, BarChart3, HardHat, LogOut, Settings,
-  ScrollText, X, Search, Bell, UsersRound, Calculator, PhoneCall, Bot,
+  ScrollText, X, Search, Bell, UsersRound, Calculator, PhoneCall, Bot, Megaphone,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
@@ -28,8 +28,9 @@ const navItems = [
   { href: "/contracts",   label: "Contracts",   icon: ScrollText,   roles: ["owner", "admin", "office"] as TeamRole[] },
   { href: "/calculator",       label: "Calculator",   icon: Calculator,  roles: ["owner", "admin", "project_manager"] as TeamRole[] },
   { href: "/propstream-leads", label: "Lead Center",  icon: PhoneCall,   roles: ["owner", "admin", "lead_operator"] as TeamRole[] },
+  { href: "/meta-leads",       label: "Meta Lead Jobs", icon: Megaphone, roles: ["owner", "admin", "meta_lead"] as TeamRole[] },
   { href: "/lia",              label: "Lia AI",       icon: Bot,         roles: ["owner", "admin"] as TeamRole[] },
-  { href: "/settings",         label: "Settings",     icon: Settings,    roles: ALL_ROLES },
+  { href: "/settings",         label: "Settings",     icon: Settings,    roles: [...ALL_ROLES, "meta_lead"] as TeamRole[] },
 ]
 
 interface SidebarProps {

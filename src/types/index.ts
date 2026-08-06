@@ -284,3 +284,34 @@ export interface JobProfitSummary {
   profit_margin: number
   amount_unpaid: number
 }
+
+// ── Meta Lead Jobs (Facebook/Meta Lead Ads call-list workspace) ─────────────
+
+export type MetaLeadList = "call_list" | "second_call_list" | "schedule_call_list" | "scheduled"
+
+export type MetaLeadOutcome = "answered_scheduled" | "no_answer" | "callback_later" | "not_interested"
+
+export interface MetaLead {
+  id: string
+  full_name: string
+  email: string | null
+  phone: string | null
+  city: string | null
+  address: string | null
+  raw_paste: string | null
+  list: MetaLeadList
+  last_outcome: string | null
+  scheduled_at: string | null
+  calendar_event_id: string | null
+  calendar_id: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface MetaLeadsGrouped {
+  call_list: MetaLead[]
+  second_call_list: MetaLead[]
+  schedule_call_list: MetaLead[]
+  scheduled: MetaLead[]
+}

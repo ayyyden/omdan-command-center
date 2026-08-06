@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { redirect } from "next/navigation"
 import { Topbar } from "@/components/shared/topbar"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -7,6 +8,8 @@ import { Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import type { ProjectManager } from "@/types"
+import { can } from "@/lib/permissions"
+import type { TeamRole } from "@/lib/permissions"
 
 interface PageProps {
   searchParams: Promise<{ archived?: string }>
@@ -18,7 +21,17 @@ export default async function ProjectManagersPage({ searchParams }: PageProps) {
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  if (!user) redirect("/login")
+
+  const { data: member } = await supabase
+    .from("team_members")
+    .select("role")
+    .eq("user_id", user.id)
+    .single()
+
+  if (!member || !can(member.role as TeamRole, "settings:project_managers")) {
+    redirect("/settings")
+  }
 
   const { data: pms } = await supabase
     .from("project_managers")

@@ -1,10 +1,13 @@
 import { schedule } from "node-cron"
-import { sendMessage }       from "./crm-client"
+import { sendMessage, rolloverMetaLeads } from "./crm-client"
 import { formatDailySummary } from "./format-response"
 import { sendTelegramMessage } from "./telegram-client"
 
 // Exported so index.ts can pass in the already-parsed allowed IDs.
 export function startScheduler(allowedIds: Set<number>): void {
+  // Meta leads rollover has no Telegram dependency — always start it.
+  startMetaLeadsRollover()
+
   if (allowedIds.size === 0) {
     console.log("[scheduler] No TELEGRAM_ALLOWED_USER_IDS configured — daily summary disabled")
     return
@@ -57,4 +60,34 @@ export function startScheduler(allowedIds: Set<number>): void {
   )
 
   console.log("[scheduler] Daily summary scheduled — Sun–Fri at 08:00 America/Los_Angeles")
+}
+
+// Nightly at 12:00 AM Los Angeles time: move every Meta lead in "Second Call
+// List" back to the main "Call List" and empty Second Call List. Runs
+// independent of Telegram config — it's a pure CRM data job.
+function startMetaLeadsRollover(): void {
+  schedule(
+    "0 0 * * *",
+    async () => {
+      const localNow = new Date().toLocaleString("en-US", {
+        timeZone: "America/Los_Angeles",
+        weekday: "long", month: "short", day: "numeric",
+        hour: "numeric", minute: "2-digit",
+      })
+      console.log(`[scheduler] Meta leads rollover starting — ${localNow}`)
+      try {
+        const { moved } = await rolloverMetaLeads()
+        console.log(`[scheduler] Meta leads rollover complete — moved ${moved} lead(s) back to Call List`)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error("[scheduler] Meta leads rollover failed:", msg)
+      }
+    },
+    {
+      timezone:  "America/Los_Angeles",
+      noOverlap: true,
+    },
+  )
+
+  console.log("[scheduler] Meta leads rollover scheduled — daily at 00:00 America/Los_Angeles")
 }
