@@ -17,13 +17,7 @@ import {
 import { Loader2, Plus } from "lucide-react"
 import { ServiceTypeMultiSelect } from "@/components/ui/service-type-multi-select"
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
-
-
-
-function streetFromAddress(address: string): string {
-  const comma = address.indexOf(",")
-  return (comma > 0 ? address.slice(0, comma) : address).trim()
-}
+import { deriveJobTitle } from "@/lib/job-title"
 
 interface PmInfo { id: string; name: string; color: string }
 
@@ -99,9 +93,7 @@ export function AddJobDialog({ userId, pms }: Props) {
     }
 
     // 2 — create job; title = street portion of address, fallback to service type or name
-    const jobTitle = address.trim()
-      ? streetFromAddress(address.trim())
-      : resolvedService || name.trim()
+    const jobTitle = deriveJobTitle(address.trim(), resolvedService || name.trim())
     const { data: job, error: jobErr } = await supabase
       .from("jobs")
       .insert({

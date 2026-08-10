@@ -10,40 +10,33 @@ const ACTIVE_STATUSES: JobStatus[] = ["scheduled", "in_progress"]
 const ALL_STATUSES: JobStatus[]    = ["scheduled", "in_progress", "completed", "on_hold", "cancelled"]
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; archived?: string; show?: string }>
+  searchParams: Promise<{ status?: string; show?: string }>
 }
 
 export default async function JobsPage({ searchParams }: PageProps) {
-  const { status, archived, show } = await searchParams
-  const isArchived  = archived === "true"
+  const { status, show } = await searchParams
   const showAll     = show === "all"
   // Default view: only active jobs (scheduled + in_progress)
-  const isActiveTab = !isArchived && !showAll && !status
+  const isActiveTab = !showAll && !status
 
   const session = await getSessionMember()
   if (!session) return null
   const { userId, role, pmId, supabase } = session
 
-  // Lazily archive completed jobs older than 14 days
-  const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
-  await supabase
-    .from("jobs")
-    .update({ is_archived: true })
-    .eq("status", "completed")
-    .eq("is_archived", false)
-    .lte("completion_date", twoWeeksAgo)
-
+  // No archiving/hiding here — every job is visible somewhere (Active,
+  // a status tab, or All). "Archived" used to silently move completed
+  // jobs older than 14 days out of every tab except a separate Archived
+  // filter, which is exactly the "can't see all jobs" bug.
   let query = supabase
     .from("jobs")
     .select("*, customer:customers(name)")
-    .eq("is_archived", isArchived)
     .order("scheduled_date", { ascending: false })
 
   if (hasJobScope(role)) query = query.eq("project_manager_id", pmId ?? NO_ROWS_ID)
 
   if (isActiveTab) {
     query = query.in("status", ACTIVE_STATUSES)
-  } else if (!isArchived && !showAll && status) {
+  } else if (!showAll && status) {
     query = query.eq("status", status)
   }
 
@@ -55,7 +48,7 @@ export default async function JobsPage({ searchParams }: PageProps) {
     .eq("is_active", true)
     .order("name")
 
-  const tabLabel = isArchived ? " · Archived" : isActiveTab ? " · Active" : showAll ? " · All" : ""
+  const tabLabel = isActiveTab ? " · Active" : showAll ? " · All" : ""
 
   return (
     <div>
@@ -72,19 +65,16 @@ export default async function JobsPage({ searchParams }: PageProps) {
             <Badge variant={isActiveTab ? "default" : "outline"} className="cursor-pointer">Active</Badge>
           </Link>
           {/* Individual status filters */}
-          {!isArchived && ALL_STATUSES.map((s) => (
+          {ALL_STATUSES.map((s) => (
             <Link key={s} href={`/jobs?status=${s}`}>
               <Badge variant={status === s ? "default" : "outline"} className="cursor-pointer capitalize">
                 {s.replace("_", " ")}
               </Badge>
             </Link>
           ))}
-          {/* Show all non-archived */}
+          {/* Show every job, regardless of status */}
           <Link href="/jobs?show=all">
             <Badge variant={showAll ? "default" : "outline"} className="cursor-pointer">All</Badge>
-          </Link>
-          <Link href="/jobs?archived=true">
-            <Badge variant={isArchived ? "default" : "outline"} className="cursor-pointer">Archived</Badge>
           </Link>
         </div>
 

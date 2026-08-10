@@ -16,12 +16,7 @@ import {
 } from "@/components/ui/select"
 import { Loader2, Briefcase } from "lucide-react"
 import { ServiceTypeMultiSelect } from "@/components/ui/service-type-multi-select"
-
-function streetFromAddress(address: string | null | undefined): string {
-  if (!address) return ""
-  const comma = address.indexOf(",")
-  return (comma > 0 ? address.slice(0, comma) : address).trim()
-}
+import { deriveJobTitle } from "@/lib/job-title"
 
 interface PmInfo { id: string; name: string; color: string }
 
@@ -61,8 +56,7 @@ export function CreateJobDialog({ customerId, customerName, address, serviceType
     setSubmitting(true)
     const supabase = createClient()
 
-    const street = streetFromAddress(address)
-    const jobTitle = street || resolvedService
+    const jobTitle = deriveJobTitle(address, resolvedService)
 
     const { data: job, error: jobErr } = await supabase
       .from("jobs")

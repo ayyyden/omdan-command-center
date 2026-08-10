@@ -8,6 +8,7 @@ import { generateEstimatePDFBuffer } from "@/lib/pdf/generate-estimate-pdf"
 import { generateInvoicePDFBuffer } from "@/lib/pdf/generate-invoice-pdf"
 import { notifyLia } from "@/lib/lia-notifications"
 import { normalizePaymentLabel } from "@/lib/lia-text-normalizer"
+import { deriveJobTitle } from "@/lib/job-title"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -1456,12 +1457,21 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       return NextResponse.json({ error: "customer_id and title are required" }, { status: 400 })
     }
 
+    // Job title is always the customer's street address when one is on
+    // file — never a service description, even if Lia proposed one.
+    const { data: jobCustomer } = await supabase
+      .from("customers")
+      .select("address")
+      .eq("id", customer_id)
+      .single()
+    const jobTitle = deriveJobTitle(jobCustomer?.address, title)
+
     const { data: job, error: jobErr } = await supabase
       .from("jobs")
       .insert({
         customer_id,
         user_id:        ownerUserId,
-        title,
+        title:          jobTitle,
         description:    description ?? null,
         status:         jobStatus ?? "scheduled",
         scheduled_date: scheduled_date ?? null,
@@ -1488,7 +1498,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         entity_id:   job.id,
         job_id:      job.id,
         action:      "created",
-        description: `Job created via Lia: ${title}`,
+        description: `Job created via Lia: ${jobTitle}`,
       })
     } catch { /* non-critical */ }
 
@@ -1496,7 +1506,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       .update({
         status:      "executed",
         executed_at: now,
-        result:      { job_id: job.id, customer_id, customer_name, title },
+        result:      { job_id: job.id, customer_id, customer_name, title: jobTitle },
         updated_at:  now,
       })
       .eq("id", id)
@@ -1506,7 +1516,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       success:       true,
       job_id:        job.id,
       customer_name,
-      title,
+      title:         jobTitle,
       job_url:       `${appUrl}/jobs/${job.id}`,
     })
   }

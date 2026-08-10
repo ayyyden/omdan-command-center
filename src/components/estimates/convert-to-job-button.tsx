@@ -7,15 +7,17 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
 import { ArrowRight, Loader2 } from "lucide-react"
+import { deriveJobTitle } from "@/lib/job-title"
 
 interface ConvertToJobButtonProps {
   estimateId: string
   customerId: string
   estimateTitle: string
+  customerAddress?: string | null
   userId: string
 }
 
-export function ConvertToJobButton({ estimateId, customerId, estimateTitle, userId }: ConvertToJobButtonProps) {
+export function ConvertToJobButton({ estimateId, customerId, estimateTitle, customerAddress, userId }: ConvertToJobButtonProps) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
@@ -25,13 +27,15 @@ export function ConvertToJobButton({ estimateId, customerId, estimateTitle, user
     setLoading(true)
     const supabase = createClient()
 
+    const jobTitle = deriveJobTitle(customerAddress, estimateTitle)
+
     const { data: job, error } = await supabase
       .from("jobs")
       .insert({
         user_id: userId,
         customer_id: customerId,
         estimate_id: estimateId,
-        title: estimateTitle,
+        title: jobTitle,
         status: "scheduled",
       })
       .select()
@@ -48,10 +52,10 @@ export function ConvertToJobButton({ estimateId, customerId, estimateTitle, user
       entity_type: "job",
       entity_id: job.id,
       action: "created",
-      description: `Job created from estimate: ${estimateTitle}`,
+      description: `Job created from estimate: ${jobTitle}`,
     })
 
-    toast({ title: "Job created", description: `"${estimateTitle}" converted to a job.` })
+    toast({ title: "Job created", description: `"${jobTitle}" converted to a job.` })
     setOpen(false)
     router.push(`/jobs/${job.id}`)
     router.refresh()
