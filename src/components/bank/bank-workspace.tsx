@@ -82,7 +82,11 @@ export function BankWorkspace() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Sync failed")
       const totalAdded = (data.results ?? []).reduce((sum: number, r: { added: number }) => sum + r.added, 0)
-      toast({ title: `Sync complete — ${totalAdded} new transaction${totalAdded !== 1 ? "s" : ""}` })
+      const drafted = data.drafted ?? 0
+      toast({
+        title: `Sync complete — ${totalAdded} new transaction${totalAdded !== 1 ? "s" : ""}`,
+        description: drafted > 0 ? `${drafted} draft expense approval${drafted !== 1 ? "s" : ""} waiting for you in Lia's chat` : undefined,
+      })
       await Promise.all([loadAccounts(), loadTransactions()])
     } catch (err) {
       toast({ title: "Sync failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" })

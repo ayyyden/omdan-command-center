@@ -2,10 +2,48 @@ import { requirePermission } from "@/lib/auth-helpers"
 import { createServiceClient } from "@/lib/supabase/service"
 import { getPlaidClient, plaidErrorMessage } from "@/lib/plaid"
 
+// Plaid personal_finance_category.primary values that represent money moving
+// between the user's own accounts / debt, not a real purchase — never worth
+// auto-drafting as an "expense" (see https://plaid.com/documents/pfc-taxonomy-all.csv).
+const NON_EXPENSE_CATEGORIES = new Set([
+  "INCOME", "TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS", "LOAN_DISBURSEMENTS",
+])
+
+// Best-effort guess from Plaid's category taxonomy to this CRM's expense
+// category enum — just a starting point, the user can correct it on the
+// approval card before approving.
+const CATEGORY_MAP: Record<string, string> = {
+  FOOD_AND_DRINK:             "meals",
+  TRANSPORTATION:             "gas",
+  TRAVEL:                     "travel",
+  HOME_IMPROVEMENT:           "materials",
+  GENERAL_SERVICES:           "subcontractors",
+  RENT_AND_UTILITIES:         "office_rent",
+  GOVERNMENT_AND_NON_PROFIT:  "permits",
+}
+
+function guessExpenseCategory(plaidPrimary: string | null): string {
+  if (!plaidPrimary) return "misc"
+  return CATEGORY_MAP[plaidPrimary] ?? "misc"
+}
+
+interface DraftCandidate {
+  bankTransactionId: string
+  amount:            number
+  vendor:            string
+  date:              string
+  category:          string
+}
+
 // POST /api/bank/sync
 // Cursor-based incremental sync for every active plaid_items row. Safe to
 // call repeatedly (manual "Sync now" button, or a future cron) — each item's
 // cursor picks up exactly where the last sync left off.
+//
+// New charges found on a sync that already had a cursor (i.e. not the first
+// import of a newly connected account) get an auto-drafted create_expense
+// approval card in the requesting user's Lia chat — never posted without
+// their approval, just pre-filled so they don't have to ask for it.
 export async function POST() {
   const session = await requirePermission("bank:manage")
   if (session instanceof Response) return session
@@ -23,9 +61,11 @@ export async function POST() {
   }
 
   const results: Array<{ item_id: string; institution_name: string | null; added: number; modified: number; removed: number; error?: string }> = []
+  const draftCandidates: DraftCandidate[] = []
 
   for (const item of items ?? []) {
     let added = 0, modified = 0, removed = 0
+    const isInitialSync = !item.cursor // first-ever sync pulls months of history — never auto-draft that backfill
     try {
       const { data: accounts, error: acctErr } = await service
         .from("bank_accounts")
@@ -48,17 +88,32 @@ export async function POST() {
         for (const tx of data.added) {
           const bankAccountId = accountIdByPlaidId.get(tx.account_id)
           if (!bankAccountId) continue // account not yet synced locally (e.g. investment account we skip)
-          const { error } = await service.from("bank_transactions").upsert({
+          const plaidPrimary = tx.personal_finance_category?.primary ?? null
+          const { data: inserted, error } = await service.from("bank_transactions").upsert({
             bank_account_id:      bankAccountId,
             plaid_transaction_id: tx.transaction_id,
             amount:                tx.amount,
             date:                  tx.date,
             name:                  tx.merchant_name || tx.name,
             merchant_name:         tx.merchant_name ?? null,
-            category:              tx.personal_finance_category?.primary ?? null,
+            category:              plaidPrimary,
             pending:               tx.pending,
           }, { onConflict: "plaid_transaction_id" })
-          if (!error) added++
+            .select("id")
+            .single()
+          if (!error) {
+            added++
+            const isMoneyOut = tx.amount > 0
+            if (!isInitialSync && isMoneyOut && !tx.pending && inserted && !NON_EXPENSE_CATEGORIES.has(plaidPrimary ?? "")) {
+              draftCandidates.push({
+                bankTransactionId: inserted.id,
+                amount:            tx.amount,
+                vendor:            tx.merchant_name || tx.name,
+                date:              tx.date,
+                category:          guessExpenseCategory(plaidPrimary),
+              })
+            }
+          }
         }
 
         for (const tx of data.modified) {
@@ -112,5 +167,98 @@ export async function POST() {
     }
   }
 
-  return Response.json({ ok: true, results })
+  let drafted = 0
+  if (draftCandidates.length) {
+    drafted = await draftExpenseApprovals(service, session.userId, draftCandidates)
+  }
+
+  return Response.json({ ok: true, results, drafted })
+}
+
+// Finds (or creates) the user's most recent Lia conversation and posts one
+// assistant message + pending create_expense approval per new charge — the
+// same shape Lia herself produces, so the existing chat UI and approve/
+// reject/edit flow just works with no special-casing.
+async function draftExpenseApprovals(
+  service: ReturnType<typeof createServiceClient>,
+  userId: string,
+  candidates: DraftCandidate[],
+): Promise<number> {
+  const { data: recentConv } = await service
+    .from("assistant_conversations")
+    .select("id")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .single()
+
+  let conversationId = recentConv?.id as string | undefined
+  if (!conversationId) {
+    const { data: newConv } = await service
+      .from("assistant_conversations")
+      .insert({ user_id: userId, title: "Bank activity" })
+      .select("id")
+      .single()
+    conversationId = newConv?.id
+  }
+  if (!conversationId) return 0
+
+  let drafted = 0
+  for (const c of candidates) {
+    // Skip if this transaction already has a pending draft (defensive — Plaid
+    // shouldn't repeat an id in `added`, but don't double-draft if it does).
+    const { data: existing } = await service
+      .from("assistant_approvals")
+      .select("id")
+      .eq("status", "pending")
+      .eq("action_type", "create_expense")
+      .contains("proposed_payload", { bank_transaction_id: c.bankTransactionId })
+      .limit(1)
+    if (existing?.length) continue
+
+    const summary = `Log $${c.amount.toFixed(2)} expense — ${c.vendor}`
+    const payload = {
+      amount:              c.amount,
+      vendor:              c.vendor,
+      category:            c.category,
+      date:                c.date,
+      notes:               null,
+      job_id:              null,
+      bank_transaction_id: c.bankTransactionId,
+    }
+
+    const { data: approval } = await service
+      .from("assistant_approvals")
+      .insert({
+        channel:          "crm",
+        action_type:      "create_expense",
+        action_summary:   summary,
+        proposed_payload: payload,
+        conversation_id:  conversationId,
+        expires_at:       new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      })
+      .select("id")
+      .single()
+    if (!approval) continue
+
+    await service.from("assistant_messages").insert({
+      conversation_id: conversationId,
+      role:            "assistant",
+      content:         `New card charge — **${c.vendor}** for $${c.amount.toFixed(2)} on ${c.date}. Want me to log this as an expense?`,
+      action_id:       approval.id,
+      metadata: {
+        action: { type: "create_expense", summary, payload, risk_level: "low" },
+      },
+    })
+
+    drafted++
+  }
+
+  if (drafted > 0) {
+    await service.from("assistant_conversations")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", conversationId)
+  }
+
+  return drafted
 }
