@@ -1348,14 +1348,15 @@ export async function POST(_req: Request, { params }: RouteCtx) {
 
   if (approval.action_type === "create_expense") {
     const {
-      amount, vendor, category, date, notes, job_id,
+      amount, vendor, category, date, notes, job_id, bank_transaction_id,
     } = payload as {
-      amount:   number
-      vendor:   string | null
-      category: string
-      date:     string
-      notes:    string | null
-      job_id:   string | null
+      amount:               number
+      vendor:               string | null
+      category:             string
+      date:                 string
+      notes:                string | null
+      job_id:               string | null
+      bank_transaction_id?: string | null
     }
 
     const expenseType  = job_id ? "job" : "business"
@@ -1385,6 +1386,12 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       )
     }
 
+    if (bank_transaction_id) {
+      await supabase.from("bank_transactions")
+        .update({ match_status: "confirmed", matched_expense_id: expense.id })
+        .eq("id", bank_transaction_id)
+    }
+
     await supabase.from("assistant_approvals")
       .update({ status: "executed", executed_at: now,
         result: { expense_id: expense.id }, updated_at: now })
@@ -1403,14 +1410,15 @@ export async function POST(_req: Request, { params }: RouteCtx) {
   // ─── record_payment ───────────────────────────────────────────────────────
 
   if (approval.action_type === "record_payment") {
-    const { job_id, customer_id, amount, method, date, invoice_id, notes } = payload as {
-      job_id:      string
-      customer_id: string
-      amount:      number
-      method:      string
-      date:        string | null
-      invoice_id:  string | null
-      notes:       string | null
+    const { job_id, customer_id, amount, method, date, invoice_id, notes, bank_transaction_id } = payload as {
+      job_id:               string
+      customer_id:          string
+      amount:               number
+      method:               string
+      date:                 string | null
+      invoice_id:           string | null
+      notes:                string | null
+      bank_transaction_id?: string | null
     }
 
     if (!job_id || !customer_id) {
@@ -1458,6 +1466,12 @@ export async function POST(_req: Request, { params }: RouteCtx) {
           await supabase.from("invoices").update({ status: newStatus }).eq("id", invoice_id)
         }
       } catch { /* non-critical */ }
+    }
+
+    if (bank_transaction_id) {
+      await supabase.from("bank_transactions")
+        .update({ match_status: "confirmed", matched_payment_id: payment.id })
+        .eq("id", bank_transaction_id)
     }
 
     await supabase.from("assistant_approvals")

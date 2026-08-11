@@ -208,6 +208,11 @@ export function can(role: TeamRole, action: string): boolean {
     case 'meta_leads:manage':
       return role === 'meta_lead' || roleAtLeast(role, 'admin')
 
+    // ── Bank accounts (Plaid) ─────────────────────────────────────────────────
+    case 'bank:view':
+    case 'bank:manage':
+      return roleAtLeast(role, 'admin')
+
     // ── Dashboard / Notifications ─────────────────────────────────────────────
     // Restricted single-page roles (meta_lead, lead_operator) get neither —
     // matches ALL_ROLES in sidebar.tsx, the roles that actually have Dashboard

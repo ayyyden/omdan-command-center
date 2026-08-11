@@ -86,7 +86,9 @@ function buildSystemPrompt(crmContext: string, today: string): string {
 
 TODAY: ${today}
 
-APPROVAL-FIRST RULE: You never execute anything directly. When a tool call would change data (create, update, complete, record — anything but looking something up), that tool call is only a *proposal* — the human always sees an approve/reject/edit card first, and nothing happens until they approve it. Only \`list_reminders\` is a lookup — call it freely, as many times as needed, to answer questions.
+APPROVAL-FIRST RULE: You never execute anything directly. When a tool call would change data (create, update, complete, record — anything but looking something up), that tool call is only a *proposal* — the human always sees an approve/reject/edit card first, and nothing happens until they approve it. Only \`list_reminders\` and \`list_bank_transactions\` are lookups — call them freely, as many times as needed, to answer questions.
+
+BANK TRANSACTIONS: You can see connected bank accounts' transactions via list_bank_transactions. If one clearly matches an expense or payment the user is describing (same amount, close date), mention it and set bank_transaction_id on the create_expense/record_payment proposal so it gets linked — but only when you're confident, and always let the user correct it via the approval card.
 
 GROUP CHAT: Some conversations are a shared group chat with multiple team members talking to you in one thread. When that's the case, user messages are prefixed with the sender's name (e.g. "Edan: can you...") so you know who said what — use that to keep track of who's asking, but never include that prefix format in your own replies, and don't confuse one person's earlier statement for another's.
 
@@ -260,13 +262,14 @@ const TOOLS: Anthropic.Tool[] = [
       type: "object",
       properties: {
         ...SUMMARY_PROP,
-        job_id:      { type: "string" },
-        customer_id: { type: "string" },
-        amount:      { type: "number" },
-        method:      { type: "string", enum: ["cash", "check", "zelle", "venmo", "credit_card", "bank_transfer", "other"] },
-        date:        { type: ["string", "null"], description: "YYYY-MM-DD, defaults to today" },
-        invoice_id:  { type: ["string", "null"] },
-        notes:       { type: ["string", "null"] },
+        job_id:              { type: "string" },
+        customer_id:         { type: "string" },
+        amount:              { type: "number" },
+        method:              { type: "string", enum: ["cash", "check", "zelle", "venmo", "credit_card", "bank_transfer", "other"] },
+        date:                { type: ["string", "null"], description: "YYYY-MM-DD, defaults to today" },
+        invoice_id:          { type: ["string", "null"] },
+        notes:               { type: ["string", "null"] },
+        bank_transaction_id: { type: ["string", "null"], description: "Set only when this payment matches a specific bank transaction surfaced by list_bank_transactions — links them together." },
       },
       required: ["summary", "job_id", "customer_id", "amount", "method"],
     },
@@ -278,12 +281,13 @@ const TOOLS: Anthropic.Tool[] = [
       type: "object",
       properties: {
         ...SUMMARY_PROP,
-        amount:   { type: "number" },
-        vendor:   { type: ["string", "null"] },
-        category: { type: "string", enum: ["gas", "meals", "materials", "labor", "equipment", "tools", "vehicle", "travel", "permits", "dump_fees", "subcontractors", "office_rent", "software", "insurance", "marketing", "misc"] },
-        date:     { type: "string", description: "YYYY-MM-DD, use today if not specified" },
-        notes:    { type: ["string", "null"] },
-        job_id:   { type: ["string", "null"], description: "Only if the user names a specific job from CRM CONTEXT." },
+        amount:              { type: "number" },
+        vendor:              { type: ["string", "null"] },
+        category:            { type: "string", enum: ["gas", "meals", "materials", "labor", "equipment", "tools", "vehicle", "travel", "permits", "dump_fees", "subcontractors", "office_rent", "software", "insurance", "marketing", "misc"] },
+        date:                { type: "string", description: "YYYY-MM-DD, use today if not specified" },
+        notes:               { type: ["string", "null"] },
+        job_id:              { type: ["string", "null"], description: "Only if the user names a specific job from CRM CONTEXT." },
+        bank_transaction_id: { type: ["string", "null"], description: "Set only when this expense matches a specific bank transaction surfaced by list_bank_transactions — links them together." },
       },
       required: ["summary", "amount", "category", "date"],
     },
@@ -346,6 +350,19 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "list_bank_transactions",
+    description: "Look up recent connected-bank-account transactions — read-only, does not need approval. Use this to answer questions about bank activity, or to find a transaction to link when proposing record_payment/create_expense (pass its id as bank_transaction_id).",
+    input_schema: {
+      type: "object",
+      properties: {
+        match_status: { type: ["string", "null"], enum: ["unmatched", "suggested", "confirmed", "ignored", null], description: "Filter by match status. Omit to see all." },
+        search:       { type: ["string", "null"], description: "Filter by merchant/description text." },
+        limit:        { type: ["number", "null"], description: "Defaults to 20, max 50." },
+      },
+      required: [],
+    },
+  },
+  {
     name: "create_lead_appointment",
     description: "Record a new lead/appointment someone told you about — a new person's name with contact info, a date/time, or a location, in any format (formal, forwarded, informal, with or without labels). scheduled_date and name are the minimum needed — ask for scheduled_date if it's missing rather than guessing. Do not create a job or estimate in the same call.",
     input_schema: {
@@ -368,7 +385,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ]
 
-const READ_ONLY_TOOLS = new Set(["list_reminders"])
+const READ_ONLY_TOOLS = new Set(["list_reminders", "list_bank_transactions"])
 
 const ACTION_RISK: Record<string, "low" | "medium" | "high"> = {
   create_send_invoice: "medium",
@@ -403,6 +420,33 @@ async function runListReminders(input: { scope?: string }): Promise<string> {
 
   return data
     .map((r) => `id=${r.id} | "${r.title}" | due=${r.due_date}${r.due_time ? ` ${r.due_time}` : ""} | type=${r.type}${r.notes ? ` | notes=${r.notes}` : ""}`)
+    .join("\n")
+}
+
+async function runListBankTransactions(input: { match_status?: string | null; search?: string | null; limit?: number | null }): Promise<string> {
+  const supabase = createServiceClient()
+  const limit = Math.min(50, Math.max(1, input.limit ?? 20))
+
+  let query = supabase
+    .from("bank_transactions")
+    .select("id, amount, date, name, merchant_name, category, pending, match_status, bank_accounts(name, mask)")
+    .order("date", { ascending: false })
+    .limit(limit)
+
+  if (input.match_status) query = query.eq("match_status", input.match_status)
+  if (input.search) query = query.ilike("name", `%${input.search}%`)
+
+  const { data, error } = await query
+  if (error) return `Error looking up bank transactions: ${error.message}`
+  if (!data?.length) return "No bank transactions found."
+
+  return data
+    .map((t) => {
+      const account = Array.isArray(t.bank_accounts) ? t.bank_accounts[0] : t.bank_accounts
+      const accountLabel = account ? `${account.name}${account.mask ? ` ••${account.mask}` : ""}` : "?"
+      const direction = t.amount < 0 ? "money in" : "money out"
+      return `id=${t.id} | ${t.date} | "${t.merchant_name ?? t.name}" | $${Math.abs(t.amount).toFixed(2)} (${direction}) | account=${accountLabel} | category=${t.category ?? "?"} | match_status=${t.match_status}${t.pending ? " | pending" : ""}`
+    })
     .join("\n")
 }
 
@@ -457,7 +501,9 @@ export async function callLiaBrain(
       console.log("[lia-brain] tool call:", toolUse.name, JSON.stringify(toolUse.input).slice(0, 300))
 
       if (READ_ONLY_TOOLS.has(toolUse.name)) {
-        const toolResultText = await runListReminders(toolUse.input as { scope?: string })
+        const toolResultText = toolUse.name === "list_bank_transactions"
+          ? await runListBankTransactions(toolUse.input as { match_status?: string | null; search?: string | null; limit?: number | null })
+          : await runListReminders(toolUse.input as { scope?: string })
         messages.push({ role: "assistant", content: result.content })
         messages.push({
           role: "user",
