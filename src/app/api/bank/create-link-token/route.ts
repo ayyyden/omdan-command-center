@@ -24,7 +24,8 @@ export async function POST() {
     // Must also be added to Allowed redirect URIs in the Plaid dashboard
     // (Team Settings → API). Not needed/used in Sandbox.
     if ((process.env.PLAID_ENV ?? "sandbox").toLowerCase() === "production") {
-      request.redirect_uri = process.env.PLAID_REDIRECT_URI ?? "https://omdancommandcenter.com/bank"
+      const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app").replace(/\/+$/, "")
+      request.redirect_uri = process.env.PLAID_REDIRECT_URI ?? `${appUrl}/bank`
     }
 
     const { data } = await plaid.linkTokenCreate(request)
