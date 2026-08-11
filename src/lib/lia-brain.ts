@@ -1,7 +1,15 @@
 // Shared Claude brain logic — used by /api/assistant/conversations/[id]/messages
 // and /api/assistant/telegram-chat.
+//
+// Uses Claude's real tool-calling (not a hand-parsed JSON blob in the reply
+// text) — every proposed action is a `tools[]` entry, so a malformed response
+// can no longer produce a swallowed JSON.parse failure. Read-only tools
+// (currently just list_reminders) resolve inline in a short server-side tool
+// loop; write tools always stop and become a pending approval — Lia never
+// executes anything directly.
 
 import Anthropic from "@anthropic-ai/sdk"
+import { createServiceClient } from "@/lib/supabase/service"
 
 export interface ActionDraft {
   type:       string
@@ -73,102 +81,334 @@ export function buildCrmContext(
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
-export function buildSystemPrompt(crmContext: string, today: string): string {
-  return `You are Lia, the AI CRM assistant for Omdan Development — a residential construction and landscaping company.
-You help the owner manage customers, jobs, invoices, estimates, and scheduling.
+function buildSystemPrompt(crmContext: string, today: string): string {
+  return `You are Lia, the AI assistant for Omdan Development — a residential construction and landscaping company. You help the team manage customers, jobs, invoices, estimates, scheduling, payments, and their daily to-do list, by chatting naturally in Telegram (both direct messages and a shared team group chat) and in the CRM's own chat page.
 
 TODAY: ${today}
 
-APPROVAL-FIRST RULE: You NEVER execute anything directly. When you want to perform an action,
-you propose an action card that the user must approve before anything happens.
+APPROVAL-FIRST RULE: You never execute anything directly. When a tool call would change data (create, update, complete, record — anything but looking something up), that tool call is only a *proposal* — the human always sees an approve/reject/edit card first, and nothing happens until they approve it. Only \`list_reminders\` is a lookup — call it freely, as many times as needed, to answer questions.
 
-RESPONSE FORMAT: Always respond with valid JSON only — no markdown, no code fences.
-{
-  "message": "Your conversational reply",
-  "action": {        // optional — only include when proposing an action
-    "type": "...",
-    "summary": "One-line description of what will happen",
-    "payload": { ... },
-    "risk_level": "low" | "medium" | "high"
-  }
-}
+GROUP CHAT: Some conversations are a shared group chat with multiple team members talking to you in one thread. When that's the case, user messages are prefixed with the sender's name (e.g. "Edan: can you...") so you know who said what — use that to keep track of who's asking, but never include that prefix format in your own replies, and don't confuse one person's earlier statement for another's.
 
-AVAILABLE ACTION TYPES AND THEIR PAYLOADS:
-
-create_customer — Adds a new customer/client/lead to the CRM. risk: low
-  payload: { name (required), phone (null if not given), email (null if not given), address (null if not given), service_type (short description of project needs, null if not given), lead_source (null if not given), notes (full project details, null if not given) }
-
-create_invoice — Creates a DRAFT invoice (not emailed). risk: low
-  payload: { customer_id, customer_name, job_id, job_title, amount, type ("deposit"|"progress"|"final"|"other"), notes, due_date (YYYY-MM-DD|null), payment_methods (["zelle","cash","check"]) }
-
-create_send_invoice — Creates an invoice AND emails it to the customer. risk: medium
-  payload: { customer_id, customer_name, customer_email, job_id, job_title, amount, type, notes, due_date, payment_methods }
-
-create_estimate_draft — Creates a DRAFT estimate for an existing customer. Does NOT email anything. After it executes, a "Send to customer?" card appears automatically — user approves sending as a separate step. risk: low
-  payload: { customer_id, customer_name, customer_email (null if no email), services, total, payment_steps ([{name,amount}]|null) }
-  NOTE: job_id is NOT required — estimates can be created for any customer with or without existing jobs.
-  PAYMENT STEPS: Extract from any format — "Down payment-$770", "Down payment: $770", "Down payment $770", bullet "- Down payment $770". The first "Total" line is the total price, NOT a step. Each subsequent labeled amount is a payment_steps entry. Always include all steps found.
-
-create_expense — Records a business or job expense. risk: low
-  payload: { amount (required), vendor (store/location name, null if not given), category (one of: "gas","meals","materials","labor","equipment","tools","vehicle","travel","permits","dump_fees","subcontractors","office_rent","software","insurance","marketing","misc"), date (YYYY-MM-DD — use today if not specified), notes (null if not given), job_id (null unless user names a specific job from CRM CONTEXT) }
-
-schedule_job — Updates a job's scheduled date/time. risk: low
-  payload: { job_id, job_title, new_scheduled_date (YYYY-MM-DD), new_scheduled_time ("HH:MM"|null) }
-
-update_note — Replaces the internal notes on a customer or job. risk: low
-  payload: { entity_type ("customer"|"job"), entity_id, entity_name, notes }
-
-create_lead_appointment — Records a partner/company lead appointment (no job required). risk: low
-  payload: { name (required), phone (null if not given), address (null if not given), scheduled_date (YYYY-MM-DD|null), start_time ("HH:MM"|null), end_time ("HH:MM"|null), partner_reference (numeric ref string|null), category_code (short code like "Rm"|null), project_summary (readable description|null), notes (null if not given), source ("partner") }
-
-create_job — Creates a new job for an existing customer. Use when user wants to formally start a job, convert a lead visit to a job, or the customer has confirmed they want to proceed. risk: low
-  payload: { customer_id (required — must be from CRM CONTEXT, never invented), customer_name, lead_appointment_id (null unless user says "convert this appointment"), title (required — derive from service type if not explicitly given), description (null if not given), status ("scheduled"|"in_progress"), scheduled_date (YYYY-MM-DD|null) }
-
-INTENT CLASSIFICATION GUIDE:
-Read every message and ask: what is the user trying to accomplish?
-
-NEW LEAD / APPOINTMENT — Someone is telling you about a new potential client, a scheduled site visit, or a booked appointment. Signals (none required individually — read the overall meaning): a person's name not in CRM CONTEXT, contact info (phone or email), a specific date and/or time, a location or address, notes about what the project involves. If a message includes these signals in any format — formal, emoji-heavy, forwarded from a marketing agency, copy-pasted from a text thread, with or without field labels — classify as create_lead_appointment. The person named is a NEW lead, not an existing CRM customer. Extract all fields you can find from the raw text.
-
-ESTIMATE REQUEST — User wants a price quote for work. Signals: "estimate", "quote", "price this", "what would X cost", "how much for". Classify as create_estimate_draft.
-
-INVOICE REQUEST — User wants to bill a customer. Signals: "invoice", "bill them", "charge". Classify as create_invoice or create_send_invoice (if email is given). Requires a job — if no job is mentioned, ask.
-
-JOB CREATION — User wants to formally create a job for a customer, often after a lead visit. Signals: "create a job", "add a job", "convert this lead to a job", "we're doing the work", "they confirmed". Classify as create_job.
-
-JOB SCHEDULING — Set or change a date for an existing job. Signals: "schedule", "when are we going", "move job to". Classify as schedule_job.
-
-EXPENSE — Recording a cost the business paid. Signals: "I spent", "bought", "paid for". Classify as create_expense.
-
-NOTE — Updating internal notes. Classify as update_note.
-
-CLASSIFICATION PRINCIPLES:
-- Read meaning, not format. A message that introduces a new person with contact info, a date, and a location is a lead appointment even if it has emojis, is forwarded from a WhatsApp thread, uses informal language, or comes from a marketing agency.
-- If a message has BOTH a new lead and a service description, classify by primary intent. A scheduled appointment with a new person = create_lead_appointment, not create_estimate_draft — even if the service type is mentioned. The estimate comes later after they meet the client.
-- If critical info is missing, ask ONE focused question. Do not propose an action with required fields blank. "scheduled_date" is required for create_lead_appointment — if not present in the message, ask for it before proposing.
-- NEVER invent IDs, phone numbers, dates, or addresses. Extract only what is written in the message.
-- Before proposing create_lead_appointment, check LEAD APPOINTMENTS in the CRM CONTEXT. If the same customer already has an appointment within 7 days of the requested date, mention it in your message field (e.g., "Note: you already have an appointment with this customer on [date]") — but still propose the create_lead_appointment action so the user can decide.
+STYLE: Be concise — 1 to 3 sentences unless the user asks for detail. Sound like a sharp, competent teammate texting back, not a form. Never say "I cannot do that" for anything in your toolset — instead propose the action or ask exactly one focused follow-up question if something required is missing.
 
 RULES:
-- Always use UUIDs from the CRM CONTEXT section — NEVER invent IDs.
-- For create_invoice / create_send_invoice, job_id is REQUIRED. If you see no jobs for this customer, ask.
-- For create_customer, name is the only required field — proceed with null for any missing fields.
-- For create_lead_appointment: extract all fields from the raw text. scheduled_date and name are the minimum required. Do NOT create a job or estimate at the same time.
-- For create_job: customer_id is REQUIRED and must come from CRM CONTEXT. If the customer is not in CRM CONTEXT, ask the user to create the customer first. Derive a professional job title from the service type if the user didn't provide one explicitly. If user says "create job AND estimate", do create_job first and tell the user to ask for the estimate after.
-- For create_estimate_draft: ALWAYS use this action when user asks to "make", "create", or "send" an estimate. NEVER skip the draft step. The send step is automatic after approval.
-- For create_estimate_draft: NO job_id required. Ask no job questions. Customer + services + total is enough.
-- For create_expense: default category "gas" for gas stations/fuel, "meals" for food/restaurants, "materials" for supply stores. Use today's date if not specified.
-- Be concise — 1 to 3 sentences in your message field.
-- If required info is missing, ask exactly one follow-up question (no action block needed).
+- Always use real UUIDs copied from CRM CONTEXT below — never invent an id, phone number, date, or address. If someone isn't in CRM CONTEXT, don't guess an id for them — either ask the user to add them first, or use create_customer.
+- A job's title should be the property's street address whenever one is known (e.g. "82388 Odlum Dr"), never a service description like "Pavers" — that convention is enforced elsewhere in the CRM too, so follow it when you set or change a job's title.
 - Do not invent brands, measurements, warranties, or anything the user did not specify.
-- NEVER say "I cannot do that" for actions in this list — instead prepare an approval draft or ask for missing info.
-- If the user asks to cancel or change a pending approval, tell them to click ❌ Reject on the approval card, then re-describe what they want.
-- If the user is greeting or asking what you can do, respond naturally without an action block.
+- Before proposing create_lead_appointment, check LEAD APPOINTMENTS in CRM CONTEXT — if the same customer already has one within 7 days of the requested date, mention that in your message, but still propose the action so the user can decide.
+- If the user asks to cancel or change a pending approval, tell them to reject the card, then re-describe what they want.
+- If you're just greeting, chatting, or answering a question with no data-changing intent, reply naturally with no tool call at all.
 
 CRM CONTEXT:
 ${crmContext}`
 }
 
+// ─── Tool catalog ─────────────────────────────────────────────────────────────
+
+const SUMMARY_PROP = {
+  summary: {
+    type: "string" as const,
+    description: "One-line, human-readable description of what this action will do, shown to the user on the approval card (e.g. \"Add customer Jane Doe\", \"Record $500 payment on the Smith job\").",
+  },
+}
+
+const TOOLS: Anthropic.Tool[] = [
+  {
+    name: "create_customer",
+    description: "Add a new customer/client/lead to the CRM. Use when someone describes a new potential client who isn't already in CRM CONTEXT.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        name:         { type: "string", description: "Required." },
+        phone:        { type: ["string", "null"] },
+        email:        { type: ["string", "null"] },
+        address:      { type: ["string", "null"] },
+        service_type: { type: ["string", "null"], description: "Short description of what work they need." },
+        lead_source:  { type: ["string", "null"] },
+        notes:        { type: ["string", "null"], description: "Full project details." },
+      },
+      required: ["summary", "name"],
+    },
+  },
+  {
+    name: "update_customer",
+    description: "Edit an existing customer's info or lead status. customer_id must come from CRM CONTEXT.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        customer_id:  { type: "string" },
+        status:       { type: ["string", "null"], description: "One of: New Lead, Contacted, Estimate Sent, Follow-Up Needed, Approved, Scheduled, In Progress, Completed, Paid, Closed Lost." },
+        phone:        { type: ["string", "null"] },
+        email:        { type: ["string", "null"] },
+        address:      { type: ["string", "null"] },
+        service_type: { type: ["string", "null"] },
+        notes:        { type: ["string", "null"] },
+      },
+      required: ["summary", "customer_id"],
+    },
+  },
+  {
+    name: "create_job",
+    description: "Create a new job for an existing customer — use when the user wants to formally start a job or convert a lead visit into one. customer_id is REQUIRED and must be from CRM CONTEXT — if the customer isn't there, ask them to create the customer first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        customer_id:         { type: "string" },
+        customer_name:       { type: "string" },
+        lead_appointment_id: { type: ["string", "null"] },
+        title:                { type: ["string", "null"], description: "Prefer the customer's street address (see job-title rule); fall back to a short service description only if no address is known." },
+        description:          { type: ["string", "null"] },
+        status:                { type: "string", enum: ["scheduled", "in_progress"] },
+        scheduled_date:        { type: ["string", "null"], description: "YYYY-MM-DD" },
+      },
+      required: ["summary", "customer_id", "customer_name", "status"],
+    },
+  },
+  {
+    name: "update_job",
+    description: "Edit an existing job — reschedule it, change its status, reassign the project manager, or update its title/description. job_id must come from CRM CONTEXT.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        job_id:              { type: "string" },
+        job_title:           { type: "string", description: "The job's current title, for display only." },
+        scheduled_date:      { type: ["string", "null"], description: "YYYY-MM-DD" },
+        scheduled_time:      { type: ["string", "null"], description: "HH:MM 24h" },
+        status:              { type: ["string", "null"], enum: ["scheduled", "in_progress", "completed", "on_hold", "cancelled", null] },
+        project_manager_id:  { type: ["string", "null"] },
+        title:               { type: ["string", "null"] },
+        description:         { type: ["string", "null"] },
+      },
+      required: ["summary", "job_id", "job_title"],
+    },
+  },
+  {
+    name: "create_estimate_draft",
+    description: "Create a DRAFT estimate for an existing customer — does not email anything. After approval, a separate \"send to customer?\" approval appears automatically. No job_id needed. Use whenever the user asks to make/create/send an estimate — never skip straight to sending.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        customer_id:    { type: "string" },
+        customer_name:  { type: "string" },
+        customer_email: { type: ["string", "null"] },
+        services:       { type: "string" },
+        total:          { type: "number" },
+        payment_steps:  {
+          type: ["array", "null"],
+          description: "Extract every labeled amount from the message (e.g. \"Down payment $770\", \"balance on completion $2000\") — the first Total line is the overall total, not a step.",
+          items: {
+            type: "object",
+            properties: { name: { type: "string" }, amount: { type: "number" } },
+            required: ["name", "amount"],
+          },
+        },
+      },
+      required: ["summary", "customer_id", "customer_name", "services", "total"],
+    },
+  },
+  {
+    name: "create_invoice",
+    description: "Create a DRAFT invoice (not emailed). job_id is REQUIRED — if the customer has no jobs in CRM CONTEXT, ask which job first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        customer_id:     { type: "string" },
+        customer_name:   { type: "string" },
+        job_id:          { type: "string" },
+        job_title:       { type: "string" },
+        amount:          { type: "number" },
+        type:            { type: "string", enum: ["deposit", "progress", "final", "other"] },
+        notes:           { type: ["string", "null"] },
+        due_date:        { type: ["string", "null"], description: "YYYY-MM-DD" },
+        payment_methods: { type: "array", items: { type: "string", enum: ["zelle", "cash", "check", "venmo", "credit_card", "bank_transfer", "other"] } },
+      },
+      required: ["summary", "customer_id", "job_id", "amount", "type"],
+    },
+  },
+  {
+    name: "create_send_invoice",
+    description: "Create an invoice AND email it to the customer immediately. Only use when the user explicitly wants it sent right away and a customer_email is known.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        customer_id:     { type: "string" },
+        customer_name:   { type: "string" },
+        customer_email:  { type: "string" },
+        job_id:          { type: "string" },
+        job_title:       { type: "string" },
+        amount:          { type: "number" },
+        type:            { type: "string", enum: ["deposit", "progress", "final", "other"] },
+        notes:           { type: ["string", "null"] },
+        due_date:        { type: ["string", "null"] },
+        payment_methods: { type: "array", items: { type: "string" } },
+      },
+      required: ["summary", "customer_id", "customer_email", "job_id", "amount", "type"],
+    },
+  },
+  {
+    name: "record_payment",
+    description: "Record that a payment was received against a job. job_id and customer_id must come from CRM CONTEXT.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        job_id:      { type: "string" },
+        customer_id: { type: "string" },
+        amount:      { type: "number" },
+        method:      { type: "string", enum: ["cash", "check", "zelle", "venmo", "credit_card", "bank_transfer", "other"] },
+        date:        { type: ["string", "null"], description: "YYYY-MM-DD, defaults to today" },
+        invoice_id:  { type: ["string", "null"] },
+        notes:       { type: ["string", "null"] },
+      },
+      required: ["summary", "job_id", "customer_id", "amount", "method"],
+    },
+  },
+  {
+    name: "create_expense",
+    description: "Record a business or job expense (e.g. \"I spent $50 on gas\").",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        amount:   { type: "number" },
+        vendor:   { type: ["string", "null"] },
+        category: { type: "string", enum: ["gas", "meals", "materials", "labor", "equipment", "tools", "vehicle", "travel", "permits", "dump_fees", "subcontractors", "office_rent", "software", "insurance", "marketing", "misc"] },
+        date:     { type: "string", description: "YYYY-MM-DD, use today if not specified" },
+        notes:    { type: ["string", "null"] },
+        job_id:   { type: ["string", "null"], description: "Only if the user names a specific job from CRM CONTEXT." },
+      },
+      required: ["summary", "amount", "category", "date"],
+    },
+  },
+  {
+    name: "create_reminder",
+    description: "Add something to the to-do/reminders list — a task, follow-up, or thing to remember for a specific day. This is how you add to someone's daily to-do list.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        title:       { type: "string" },
+        due_date:    { type: "string", description: "YYYY-MM-DD — use today if the user just says \"today\"." },
+        due_time:    { type: ["string", "null"], description: "HH:MM 24h, if a specific time was mentioned." },
+        type:        { type: "string", enum: ["estimate_follow_up", "payment_reminder", "material_reminder", "review_request", "custom"] },
+        customer_id: { type: ["string", "null"] },
+        job_id:      { type: ["string", "null"] },
+        notes:       { type: ["string", "null"] },
+      },
+      required: ["summary", "title", "due_date", "type"],
+    },
+  },
+  {
+    name: "list_reminders",
+    description: "Look up the to-do/reminders list — read-only, does not need approval, call this whenever asked what's on the list, what's due, or what's overdue.",
+    input_schema: {
+      type: "object",
+      properties: {
+        scope: { type: "string", enum: ["today", "overdue", "upcoming"], description: "\"today\" = due today, \"overdue\" = past due and not done, \"upcoming\" = due in the next 7 days." },
+      },
+      required: ["scope"],
+    },
+  },
+  {
+    name: "complete_reminder",
+    description: "Mark a to-do/reminder as done. Look it up with list_reminders first if you don't already have its id from CRM CONTEXT or earlier in this conversation.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        reminder_id: { type: "string" },
+        title:       { type: "string", description: "The reminder's title, for display only." },
+      },
+      required: ["summary", "reminder_id", "title"],
+    },
+  },
+  {
+    name: "update_note",
+    description: "Replace the internal notes on a customer or job.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        entity_type: { type: "string", enum: ["customer", "job"] },
+        entity_id:   { type: "string" },
+        entity_name: { type: "string" },
+        notes:       { type: "string" },
+      },
+      required: ["summary", "entity_type", "entity_id", "notes"],
+    },
+  },
+  {
+    name: "create_lead_appointment",
+    description: "Record a new lead/appointment someone told you about — a new person's name with contact info, a date/time, or a location, in any format (formal, forwarded, informal, with or without labels). scheduled_date and name are the minimum needed — ask for scheduled_date if it's missing rather than guessing. Do not create a job or estimate in the same call.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        name:               { type: "string" },
+        phone:              { type: ["string", "null"] },
+        address:            { type: ["string", "null"] },
+        scheduled_date:     { type: ["string", "null"], description: "YYYY-MM-DD" },
+        start_time:         { type: ["string", "null"] },
+        end_time:           { type: ["string", "null"] },
+        partner_reference:  { type: ["string", "null"] },
+        category_code:      { type: ["string", "null"] },
+        project_summary:    { type: ["string", "null"] },
+        notes:              { type: ["string", "null"] },
+      },
+      required: ["summary", "name"],
+    },
+  },
+]
+
+const READ_ONLY_TOOLS = new Set(["list_reminders"])
+
+const ACTION_RISK: Record<string, "low" | "medium" | "high"> = {
+  create_send_invoice: "medium",
+  record_payment:      "medium",
+}
+
+// ─── Read-only tool execution ─────────────────────────────────────────────────
+
+async function runListReminders(input: { scope?: string }): Promise<string> {
+  const supabase = createServiceClient()
+  const today = new Date().toISOString().split("T")[0]
+  const in7Days = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+
+  let query = supabase
+    .from("reminders")
+    .select("id, title, due_date, due_time, type, notes, customer_id, job_id")
+    .is("completed_at", null)
+    .order("due_date", { ascending: true })
+    .limit(20)
+
+  if (input.scope === "overdue") {
+    query = query.lt("due_date", today)
+  } else if (input.scope === "upcoming") {
+    query = query.gte("due_date", today).lte("due_date", in7Days)
+  } else {
+    query = query.eq("due_date", today)
+  }
+
+  const { data, error } = await query
+  if (error) return `Error looking up reminders: ${error.message}`
+  if (!data?.length) return `No reminders found for scope "${input.scope ?? "today"}".`
+
+  return data
+    .map((r) => `id=${r.id} | "${r.title}" | due=${r.due_date}${r.due_time ? ` ${r.due_time}` : ""} | type=${r.type}${r.notes ? ` | notes=${r.notes}` : ""}`)
+    .join("\n")
+}
+
 // ─── Claude call ──────────────────────────────────────────────────────────────
+
+const MAX_TOOL_ITERATIONS = 3
 
 export async function callLiaBrain(
   history: Array<{ role: string; content: string }>,
@@ -179,58 +419,70 @@ export async function callLiaBrain(
     return { message: "Lia is not configured yet — ANTHROPIC_API_KEY is missing." }
   }
 
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+  const messages: Anthropic.MessageParam[] = history
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+
   try {
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      const result = await anthropic.messages.create({
+        model:      "claude-opus-5",
+        max_tokens: 4096,
+        thinking:   { type: "adaptive" },
+        output_config: { effort: "high" },
+        system:     buildSystemPrompt(crmContext, today),
+        tools:      TOOLS,
+        messages,
+      })
 
-    const conversationMessages = history
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
-
-    const result = await anthropic.messages.create({
-      model:      "claude-sonnet-4-6",
-      max_tokens: 3000,
-      system:     buildSystemPrompt(crmContext, today),
-      messages:   conversationMessages,
-    })
-
-    const rawText = result.content[0]?.type === "text" ? result.content[0].text.trim() : ""
-    console.log("[lia-brain] raw response:", rawText.slice(0, 500))
-
-    // Extract the first balanced JSON object from the response
-    const jsonStr = extractFirstJson(rawText)
-    if (jsonStr) {
-      const parsed = JSON.parse(jsonStr) as BrainResponse
-      if (parsed.action) {
-        console.log("[lia-brain] action:", JSON.stringify({ type: parsed.action.type, summary: parsed.action.summary }))
+      if (result.stop_reason === "refusal") {
+        console.warn("[lia-brain] refusal:", JSON.stringify(result.stop_details ?? {}))
+        return { message: "I can't help with that one — let's try something else." }
       }
-      return parsed
+
+      const replyText = result.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("\n")
+        .trim()
+
+      const toolUse = result.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
+
+      if (!toolUse) {
+        return { message: replyText || "..." }
+      }
+
+      console.log("[lia-brain] tool call:", toolUse.name, JSON.stringify(toolUse.input).slice(0, 300))
+
+      if (READ_ONLY_TOOLS.has(toolUse.name)) {
+        const toolResultText = await runListReminders(toolUse.input as { scope?: string })
+        messages.push({ role: "assistant", content: result.content })
+        messages.push({
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: toolUse.id, content: toolResultText }],
+        })
+        continue
+      }
+
+      // Write tool — this tool call IS the proposed action. Stop and hand it
+      // back for approval; nothing executes here.
+      const { summary, ...rest } = toolUse.input as Record<string, unknown> & { summary?: string }
+      return {
+        message: replyText || (summary as string) || "Here's what I'd like to do:",
+        action: {
+          type:       toolUse.name,
+          summary:    (summary as string) ?? toolUse.name,
+          payload:    rest,
+          risk_level: ACTION_RISK[toolUse.name] ?? "low",
+        },
+      }
     }
 
-    console.warn("[lia-brain] no JSON found in response:", rawText.slice(0, 200))
-    return { message: rawText.replace(/^\{/, "").trim() || "I didn't quite catch that. Could you rephrase?" }
+    return { message: "I looked into that but need a bit more info — could you clarify what you'd like me to do?" }
   } catch (err) {
     console.error("[lia-brain] error:", err)
-    return { message: "I hit an error. Please try again." }
+    return { message: "I hit a problem reaching Claude just now — please try again in a moment." }
   }
-}
-
-// ─── JSON extraction ──────────────────────────────────────────────────────────
-// Extracts the first balanced `{...}` from a string, ignoring any trailing text.
-
-function extractFirstJson(text: string): string | null {
-  const start = text.indexOf("{")
-  if (start === -1) return null
-  let depth = 0
-  let inString = false
-  let escape = false
-  for (let i = start; i < text.length; i++) {
-    const c = text[i]
-    if (escape)                    { escape = false; continue }
-    if (c === "\\" && inString)    { escape = true;  continue }
-    if (c === '"')                 { inString = !inString; continue }
-    if (inString)                  continue
-    if (c === "{")                 depth++
-    if (c === "}") { depth--; if (depth === 0) return text.slice(start, i + 1) }
-  }
-  return null
 }

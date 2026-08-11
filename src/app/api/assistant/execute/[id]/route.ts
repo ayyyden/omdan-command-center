@@ -143,6 +143,61 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     })
   }
 
+  // ─── update_customer ──────────────────────────────────────────────────────
+
+  if (approval.action_type === "update_customer") {
+    const {
+      customer_id, status, phone, email, address, service_type, notes,
+    } = payload as {
+      customer_id:  string
+      status:       string | null
+      phone:        string | null
+      email:        string | null
+      address:      string | null
+      service_type: string | null
+      notes:        string | null
+    }
+
+    if (!customer_id) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "customer_id is required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "customer_id missing from approval payload" }, { status: 400 })
+    }
+
+    const updates: Record<string, unknown> = { updated_at: now }
+    if (status       !== undefined && status       !== null) updates.status       = status
+    if (phone        !== undefined && phone        !== null) updates.phone        = phone
+    if (email        !== undefined && email        !== null) updates.email        = email
+    if (address      !== undefined && address      !== null) updates.address      = address
+    if (service_type !== undefined && service_type !== null) updates.service_type = service_type
+    if (notes        !== undefined && notes        !== null) updates.notes        = notes
+
+    const { data: customer, error: updateErr } = await supabase
+      .from("customers")
+      .update(updates)
+      .eq("id", customer_id)
+      .select("id, name")
+      .single()
+
+    if (updateErr || !customer) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: updateErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to update customer: ${updateErr?.message}` }, { status: 500 })
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now, result: { customer_id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:   "update_customer",
+      success:       true,
+      customer_id,
+      customer_name: customer.name,
+      customer_url:  `${appUrl}/customers/${customer_id}`,
+    })
+  }
+
   // ─── create_lead_estimate ─────────────────────────────────────────────────
 
   if (approval.action_type === "create_lead_estimate") {
@@ -826,6 +881,74 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     })
   }
 
+  // ─── update_job ───────────────────────────────────────────────────────────
+  // General-purpose job editor (status, PM, title/description, schedule) —
+  // what Lia's conversational brain proposes; schedule_job above stays as-is
+  // for the older structured-intent path.
+
+  if (approval.action_type === "update_job") {
+    const {
+      job_id, job_title, scheduled_date, scheduled_time, status,
+      project_manager_id, title, description,
+    } = payload as {
+      job_id:              string
+      job_title:           string
+      scheduled_date?:     string | null
+      scheduled_time?:     string | null
+      status?:             string | null
+      project_manager_id?: string | null
+      title?:              string | null
+      description?:        string | null
+    }
+
+    if (!job_id) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "job_id is required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "job_id missing from approval payload" }, { status: 400 })
+    }
+
+    const updates: Record<string, unknown> = { updated_at: now }
+    if (scheduled_date      !== undefined && scheduled_date      !== null) updates.scheduled_date      = scheduled_date
+    if (scheduled_time      !== undefined && scheduled_time      !== null) updates.scheduled_time      = scheduled_time
+    if (status               !== undefined && status               !== null) updates.status               = status
+    if (project_manager_id  !== undefined && project_manager_id  !== null) updates.project_manager_id  = project_manager_id
+    if (title                !== undefined && title                !== null) updates.title                = title
+    if (description          !== undefined && description          !== null) updates.description          = description
+
+    const { error: updateErr } = await supabase
+      .from("jobs")
+      .update(updates)
+      .eq("id", job_id)
+
+    if (updateErr) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: updateErr.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to update job: ${updateErr.message}` }, { status: 500 })
+    }
+
+    try {
+      await supabase.from("activity_log").insert({
+        user_id:     ownerUserId,
+        entity_type: "job",
+        entity_id:   job_id,
+        job_id:      job_id,
+        action:      "updated",
+        description: `Updated via Lia`,
+      })
+    } catch { /* non-critical */ }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now, result: { job_id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type: "update_job",
+      success:     true,
+      job_id,
+      job_title:   title ?? job_title,
+    })
+  }
+
   // ─── send_contracts ───────────────────────────────────────────────────────
 
   if (approval.action_type === "send_contracts") {
@@ -1274,6 +1397,166 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       amount:      Number(amount),
       vendor:      vendor ?? null,
       category:    category ?? "misc",
+    })
+  }
+
+  // ─── record_payment ───────────────────────────────────────────────────────
+
+  if (approval.action_type === "record_payment") {
+    const { job_id, customer_id, amount, method, date, invoice_id, notes } = payload as {
+      job_id:      string
+      customer_id: string
+      amount:      number
+      method:      string
+      date:        string | null
+      invoice_id:  string | null
+      notes:       string | null
+    }
+
+    if (!job_id || !customer_id) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "job_id and customer_id are required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "job_id and customer_id are required" }, { status: 400 })
+    }
+
+    const { data: payment, error: payErr } = await supabase
+      .from("payments")
+      .insert({
+        user_id:     ownerUserId,
+        job_id,
+        customer_id,
+        amount:      Number(amount),
+        method:      method ?? "other",
+        date:        date ?? new Date().toISOString().split("T")[0],
+        notes:       notes ?? null,
+      })
+      .select("id")
+      .single()
+
+    if (payErr || !payment) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: payErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to record payment: ${payErr?.message}` }, { status: 500 })
+    }
+
+    // Best-effort: if linked to an invoice, recompute its paid total/status —
+    // same fields the add-payment-dialog UI updates, kept in sync here too.
+    if (invoice_id) {
+      try {
+        const { data: invoice } = await supabase
+          .from("invoices")
+          .select("amount")
+          .eq("id", invoice_id)
+          .single()
+        const { data: allPayments } = await supabase
+          .from("payments")
+          .select("amount")
+          .eq("job_id", job_id)
+        const totalPaid = (allPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
+        if (invoice) {
+          const newStatus = totalPaid >= Number(invoice.amount) ? "paid" : totalPaid > 0 ? "partial" : "sent"
+          await supabase.from("invoices").update({ status: newStatus }).eq("id", invoice_id)
+        }
+      } catch { /* non-critical */ }
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now, result: { payment_id: payment.id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type: "record_payment",
+      success:     true,
+      payment_id:  payment.id,
+      amount:      Number(amount),
+      method:      method ?? "other",
+    })
+  }
+
+  // ─── create_reminder ──────────────────────────────────────────────────────
+
+  if (approval.action_type === "create_reminder") {
+    const { title, due_date, due_time, type, customer_id, job_id, notes } = payload as {
+      title:       string
+      due_date:    string
+      due_time:    string | null
+      type:        string
+      customer_id: string | null
+      job_id:      string | null
+      notes:       string | null
+    }
+
+    if (!title || !due_date) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "title and due_date are required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "title and due_date are required" }, { status: 400 })
+    }
+
+    const { data: reminder, error: remErr } = await supabase
+      .from("reminders")
+      .insert({
+        user_id:     ownerUserId,
+        title,
+        due_date,
+        due_time:    due_time ?? null,
+        type:        type ?? "custom",
+        customer_id: customer_id ?? null,
+        job_id:      job_id ?? null,
+        notes:       notes ?? null,
+      })
+      .select("id")
+      .single()
+
+    if (remErr || !reminder) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: remErr?.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to create reminder: ${remErr?.message}` }, { status: 500 })
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now, result: { reminder_id: reminder.id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type: "create_reminder",
+      success:     true,
+      reminder_id: reminder.id,
+      title,
+      due_date,
+    })
+  }
+
+  // ─── complete_reminder ────────────────────────────────────────────────────
+
+  if (approval.action_type === "complete_reminder") {
+    const { reminder_id, title } = payload as { reminder_id: string; title: string }
+
+    if (!reminder_id) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "reminder_id is required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "reminder_id missing from approval payload" }, { status: 400 })
+    }
+
+    const { error: updateErr } = await supabase
+      .from("reminders")
+      .update({ completed_at: now, updated_at: now })
+      .eq("id", reminder_id)
+
+    if (updateErr) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: updateErr.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to complete reminder: ${updateErr.message}` }, { status: 500 })
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now, result: { reminder_id }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type: "complete_reminder",
+      success:     true,
+      reminder_id,
+      title:       title ?? null,
     })
   }
 

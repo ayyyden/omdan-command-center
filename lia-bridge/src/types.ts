@@ -228,6 +228,13 @@ export interface ExecuteResponse {
   appointment_url?: string
   // create_job fields
   job_url?: string
+  // update_job fields (job_id/job_title shared with schedule_job above)
+  // record_payment fields
+  payment_id?: string
+  method?: string
+  // create_reminder / complete_reminder fields
+  reminder_id?: string
+  due_date?: string
 }
 
 export interface DailySummary {

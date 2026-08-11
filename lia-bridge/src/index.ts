@@ -796,6 +796,48 @@ function formatClaudeActionForTelegram(
       const preview = String(p.description).slice(0, 150)
       lines.push(`📝 ${preview}${String(p.description).length > 150 ? "…" : ""}`)
     }
+  } else if (action.type === "update_job") {
+    lines.push("🔨 Update Job")
+    lines.push("")
+    if (p.job_title)           lines.push(`🔨 Job: ${p.job_title}`)
+    if (p.title)                lines.push(`✏️ New title: ${p.title}`)
+    if (p.status)                lines.push(`📊 Status: ${cap(String(p.status))}`)
+    if (p.scheduled_date)        lines.push(`📅 Date: ${p.scheduled_date}`)
+    if (p.scheduled_time)        lines.push(`🕐 Time: ${p.scheduled_time}`)
+    if (p.description) {
+      const preview = String(p.description).slice(0, 150)
+      lines.push(`📝 ${preview}${String(p.description).length > 150 ? "…" : ""}`)
+    }
+  } else if (action.type === "update_customer") {
+    lines.push("👤 Update Customer")
+    lines.push("")
+    if (p.status)       lines.push(`📊 Status: ${p.status}`)
+    if (p.phone)        lines.push(`📞 Phone: ${p.phone}`)
+    if (p.email)        lines.push(`📧 Email: ${p.email}`)
+    if (p.address)      lines.push(`📍 Address: ${p.address}`)
+    if (p.service_type) lines.push(`🛠 Services: ${p.service_type}`)
+    if (p.notes) {
+      const preview = String(p.notes).slice(0, 200)
+      lines.push(`📝 Notes: ${preview}${String(p.notes).length > 200 ? "…" : ""}`)
+    }
+  } else if (action.type === "record_payment") {
+    lines.push("💵 Record Payment")
+    lines.push("")
+    if (p.amount != null) lines.push(`💰 Amount: ${fmt(p.amount)}`)
+    if (p.method)          lines.push(`💳 Method: ${cap(String(p.method).replace(/_/g, " "))}`)
+    if (p.date)             lines.push(`📅 Date: ${p.date}`)
+    if (p.notes)            lines.push(`📝 Notes: ${p.notes}`)
+  } else if (action.type === "create_reminder") {
+    lines.push("📌 Add To-Do / Reminder")
+    lines.push("")
+    if (p.title)    lines.push(`📝 ${p.title}`)
+    if (p.due_date) lines.push(`📅 Due: ${p.due_date}${p.due_time ? ` at ${p.due_time}` : ""}`)
+    if (p.type)      lines.push(`📂 Type: ${cap(String(p.type).replace(/_/g, " "))}`)
+    if (p.notes)      lines.push(`📝 Notes: ${p.notes}`)
+  } else if (action.type === "complete_reminder") {
+    lines.push("✅ Complete To-Do / Reminder")
+    lines.push("")
+    if (p.title) lines.push(`📝 ${p.title}`)
   } else {
     lines.push(`⚡ ${action.summary}`)
   }
@@ -1557,6 +1599,20 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         await sendTelegramMessage(chatId, `✅ Draft estimate created${result.title ? `: ${result.title}` : ""}.${url}`)
       } else if (result.action_type === "update_note") {
         await sendTelegramMessage(chatId, `✅ Notes updated for ${result.entity_name ?? "record"}.`)
+      } else if (result.action_type === "update_job") {
+        await sendTelegramMessage(chatId, `✅ Job updated: ${result.job_title ?? "Job"}.`)
+      } else if (result.action_type === "update_customer") {
+        const url = result.customer_url ? `\n${result.customer_url}` : ""
+        await sendTelegramMessage(chatId, `✅ Customer updated: ${result.customer_name ?? "Customer"}.${url}`)
+      } else if (result.action_type === "record_payment") {
+        const amtFmt = result.amount != null
+          ? `$${Number(result.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+          : "payment"
+        await sendTelegramMessage(chatId, `✅ Payment recorded: ${amtFmt}.`)
+      } else if (result.action_type === "create_reminder") {
+        await sendTelegramMessage(chatId, `✅ Added to the list: ${result.title ?? "reminder"} (due ${result.due_date ?? "?"}).`)
+      } else if (result.action_type === "complete_reminder") {
+        await sendTelegramMessage(chatId, `✅ Marked done: ${result.title ?? "reminder"}.`)
       } else {
         await sendTelegramMessage(chatId, "✅ Done.")
       }
@@ -1578,10 +1634,32 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
     // natural-language CRM requests, etc.) goes to Claude.
     if (intent.type !== "unknown") return
 
-    console.log(`[lia/telegram/ai] fallback start — chat=${chatId} from=${fromId} text="${text.slice(0, 80)}"`)
+    const crmBaseUrl  = (process.env.CRM_BASE_URL ?? "").replace(/\/+$/, "")
+    const crmSecret   = process.env.CRM_ASSISTANT_SECRET ?? ""
+    const senderName  = message?.from?.first_name ?? message?.from?.username ?? "Someone"
 
-    const crmBaseUrl = (process.env.CRM_BASE_URL ?? "").replace(/\/+$/, "")
-    const crmSecret  = process.env.CRM_ASSISTANT_SECRET ?? ""
+    // In a group chat, Lia only speaks up when addressed by name — otherwise
+    // she stays passively aware: the message is still logged into the shared
+    // conversation for context, just with no reply sent.
+    const isGroupChat = chatType === "group" || chatType === "supergroup"
+    const isAddressed = /\blia\b/i.test(text)
+
+    if (isGroupChat && !isAddressed) {
+      fetch(`${crmBaseUrl}/api/assistant/telegram-chat`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "x-assistant-secret": crmSecret },
+        body:    JSON.stringify({
+          telegram_user_id: fromId,
+          telegram_chat_id: chatId,
+          message:          text,
+          sender_name:      senderName,
+          observe_only:     true,
+        }),
+      }).catch((err: unknown) => console.error("[lia/telegram/ai] observe_only failed:", err))
+      return
+    }
+
+    console.log(`[lia/telegram/ai] fallback start — chat=${chatId} from=${fromId} text="${text.slice(0, 80)}"`)
 
     let aiText       = "I had trouble with that — please try again."
     let aiApprovalId: string | null = null
@@ -1597,6 +1675,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
           telegram_user_id: fromId,
           telegram_chat_id: chatId,
           message:          text,
+          sender_name:      senderName,
         }),
       })
       console.log(`[lia/telegram/ai] response status ${aiRes.status}`)

@@ -6,8 +6,12 @@ import { buildCrmContext, callLiaBrain } from "@/lib/lia-brain"
 // POST /api/assistant/telegram-chat
 // Called by the lia-bridge for conversational AI fallback in Telegram.
 // Auth: x-assistant-secret header (same secret as execute route).
-// Body: { telegram_user_id: number, telegram_chat_id: number, message: string }
+// Body: { telegram_user_id, telegram_chat_id, message, sender_name?, observe_only? }
 // Returns: { text, approval_id?, action_type?, action_summary?, action_payload? }
+//
+// observe_only: true saves the message to shared history (for group-chat
+// context) without calling Claude or producing a reply — used when a group
+// message doesn't mention "lia" and shouldn't trigger a response.
 
 export async function POST(req: Request) {
   const authErr = verifyAssistantSecret(req)
@@ -16,10 +20,12 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({})) as {
     telegram_user_id?: number
     telegram_chat_id?: number
-    message?: string
+    message?:          string
+    sender_name?:      string
+    observe_only?:     boolean
   }
 
-  const { telegram_user_id, telegram_chat_id, message } = body
+  const { telegram_user_id, telegram_chat_id, message, sender_name, observe_only } = body
   if (!telegram_user_id || !telegram_chat_id || !message?.trim()) {
     return NextResponse.json({ error: "telegram_user_id, telegram_chat_id, message required" }, { status: 400 })
   }
@@ -58,8 +64,10 @@ export async function POST(req: Request) {
   }
 
   // ── Find or create Telegram conversation ───────────────────────────────────
-  // Keyed by title "_tg_<chatId>_<userId>" under the owner's user_id.
-  const tgKey = `_tg_${telegram_chat_id}_${telegram_user_id}`
+  // Keyed by title "_tg_<chatId>" under the owner's user_id — shared by
+  // everyone in that chat (a private chat's id is already the user's own id,
+  // so this is a no-op for DMs and exactly what's needed for group chats).
+  const tgKey = `_tg_${telegram_chat_id}`
   const now   = new Date().toISOString()
 
   let conversationId: string
@@ -90,19 +98,30 @@ export async function POST(req: Request) {
   }
 
   // ── Save user message ───────────────────────────────────────────────────────
+  // Prefixed with the sender's name — harmless in a DM, needed in a shared
+  // group conversation so Claude can tell who said what.
+  const storedContent = sender_name ? `${sender_name}: ${message.trim()}` : message.trim()
   await service.from("assistant_messages").insert({
     conversation_id: conversationId,
     role:            "user",
-    content:         message.trim(),
+    content:         storedContent,
   })
 
-  // ── Fetch history (last 20) ────────────────────────────────────────────────
-  const { data: history } = await service
+  // Passive observation — message logged for context, no reply generated.
+  if (observe_only) {
+    return NextResponse.json({ text: null })
+  }
+
+  // ── Fetch history (most recent 20, chronological) ──────────────────────────
+  // Fetch newest-first so `.limit(20)` gives the most RECENT messages, not the
+  // oldest — then reverse into chronological order for the model.
+  const { data: recentHistory } = await service
     .from("assistant_messages")
     .select("role, content")
     .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(20)
+  const history = recentHistory ? [...recentHistory].reverse() : null
 
   // ── Fetch CRM context ───────────────────────────────────────────────────────
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]

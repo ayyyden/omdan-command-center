@@ -30,13 +30,16 @@ export async function POST(req: NextRequest, { params }: RouteCtx) {
     .from("assistant_messages")
     .insert({ conversation_id: conversationId, role: "user", content: userMessage })
 
-  // Fetch conversation history (last 20 messages for context)
-  const { data: history } = await sessionClient
+  // Fetch conversation history (most recent 20 messages, chronological order)
+  // — fetch newest-first so `.limit(20)` gives the most RECENT messages, not
+  // the oldest, then reverse for the model.
+  const { data: recentHistory } = await sessionClient
     .from("assistant_messages")
     .select("role, content")
     .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(20)
+  const history = recentHistory ? [...recentHistory].reverse() : null
 
   // Fetch CRM context using service client
   const service = createServiceClient()
