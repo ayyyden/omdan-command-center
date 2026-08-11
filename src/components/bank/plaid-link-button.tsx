@@ -21,12 +21,17 @@ export function PlaidLinkButton({ onConnected }: Props) {
     let cancelled = false
     setLoading(true)
     fetch("/api/bank/create-link-token", { method: "POST" })
-      .then((res) => res.json())
-      .then((data) => {
-        if (!cancelled) setLinkToken(data.link_token ?? null)
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!res.ok || !data.link_token) {
+          toast({ title: "Couldn't start bank connection", description: data.error ?? `Server returned ${res.status}`, variant: "destructive" })
+          return
+        }
+        setLinkToken(data.link_token)
       })
-      .catch(() => {
-        if (!cancelled) toast({ title: "Couldn't start bank connection", variant: "destructive" })
+      .catch((err) => {
+        if (!cancelled) toast({ title: "Couldn't start bank connection", description: err instanceof Error ? err.message : String(err), variant: "destructive" })
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
