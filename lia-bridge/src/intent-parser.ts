@@ -136,8 +136,13 @@ export function parseIntent(text: string): Intent {
   if (/connected|health|alive|online|test/.test(lower)) return { type: "health_check" }
   if (/are you|lia.*connect/.test(lower))               return { type: "health_check" }
 
-  // Daily attention / summary
-  if (/attention|today|summary|overview|pending|what.*need|review|status/.test(lower)) {
+  // Daily attention / summary — must be a clear, standalone request for the
+  // summary itself, not just a message that happens to contain a word like
+  // "today"/"pending"/"status" as part of some other request (e.g. "make us
+  // a call reminder for Oscar at 6pm today" is NOT this — it's a reminder).
+  const isSummaryPhrase = /\b(daily\s+summary|daily\s+attention|what\s+needs\s+(my\s+)?attention|what.?s\s+(pending|outstanding|overdue)|give\s+me\s+(the\s+|an\s+)?(daily\s+)?overview|today.?s\s+summary|morning\s+summary)\b/.test(lower)
+  const looksLikeOtherRequest = /\b(remind|reminder|schedule|book|create|add|record|log|update|send|invoice|payment|estimate|expense|calendar|appointment)\b/.test(lower)
+  if (isSummaryPhrase && !looksLikeOtherRequest) {
     return { type: "daily_attention" }
   }
 
