@@ -420,7 +420,7 @@ function ExecutedResult({ type, result }: { type: string; result: Record<string,
   if (type === "schedule_job" || type === "create_job") {
     if (result.job_id) links.push({ label: "View Job", href: `${appUrl}/jobs/${result.job_id}` })
   }
-  if (type === "create_calendar_event") {
+  if (type === "create_calendar_event" || type === "create_reminder") {
     if (result.calendar_link) links.push({ label: "View on Calendar", href: result.calendar_link as string })
   }
 

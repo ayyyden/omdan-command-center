@@ -3,7 +3,7 @@ import express, { type Request, type Response } from "express"
 import { startScheduler }           from "./scheduler"
 import { parseIntent }              from "./intent-parser"
 import { parseInvoiceMessage }      from "./invoice-parser"
-import { parseLeadEstimateMessage } from "./lead-parser"
+import { parseLeadEstimateMessage, parseMetaAdLeadMessage } from "./lead-parser"
 import { parseScheduleMessage, formatScheduledDate, formatScheduledTime } from "./schedule-parser"
 import { parseContractMessage } from "./contract-parser"
 import { formatDailySummary }       from "./format-response"
@@ -838,6 +838,14 @@ function formatClaudeActionForTelegram(
     lines.push("✅ Complete To-Do / Reminder")
     lines.push("")
     if (p.title) lines.push(`📝 ${p.title}`)
+  } else if (action.type === "create_calendar_event") {
+    lines.push("📅 Calendar Event")
+    lines.push("")
+    if (p.title)            lines.push(`📝 ${p.title}`)
+    if (p.date)             lines.push(`📅 Date: ${p.date}${p.start_time ? ` at ${p.start_time}` : ""}`)
+    if (p.duration_minutes) lines.push(`⏱ Duration: ${p.duration_minutes} min`)
+    if (p.location)         lines.push(`📍 Location: ${p.location}`)
+    if (p.notes)            lines.push(`📝 Notes: ${p.notes}`)
   } else {
     lines.push(`⚡ ${action.summary}`)
   }
@@ -996,7 +1004,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
   const update = req.body as {
     update_id?: number
     message?: {
-      from?:    { id: number; first_name?: string; username?: string }
+      from?:    { id: number; first_name?: string; username?: string; is_bot?: boolean }
       chat?:    { id: number; type?: string; title?: string }
       text?:    string
       caption?: string
@@ -1039,6 +1047,49 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
   }
 
   if (!fromId || !chatId || (!text && !message?.photo?.length)) return
+
+  // ── Meta Ad lead bot (desertleads) ───────────────────────────────────────
+  // A separate bot posts structured "🚨 NEW META LEAD" messages into the
+  // team group when a new Meta/Facebook ad lead comes in. Telegram only
+  // delivers bot-to-bot messages when Bot-to-Bot Communication Mode is
+  // enabled for this bot in @BotFather, so this only fires once that's on.
+  // Bypasses the human allowlist and the normal AI pipeline entirely —
+  // parsed directly and inserted onto the Meta Leads call list.
+  if (message?.from?.is_bot && text && TELEGRAM_ALLOWED_CHAT_IDS.has(chatId)) {
+    const metaLead = parseMetaAdLeadMessage(text)
+    if (metaLead) {
+      console.log(`[lia/telegram] meta-ad-lead from @${message.from.username ?? "?"} — "${metaLead.name}"`)
+      try {
+        const crmBaseUrl = (process.env.CRM_BASE_URL ?? "").replace(/\/+$/, "")
+        const crmSecret  = process.env.CRM_ASSISTANT_SECRET ?? ""
+        const crmRes = await fetch(`${crmBaseUrl}/api/meta-leads/ingest`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", "x-assistant-secret": crmSecret },
+          body: JSON.stringify({
+            full_name: metaLead.name,
+            phone:     metaLead.phone,
+            email:     metaLead.email,
+            city:      metaLead.city,
+            homeowner: metaLead.homeowner,
+            link:      metaLead.link,
+            raw_text:  text,
+          }),
+        })
+        const result = await crmRes.json().catch(() => ({})) as { error?: string; skipped?: boolean }
+        if (crmRes.ok && !result.skipped) {
+          await sendTelegramMessage(chatId, `✅ Added ${metaLead.name} to the Meta Leads call list.`)
+        } else if (crmRes.ok && result.skipped) {
+          console.log(`[lia/telegram] meta-ad-lead duplicate skipped — ${metaLead.name}`)
+        } else {
+          console.error("[lia/telegram] meta-ad-lead ingest failed:", result.error)
+          await sendTelegramMessage(chatId, `⚠️ Got a new Meta lead (${metaLead.name}) but couldn't save it — check the logs.`)
+        }
+      } catch (err) {
+        console.error("[lia/telegram] meta-ad-lead ingest error:", err)
+      }
+      return
+    }
+  }
 
   // User must always be in the allowlist
   if (!TELEGRAM_ALLOWED_IDS.has(fromId)) {
@@ -1610,9 +1661,13 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
           : "payment"
         await sendTelegramMessage(chatId, `✅ Payment recorded: ${amtFmt}.`)
       } else if (result.action_type === "create_reminder") {
-        await sendTelegramMessage(chatId, `✅ Added to the list: ${result.title ?? "reminder"} (due ${result.due_date ?? "?"}).`)
+        const calUrl = result.calendar_link ? `\n${result.calendar_link}` : ""
+        await sendTelegramMessage(chatId, `✅ Added to the list: ${result.title ?? "reminder"} (due ${result.due_date ?? "?"}).${calUrl}`)
       } else if (result.action_type === "complete_reminder") {
         await sendTelegramMessage(chatId, `✅ Marked done: ${result.title ?? "reminder"}.`)
+      } else if (result.action_type === "create_calendar_event") {
+        const url = result.calendar_link ? `\n${result.calendar_link}` : ""
+        await sendTelegramMessage(chatId, `✅ Calendar event created: ${result.title ?? "Appointment"} — ${result.date ?? "?"}${result.start_time ? ` at ${result.start_time}` : ""}.${url}`)
       } else {
         await sendTelegramMessage(chatId, "✅ Done.")
       }

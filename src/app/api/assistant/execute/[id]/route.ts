@@ -1529,16 +1529,37 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       return NextResponse.json({ error: `Failed to create reminder: ${remErr?.message}` }, { status: 500 })
     }
 
+    // Best-effort: also put every reminder on the Google Calendar, so it
+    // shows up alongside everything else instead of only living in the CRM.
+    // Never fails reminder creation — the reminder itself already succeeded.
+    let calendarLink: string | null = null
+    const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
+    if (calendarId) {
+      try {
+        const startISO = fromZonedTime(`${due_date}T${due_time ?? "09:00"}:00`, "America/Los_Angeles").toISOString()
+        const cal = await createAppointmentEvent(calendarId, {
+          title:           title,
+          description:     notes ?? null,
+          startISO,
+          durationMinutes: 30,
+        })
+        calendarLink = cal.htmlLink
+      } catch (err) {
+        console.error("[execute/create_reminder] calendar sync failed (non-fatal):", err instanceof Error ? err.message : err)
+      }
+    }
+
     await supabase.from("assistant_approvals")
-      .update({ status: "executed", executed_at: now, result: { reminder_id: reminder.id }, updated_at: now })
+      .update({ status: "executed", executed_at: now, result: { reminder_id: reminder.id, calendar_link: calendarLink }, updated_at: now })
       .eq("id", id)
 
     return NextResponse.json({
-      action_type: "create_reminder",
-      success:     true,
-      reminder_id: reminder.id,
+      action_type:   "create_reminder",
+      success:       true,
+      reminder_id:   reminder.id,
       title,
       due_date,
+      calendar_link: calendarLink,
     })
   }
 
