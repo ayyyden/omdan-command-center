@@ -42,6 +42,7 @@ const ACTION_META: Record<string, { label: string; icon: React.ElementType; colo
   update_note:            { label: "Update Note",           icon: StickyNote, color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300" },
   send_contracts:         { label: "Send Contracts",        icon: Send,       color: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300" },
   create_job:             { label: "Create Job",            icon: Briefcase,  color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300" },
+  create_calendar_event:  { label: "Calendar Event",        icon: Calendar,   color: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300" },
 }
 
 const RISK_COLOR: Record<string, string> = {
@@ -80,6 +81,27 @@ function renderPayload(type: string, payload: Record<string, unknown>) {
         } />
         <PayloadRow label="Project"   value={payload.project_summary as string | null} />
         <PayloadRow label="Ref #"     value={payload.partner_reference as string | null} />
+        {payload.notes ? (
+          <div className="flex gap-2 text-xs">
+            <span className="text-muted-foreground w-28 shrink-0">Notes</span>
+            <span className="font-medium text-foreground line-clamp-3 whitespace-pre-wrap">{payload.notes as string}</span>
+          </div>
+        ) : null}
+      </>
+    )
+  }
+
+  if (type === "create_calendar_event") {
+    return (
+      <>
+        <PayloadRow label="Title"    value={payload.title as string} />
+        <PayloadRow label="Date"     value={payload.date as string} />
+        <PayloadRow label="Time"     value={
+          payload.start_time
+            ? `${payload.start_time as string}${payload.duration_minutes ? ` (${payload.duration_minutes} min)` : ""}`
+            : null
+        } />
+        <PayloadRow label="Location" value={payload.location as string | null} />
         {payload.notes ? (
           <div className="flex gap-2 text-xs">
             <span className="text-muted-foreground w-28 shrink-0">Notes</span>
@@ -398,6 +420,9 @@ function ExecutedResult({ type, result }: { type: string; result: Record<string,
   if (type === "schedule_job" || type === "create_job") {
     if (result.job_id) links.push({ label: "View Job", href: `${appUrl}/jobs/${result.job_id}` })
   }
+  if (type === "create_calendar_event") {
+    if (result.calendar_link) links.push({ label: "View on Calendar", href: result.calendar_link as string })
+  }
 
   if (!links.length) return null
   return (
@@ -406,6 +431,8 @@ function ExecutedResult({ type, result }: { type: string; result: Record<string,
         <a
           key={l.href}
           href={l.href}
+          target={l.href.startsWith("http") ? "_blank" : undefined}
+          rel={l.href.startsWith("http") ? "noopener noreferrer" : undefined}
           className="text-xs underline text-muted-foreground hover:text-foreground"
         >
           {l.label}

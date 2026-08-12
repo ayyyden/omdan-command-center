@@ -75,3 +75,44 @@ export async function createCalendarEvent(
 
   return { eventId: data.id }
 }
+
+export interface AppointmentEventInput {
+  title:            string
+  description?:     string | null
+  location?:        string | null
+  startISO:          string  // full ISO datetime, already in the correct instant (e.g. via fromZonedTime)
+  durationMinutes?: number   // defaults to 60
+}
+
+/**
+ * Creates a general-purpose appointment/event on the given calendar — used
+ * by Lia's create_calendar_event action (not tied to a meta lead). Throws on
+ * any failure — callers should NOT mark the approval executed until this resolves.
+ */
+export async function createAppointmentEvent(
+  calendarId: string,
+  input: AppointmentEventInput,
+): Promise<{ eventId: string; htmlLink: string | null }> {
+  const start = new Date(input.startISO)
+  if (Number.isNaN(start.getTime())) {
+    throw new Error(`Invalid start datetime: ${input.startISO}`)
+  }
+  const end = new Date(start.getTime() + (input.durationMinutes ?? EVENT_DURATION_MINUTES) * 60 * 1000)
+
+  const calendar = getCalendarClient()
+
+  const { data } = await calendar.events.insert({
+    calendarId,
+    requestBody: {
+      summary:     input.title,
+      description: input.description || undefined,
+      location:    input.location || undefined,
+      start: { dateTime: start.toISOString(), timeZone: "America/Los_Angeles" },
+      end:   { dateTime: end.toISOString(),   timeZone: "America/Los_Angeles" },
+    },
+  })
+
+  if (!data.id) throw new Error("Google Calendar did not return an event id")
+
+  return { eventId: data.id, htmlLink: data.htmlLink ?? null }
+}

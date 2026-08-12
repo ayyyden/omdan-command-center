@@ -383,6 +383,25 @@ const TOOLS: Anthropic.Tool[] = [
       required: ["summary", "name"],
     },
   },
+  {
+    name: "create_calendar_event",
+    description: "Put an appointment/meeting/site visit on the company Google Calendar — use this whenever someone asks to schedule, book, or set an appointment that isn't specifically a new lead's first contact (for a brand-new lead's initial appointment, use create_lead_appointment instead). Can optionally link to an existing customer or job from CRM CONTEXT.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        title:            { type: "string", description: "Short event title, e.g. \"Site visit — Smith job\" or \"Meeting with John Doe\"." },
+        date:             { type: "string", description: "YYYY-MM-DD" },
+        start_time:       { type: "string", description: "HH:MM 24h" },
+        duration_minutes: { type: ["number", "null"], description: "Defaults to 60 if not specified." },
+        location:         { type: ["string", "null"], description: "Address or place, if known." },
+        notes:            { type: ["string", "null"], description: "Event description/details." },
+        customer_id:      { type: ["string", "null"], description: "From CRM CONTEXT, if this appointment is tied to an existing customer." },
+        job_id:           { type: ["string", "null"], description: "From CRM CONTEXT, if this appointment is tied to an existing job." },
+      },
+      required: ["summary", "title", "date", "start_time"],
+    },
+  },
 ]
 
 const READ_ONLY_TOOLS = new Set(["list_reminders", "list_bank_transactions"])

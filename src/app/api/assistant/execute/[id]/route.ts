@@ -9,6 +9,8 @@ import { generateInvoicePDFBuffer } from "@/lib/pdf/generate-invoice-pdf"
 import { notifyLia } from "@/lib/lia-notifications"
 import { normalizePaymentLabel } from "@/lib/lia-text-normalizer"
 import { deriveJobTitle } from "@/lib/job-title"
+import { createAppointmentEvent } from "@/lib/google-calendar"
+import { fromZonedTime } from "date-fns-tz"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -1571,6 +1573,77 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       success:     true,
       reminder_id,
       title:       title ?? null,
+    })
+  }
+
+  // ─── create_calendar_event ────────────────────────────────────────────────
+
+  if (approval.action_type === "create_calendar_event") {
+    const { title, date, start_time, duration_minutes, location, notes, customer_id, job_id } = payload as {
+      title:             string
+      date:              string
+      start_time:        string
+      duration_minutes?: number | null
+      location?:         string | null
+      notes?:            string | null
+      customer_id?:      string | null
+      job_id?:           string | null
+    }
+
+    if (!title || !date || !start_time) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "title, date, and start_time are required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "title, date, and start_time are required" }, { status: 400 })
+    }
+
+    const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
+    if (!calendarId) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "META_LEADS_MAIN_CALENDAR_ID is not configured", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "Calendar is not configured (META_LEADS_MAIN_CALENDAR_ID)" }, { status: 500 })
+    }
+
+    let startISO: string
+    try {
+      startISO = fromZonedTime(`${date}T${start_time}:00`, "America/Los_Angeles").toISOString()
+    } catch {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "Invalid date/start_time", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "Invalid date/start_time" }, { status: 400 })
+    }
+
+    let result: { eventId: string; htmlLink: string | null }
+    try {
+      result = await createAppointmentEvent(calendarId, {
+        title,
+        description:     notes ?? null,
+        location:        location ?? null,
+        startISO,
+        durationMinutes: duration_minutes ?? undefined,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to create calendar event: ${message}` }, { status: 500 })
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({
+        status: "executed", executed_at: now,
+        result: { event_id: result.eventId, calendar_link: result.htmlLink, customer_id: customer_id ?? null, job_id: job_id ?? null },
+        updated_at: now,
+      })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:   "create_calendar_event",
+      success:       true,
+      title,
+      date,
+      start_time,
+      event_id:      result.eventId,
+      calendar_link: result.htmlLink,
     })
   }
 
