@@ -11,11 +11,10 @@ import { useSelection } from "@/hooks/use-selection"
 import { useToast } from "@/hooks/use-toast"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
-import { Receipt } from "lucide-react"
+import { Receipt, Pencil } from "lucide-react"
 import Link from "next/link"
-
-const CAT_LABEL = (c: string) =>
-  c.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+import { expenseCategoryLabel as CAT_LABEL } from "@/lib/expense-categories"
+import { EditExpenseDialog } from "@/components/expenses/edit-expense-dialog"
 
 interface ExpenseRow {
   id: string
@@ -39,6 +38,7 @@ export function ExpensesBulkTable({ expenses, userId }: Props) {
   const { selected, toggle, toggleAll, clear, allSelected, someSelected } = useSelection(allIds)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [editingExpense, setEditingExpense] = useState<ExpenseRow | null>(null)
 
   async function handleDelete() {
     setDeleting(true)
@@ -117,6 +117,14 @@ export function ExpensesBulkTable({ expenses, userId }: Props) {
                     <span className="text-xs text-muted-foreground ml-auto">{formatDate(exp.date)}</span>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingExpense(exp)}
+                  className="shrink-0 self-start text-muted-foreground hover:text-primary p-1 -m-1"
+                  aria-label="Edit expense"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
               </div>
             ))}
           </div>
@@ -134,6 +142,7 @@ export function ExpensesBulkTable({ expenses, userId }: Props) {
                   <TableHead>Category</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Date</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -170,6 +179,16 @@ export function ExpensesBulkTable({ expenses, userId }: Props) {
                     <TableCell className="text-sm text-muted-foreground">
                       {formatDate(exp.date)}
                     </TableCell>
+                    <TableCell className="px-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingExpense(exp)}
+                        className="text-muted-foreground hover:text-primary p-1"
+                        aria-label="Edit expense"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -186,6 +205,23 @@ export function ExpensesBulkTable({ expenses, userId }: Props) {
         onCancel={() => setConfirmOpen(false)}
         deleting={deleting}
       />
+
+      {editingExpense && (
+        <EditExpenseDialog
+          expense={{
+            id:           editingExpense.id,
+            expense_type: editingExpense.expense_type,
+            job_id:       editingExpense.job?.id ?? null,
+            category:     editingExpense.category,
+            description:  editingExpense.description,
+            amount:       editingExpense.amount,
+            date:         editingExpense.date,
+          }}
+          userId={userId}
+          open={!!editingExpense}
+          onOpenChange={(o) => { if (!o) setEditingExpense(null) }}
+        />
+      )}
     </div>
   )
 }

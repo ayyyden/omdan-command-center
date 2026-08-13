@@ -6,14 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { X } from "lucide-react"
-
-const CATEGORIES = [
-  "materials", "labor", "subcontractors", "permits", "dump_fees",
-  "equipment", "gas", "vehicle", "tools", "office_rent", "software",
-  "insurance", "marketing", "meals", "travel", "misc",
-]
-
-const CAT_LABEL = (c: string) => c.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+import { EXPENSE_CATEGORIES as CATEGORIES, expenseCategoryLabel as CAT_LABEL } from "@/lib/expense-categories"
 
 interface Props {
   currentType: string

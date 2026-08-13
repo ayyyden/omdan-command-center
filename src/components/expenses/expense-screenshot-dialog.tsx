@@ -10,14 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast"
 import { ImageIcon, Loader2, Trash2, Upload, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-
-const ALL_CATEGORIES = [
-  "materials","labor","subcontractors","permits","dump_fees","equipment",
-  "gas","vehicle","tools","office_rent","software","insurance","marketing",
-  "meals","travel","utilities","office_supplies","advertising","professional_services","misc",
-] as const
-
-const CAT_LABEL = (c: string) => c.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+import { EXPENSE_CATEGORIES as ALL_CATEGORIES, expenseCategoryLabel as CAT_LABEL } from "@/lib/expense-categories"
 
 type ParsedRow = {
   id:          string

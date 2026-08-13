@@ -9,12 +9,12 @@ import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NumericInput } from "@/components/ui/numeric-input"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import { logActivity } from "@/lib/activity"
-import { Loader2, Receipt } from "lucide-react"
+import { Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { EXPENSE_CATEGORIES, expenseCategoryLabel as CAT_LABEL } from "@/lib/expense-categories"
 
@@ -32,25 +32,35 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>
 
-interface AddExpenseDialogProps {
-  jobId?: string
-  userId: string
-  size?: "default" | "sm"
+export interface EditableExpense {
+  id:           string
+  expense_type: string
+  job_id:       string | null
+  category:     string
+  description:  string
+  amount:       number
+  date:         string
 }
 
-export function AddExpenseDialog({ jobId, userId, size = "default" }: AddExpenseDialogProps) {
-  const [open, setOpen] = useState(false)
+interface EditExpenseDialogProps {
+  expense: EditableExpense
+  userId:  string
+  open:    boolean
+  onOpenChange: (open: boolean) => void
+}
+
+export function EditExpenseDialog({ expense, userId, open, onOpenChange }: EditExpenseDialogProps) {
   const [jobs, setJobs] = useState<{ id: string; title: string }[]>([])
   const router = useRouter()
   const { toast } = useToast()
 
   const defaultValues: FormValues = {
-    expense_type: "job",
-    job_id: jobId ?? "",
-    category: "materials",
-    description: "",
-    amount: 0,
-    date: new Date().toLocaleDateString("en-CA"),
+    expense_type: (expense.expense_type as "job" | "business") ?? "job",
+    job_id:       expense.job_id ?? "",
+    category:     (expense.category as FormValues["category"]) ?? "materials",
+    description:  expense.description,
+    amount:       Number(expense.amount),
+    date:         expense.date,
   }
 
   const form = useForm<FormValues>({
@@ -60,9 +70,14 @@ export function AddExpenseDialog({ jobId, userId, size = "default" }: AddExpense
 
   const expenseType = form.watch("expense_type")
 
-  // Fetch jobs when dialog opens (only needed when no pre-set jobId)
+  // Reset form whenever a different expense is opened for editing.
   useEffect(() => {
-    if (!open || jobId) return
+    if (open) form.reset(defaultValues)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, expense.id])
+
+  useEffect(() => {
+    if (!open) return
     const supabase = createClient()
     supabase
       .from("jobs")
@@ -70,17 +85,15 @@ export function AddExpenseDialog({ jobId, userId, size = "default" }: AddExpense
       .neq("status", "cancelled")
       .order("title")
       .then(({ data }) => setJobs(data ?? []))
-  }, [open, jobId, userId])
+  }, [open])
 
   async function onSubmit(values: FormValues) {
     const supabase = createClient()
-    const resolvedJobId =
-      values.expense_type === "job" ? (jobId ?? values.job_id ?? null) : null
+    const resolvedJobId = values.expense_type === "job" ? (values.job_id ?? null) : null
 
-    const { data: inserted, error } = await supabase
+    const { error } = await supabase
       .from("expenses")
-      .insert({
-        user_id:      userId,
+      .update({
         expense_type: values.expense_type,
         job_id:       resolvedJobId,
         category:     values.category,
@@ -88,8 +101,7 @@ export function AddExpenseDialog({ jobId, userId, size = "default" }: AddExpense
         amount:       values.amount,
         date:         values.date,
       })
-      .select("id")
-      .single()
+      .eq("id", expense.id)
 
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" })
@@ -99,58 +111,48 @@ export function AddExpenseDialog({ jobId, userId, size = "default" }: AddExpense
     await logActivity(supabase, {
       userId,
       entityType: "expense",
-      entityId:   inserted.id,
-      action:     "created",
-      description: `Expense added: ${values.description} — $${values.amount.toFixed(2)} (${CAT_LABEL(values.category)})`,
+      entityId:   expense.id,
+      action:     "updated",
+      description: `Expense updated: ${values.description} — $${values.amount.toFixed(2)} (${CAT_LABEL(values.category)})`,
       jobId: resolvedJobId ?? undefined,
     })
 
-    toast({ title: "Expense added", description: `${values.description} — $${values.amount}` })
-    form.reset(defaultValues)
-    setOpen(false)
+    toast({ title: "Expense updated", description: `${values.description} — $${values.amount}` })
+    onOpenChange(false)
     router.refresh()
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size={size}>
-          <Receipt className="w-4 h-4 mr-2" />Add Expense
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={(o) => { if (!form.formState.isSubmitting) onOpenChange(o) }}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Add Expense</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Edit Expense</DialogTitle></DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
 
-            {/* Type toggle — only when no pre-set jobId */}
-            {!jobId && (
-              <FormField control={form.control} name="expense_type" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Type</FormLabel>
-                  <div className="flex rounded-md border overflow-hidden">
-                    {(["job", "business"] as const).map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        className={cn(
-                          "flex-1 px-3 py-1.5 text-sm font-medium transition-colors",
-                          field.value === t
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-background text-muted-foreground hover:bg-muted",
-                        )}
-                        onClick={() => field.onChange(t)}
-                      >
-                        {t === "job" ? "Job Expense" : "Business / Overhead"}
-                      </button>
-                    ))}
-                  </div>
-                </FormItem>
-              )} />
-            )}
+            <FormField control={form.control} name="expense_type" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Type</FormLabel>
+                <div className="flex rounded-md border overflow-hidden">
+                  {(["job", "business"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={cn(
+                        "flex-1 px-3 py-1.5 text-sm font-medium transition-colors",
+                        field.value === t
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-background text-muted-foreground hover:bg-muted",
+                      )}
+                      onClick={() => field.onChange(t)}
+                    >
+                      {t === "job" ? "Job Expense" : "Business / Overhead"}
+                    </button>
+                  ))}
+                </div>
+              </FormItem>
+            )} />
 
-            {/* Job selector — only when no pre-set jobId and type is job */}
-            {!jobId && expenseType === "job" && (
+            {expenseType === "job" && (
               <FormField control={form.control} name="job_id" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Job</FormLabel>
@@ -223,10 +225,10 @@ export function AddExpenseDialog({ jobId, userId, size = "default" }: AddExpense
             </div>
 
             <div className="flex gap-2 justify-end">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
               <Button type="submit" disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Add Expense
+                Save Changes
               </Button>
             </div>
           </form>

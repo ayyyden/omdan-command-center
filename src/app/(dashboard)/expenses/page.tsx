@@ -8,8 +8,7 @@ import { ExpenseScreenshotDialog } from "@/components/expenses/expense-screensho
 import { ExpensesFilters } from "./expenses-filters"
 import { ExpensesBulkTable } from "@/components/expenses/expenses-bulk-table"
 import { ReceiptsSection } from "@/components/receipts/receipts-section"
-
-const CAT_LABEL = (c: string) => c.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+import { expenseCategoryLabel as CAT_LABEL } from "@/lib/expense-categories"
 
 interface PageProps {
   searchParams: Promise<{ type?: string; category?: string; from?: string; to?: string }>

@@ -10,6 +10,7 @@
 
 import Anthropic from "@anthropic-ai/sdk"
 import { createServiceClient } from "@/lib/supabase/service"
+import { EXPENSE_CATEGORIES } from "@/lib/expense-categories"
 
 export interface ActionDraft {
   type:       string
@@ -308,7 +309,7 @@ const TOOLS: Anthropic.Tool[] = [
         ...SUMMARY_PROP,
         amount:              { type: "number" },
         vendor:              { type: ["string", "null"] },
-        category:            { type: "string", enum: ["gas", "meals", "materials", "labor", "equipment", "tools", "vehicle", "travel", "permits", "dump_fees", "subcontractors", "office_rent", "software", "insurance", "marketing", "misc"] },
+        category:            { type: "string", enum: [...EXPENSE_CATEGORIES] },
         date:                { type: "string", description: "YYYY-MM-DD, use today if not specified" },
         notes:               { type: ["string", "null"] },
         job_id:              { type: ["string", "null"], description: "Only if the user names a specific job from CRM CONTEXT." },

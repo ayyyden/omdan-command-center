@@ -2,13 +2,9 @@ import { NextResponse } from "next/server"
 import Anthropic from "@anthropic-ai/sdk"
 import { verifyAssistantSecret } from "@/lib/assistant-auth"
 import { createServiceClient } from "@/lib/supabase/service"
+import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_HINTS } from "@/lib/expense-categories"
 
-const VALID_CATEGORIES = new Set([
-  "labor","materials","subcontractors","permits","dump_fees","travel",
-  "equipment","gas","vehicle","tools","office_rent","software",
-  "insurance","marketing","meals","misc",
-  "utilities","office_supplies","advertising","professional_services",
-])
+const VALID_CATEGORIES = new Set<string>(EXPENSE_CATEGORIES)
 
 const client = new Anthropic()
 
@@ -17,25 +13,10 @@ const SYSTEM_PROMPT = `You are an expense tracking assistant. You will receive a
 Extract ALL transactions visible in the image and return them as JSON.
 
 Determine the business expense category for each transaction from this list ONLY:
-labor, materials, subcontractors, permits, dump_fees, travel, equipment, gas, vehicle,
-tools, office_rent, software, insurance, marketing, meals, misc, utilities,
-office_supplies, advertising, professional_services
+${EXPENSE_CATEGORIES.join(", ")}
 
 Category rules:
-- Home Depot, Lowe's, lumber yards → materials
-- Gas stations, fuel (Shell, BP, Chevron, Exxon) → gas
-- Restaurants, fast food, food delivery (McDonald's, DoorDash, Uber Eats) → meals
-- Google Ads, Meta/Facebook, advertising platforms → advertising
-- Insurance companies, State Farm, Allstate → insurance
-- Amazon (non-tools), Staples, office supply stores → office_supplies
-- Electric, water, internet, phone bills (AT&T, Verizon, ConEd) → utilities
-- Software subscriptions (QuickBooks, Adobe, Slack, Microsoft) → software
-- Auto parts, car repairs, vehicle registration → vehicle
-- Uber, Lyft, flights, tolls, parking → travel
-- Tools, hardware stores for tools → tools
-- Rent, office space → office_rent
-- Consulting, legal, accounting fees → professional_services
-- Anything else → misc
+${EXPENSE_CATEGORY_HINTS}
 
 Return ONLY a JSON object with this exact shape — no markdown, no explanation:
 {"transactions":[{"date":"YYYY-MM-DD","description":"vendor name","amount":12.34,"card_last4":"1234","category":"category_name","notes":null}]}
@@ -63,7 +44,7 @@ export async function POST(req: Request) {
   }
 
   const response = await client.messages.create({
-    model:      "claude-opus-4-8",
+    model:      "claude-opus-5",
     max_tokens: 4096,
     thinking:   { type: "adaptive" },
     system:     SYSTEM_PROMPT,
