@@ -124,9 +124,9 @@ const SUMMARY_PROP = {
 // exact-match `.eq()` calls, so this can never become arbitrary SQL.
 const QUERYABLE_TABLES: Record<string, { columns: string; filterable: string[]; orderBy: string }> = {
   customers:         { columns: "id, name, phone, email, address, service_type, lead_source, status, created_at", filterable: ["status", "lead_source"], orderBy: "created_at" },
-  jobs:              { columns: "id, title, status, scheduled_date, completion_date, customer_id, created_at", filterable: ["status"], orderBy: "created_at" },
+  jobs:              { columns: "id, title, status, scheduled_date, completion_date, customer_id, created_at", filterable: ["status"], orderBy: "scheduled_date" },
   estimates:         { columns: "id, title, status, total, customer_id, sent_at, approved_at, created_at", filterable: ["status"], orderBy: "created_at" },
-  invoices:          { columns: "id, type, status, amount, due_date, job_id, customer_id, created_at", filterable: ["status", "type"], orderBy: "created_at" },
+  invoices:          { columns: "id, type, status, amount, due_date, job_id, customer_id, created_at", filterable: ["status", "type"], orderBy: "due_date" },
   payments:          { columns: "id, amount, method, date, job_id, customer_id", filterable: ["method"], orderBy: "date" },
   expenses:          { columns: "id, category, description, amount, date, job_id", filterable: ["category"], orderBy: "date" },
   reminders:         { columns: "id, title, due_date, due_time, type, completed_at, customer_id, job_id", filterable: ["type"], orderBy: "due_date" },
@@ -137,6 +137,8 @@ const QUERYABLE_TABLES: Record<string, { columns: string; filterable: string[]; 
   bank_transactions: { columns: "id, amount, date, name, merchant_name, category, match_status", filterable: ["match_status"], orderBy: "date" },
   team_members:      { columns: "id, name, email, role, status", filterable: ["role", "status"], orderBy: "created_at" },
 }
+// The orderBy column doubles as each table's primary date field for
+// date_from/date_to range filtering (e.g. "how much did we spend today").
 
 const TOOLS: Anthropic.Tool[] = [
   {
@@ -387,15 +389,18 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "query_crm",
-    description: `Look up records from anywhere in the CRM — read-only, does not need approval, call it as many times as needed in one turn. Use this for ANY factual question you can't already answer from CRM CONTEXT: counts ("how many on the call list"), lists ("which invoices are unpaid"), lookups by status, etc. Never say you don't have access — query instead.
+    description: `Look up records from anywhere in the CRM — read-only, does not need approval, call it as many times as needed in one turn (in parallel is fine). Use this for ANY factual question you can't already answer from CRM CONTEXT: counts ("how many on the call list"), totals ("how much did we spend today"), lists ("which invoices are unpaid"), lookups by status, etc. Never say you don't have access — query instead.
 
 Tables you can query: ${Object.keys(QUERYABLE_TABLES).join(", ")}.
-Set count_only=true for "how many" questions — much cheaper than listing rows.`,
+Set count_only=true for "how many" questions — much cheaper than listing rows. For sums ("how much money"), list the rows (not count_only) and add up the amount field yourself.
+For date-range questions ("today", "this week"), use date_from/date_to — each table's most relevant date field is used automatically (jobs→scheduled_date, expenses/payments/bank_transactions→date, invoices/reminders→due_date, meta_leads/estimates/change_orders→created_at, sent_contracts→sent_at). For "today" set both to the same date.`,
     input_schema: {
       type: "object",
       properties: {
         table:      { type: "string", enum: Object.keys(QUERYABLE_TABLES), description: "Which table to query." },
         filters:    { type: ["object", "null"], description: "Exact-match filters as {field: value}, e.g. {\"list\": \"call_list\"} or {\"status\": \"unpaid\"}. Only use fields from that table's filterable list (ask via a query with no filters first if unsure, or just try a sensible field name)." },
+        date_from:  { type: ["string", "null"], description: "YYYY-MM-DD, inclusive lower bound on that table's date field." },
+        date_to:    { type: ["string", "null"], description: "YYYY-MM-DD, inclusive upper bound on that table's date field." },
         count_only: { type: ["boolean", "null"], description: "true = just return the count, not the rows. Use for \"how many\" questions." },
         limit:      { type: ["number", "null"], description: "Max rows when not count_only. Defaults to 20, max 50." },
       },
@@ -524,7 +529,7 @@ async function runListBankTransactions(input: { match_status?: string | null; se
     .join("\n")
 }
 
-async function runQueryCrm(input: { table?: string; filters?: Record<string, string> | null; count_only?: boolean | null; limit?: number | null }): Promise<string> {
+async function runQueryCrm(input: { table?: string; filters?: Record<string, string> | null; date_from?: string | null; date_to?: string | null; count_only?: boolean | null; limit?: number | null }): Promise<string> {
   const table  = input.table ?? ""
   const config = QUERYABLE_TABLES[table]
   if (!config) {
@@ -538,11 +543,17 @@ async function runQueryCrm(input: { table?: string; filters?: Record<string, str
   }
 
   const supabase = createServiceClient()
-  const filterDesc = input.filters && Object.keys(input.filters).length ? ` matching ${JSON.stringify(input.filters)}` : ""
+  const descParts = [
+    input.filters && Object.keys(input.filters).length ? `matching ${JSON.stringify(input.filters)}` : null,
+    input.date_from || input.date_to ? `between ${input.date_from ?? "…"} and ${input.date_to ?? "…"} (by ${config.orderBy})` : null,
+  ].filter(Boolean)
+  const filterDesc = descParts.length ? ` ${descParts.join(" ")}` : ""
 
   if (input.count_only) {
     let query = supabase.from(table).select("id", { count: "exact", head: true })
     for (const [key, value] of Object.entries(input.filters ?? {})) query = query.eq(key, value)
+    if (input.date_from) query = query.gte(config.orderBy, input.date_from)
+    if (input.date_to)   query = query.lte(config.orderBy, input.date_to)
     const { count, error } = await query
     if (error) return `Error querying ${table}: ${error.message}`
     return `${count ?? 0} row(s) in ${table}${filterDesc}.`
@@ -551,6 +562,8 @@ async function runQueryCrm(input: { table?: string; filters?: Record<string, str
   const limit = Math.min(50, Math.max(1, input.limit ?? 20))
   let query = supabase.from(table).select(config.columns)
   for (const [key, value] of Object.entries(input.filters ?? {})) query = query.eq(key, value)
+  if (input.date_from) query = query.gte(config.orderBy, input.date_from)
+  if (input.date_to)   query = query.lte(config.orderBy, input.date_to)
   const { data, error } = await query.order(config.orderBy, { ascending: false }).limit(limit)
 
   if (error) return `Error querying ${table}: ${error.message}`
@@ -600,37 +613,50 @@ export async function callLiaBrain(
         .join("\n")
         .trim()
 
-      const toolUse = result.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
+      // Claude can (and does) call more than one tool in a single response
+      // (e.g. two query_crm lookups at once) — every tool_use block here
+      // MUST get a matching tool_result before the next API call, or the
+      // request 400s on the very next turn ("tool_use ids were found
+      // without tool_result blocks"). Grabbing only the first with .find()
+      // silently dropped the rest and corrupted the transcript.
+      const toolUses = result.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
 
-      if (!toolUse) {
+      if (!toolUses.length) {
         return { message: replyText || "..." }
       }
 
-      console.log("[lia-brain] tool call:", toolUse.name, JSON.stringify(toolUse.input).slice(0, 300))
+      for (const t of toolUses) {
+        console.log("[lia-brain] tool call:", t.name, JSON.stringify(t.input).slice(0, 300))
+      }
 
-      if (READ_ONLY_TOOLS.has(toolUse.name)) {
-        const toolResultText =
-          toolUse.name === "list_bank_transactions" ? await runListBankTransactions(toolUse.input as { match_status?: string | null; search?: string | null; limit?: number | null }) :
-          toolUse.name === "query_crm"              ? await runQueryCrm(toolUse.input as { table?: string; filters?: Record<string, string> | null; count_only?: boolean | null; limit?: number | null }) :
-          await runListReminders(toolUse.input as { scope?: string })
+      const writeTool = toolUses.find((t) => !READ_ONLY_TOOLS.has(t.name))
+
+      if (!writeTool) {
+        // All read-only — resolve every one, then continue the loop.
+        const toolResults = await Promise.all(toolUses.map(async (t) => {
+          const text =
+            t.name === "list_bank_transactions" ? await runListBankTransactions(t.input as { match_status?: string | null; search?: string | null; limit?: number | null }) :
+            t.name === "query_crm"              ? await runQueryCrm(t.input as { table?: string; filters?: Record<string, string> | null; date_from?: string | null; date_to?: string | null; count_only?: boolean | null; limit?: number | null }) :
+            await runListReminders(t.input as { scope?: string })
+          return { type: "tool_result" as const, tool_use_id: t.id, content: text }
+        }))
         messages.push({ role: "assistant", content: result.content })
-        messages.push({
-          role: "user",
-          content: [{ type: "tool_result", tool_use_id: toolUse.id, content: toolResultText }],
-        })
+        messages.push({ role: "user", content: toolResults })
         continue
       }
 
       // Write tool — this tool call IS the proposed action. Stop and hand it
-      // back for approval; nothing executes here.
-      const { summary, ...rest } = toolUse.input as Record<string, unknown> & { summary?: string }
+      // back for approval; nothing executes here. Any other tool_use blocks
+      // in this same response are discarded — safe, since `messages` is
+      // never sent to the API again after we return.
+      const { summary, ...rest } = writeTool.input as Record<string, unknown> & { summary?: string }
       return {
         message: replyText || (summary as string) || "Here's what I'd like to do:",
         action: {
-          type:       toolUse.name,
-          summary:    (summary as string) ?? toolUse.name,
+          type:       writeTool.name,
+          summary:    (summary as string) ?? writeTool.name,
           payload:    rest,
-          risk_level: ACTION_RISK[toolUse.name] ?? "low",
+          risk_level: ACTION_RISK[writeTool.name] ?? "low",
         },
       }
     }
