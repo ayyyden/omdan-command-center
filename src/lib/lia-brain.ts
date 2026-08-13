@@ -105,6 +105,8 @@ RULES:
 
 DATA ACCESS: CRM CONTEXT below is only a small recent-activity snapshot (customers, jobs, lead appointments) — it is NOT everything in the CRM. You have a lot more data than that: meta lead call lists, PropStream leads, estimates, invoices, payments, expenses, reminders, sent contracts, change orders, bank transactions, and team members. Never say you don't have access to something or can't check — call query_crm (as many times as needed) to look it up for real before answering. This applies to any "how many", "list", "who/what/when" question about CRM data, not just the tables shown in CRM CONTEXT.
 
+EDITING EXISTING RECORDS: Don't say "I can't edit that" or "I don't have a tool for that." For a specific, well-understood action (reschedule a job, log a payment, mark a call outcome), use the dedicated tool. For anything else — renaming/correcting a field on one record, or the same change across many ("rename every Facebook-related expense's description to 'Facebook Advertising'") — use update_crm_records. Always query_crm first (count_only for bulk) so your proposal message tells the user exactly how many records and what's changing before they approve it.
+
 CRM CONTEXT:
 ${crmContext}`
 }
@@ -138,6 +140,24 @@ const QUERYABLE_TABLES: Record<string, { columns: string; filterable: string[]; 
   bank_transactions: { columns: "id, amount, date, name, merchant_name, category, match_status", filterable: ["match_status"], orderBy: "date" },
   team_members:      { columns: "id, name, email, role, status", filterable: ["role", "status"], orderBy: "created_at" },
 }
+// Which fields update_crm_records is allowed to touch, per table — always a
+// SUBSET of that table's columns, deliberately excluding anything with real
+// business logic behind it (money fields, and statuses that drive side
+// effects like invoice paid/partial math or job completion) — those stay on
+// their dedicated tools (update_job, record_payment, etc.) which get that
+// logic right. "id" is always a valid filter key in addition to the list
+// below, for targeting one specific record.
+export const EDITABLE_TABLES: Record<string, { editable: string[]; filterable: string[] }> = {
+  customers:  { editable: ["name", "phone", "email", "address", "service_type", "lead_source", "status", "notes"], filterable: ["status", "lead_source"] },
+  jobs:       { editable: ["title", "description"], filterable: ["status"] },
+  expenses:   { editable: ["category", "description", "date", "job_id", "expense_type"], filterable: ["category", "expense_type"] },
+  payments:   { editable: ["notes", "method"], filterable: ["method"] },
+  reminders:  { editable: ["title", "due_date", "due_time", "type", "notes"], filterable: ["type"] },
+  invoices:   { editable: ["notes"], filterable: ["status", "type"] },
+  meta_leads: { editable: ["notes", "city", "email", "phone", "full_name"], filterable: ["list", "last_outcome"] },
+  change_orders: { editable: ["notes", "title", "description"], filterable: ["status"] },
+}
+
 // The orderBy column doubles as each table's primary date field for
 // date_from/date_to range filtering (e.g. "how much did we spend today").
 
@@ -409,6 +429,23 @@ For date-range questions ("today", "this week"), use date_from/date_to — each 
     },
   },
   {
+    name: "update_crm_records",
+    description: `Edit one or more EXISTING records anywhere in the CRM — single record (filter by id) or bulk (filter by a shared field, e.g. rename every "marketing" expense's description). Always requires approval, same as every other write tool here — for a bulk change, ALWAYS call query_crm with the same filters and count_only=true FIRST so your message tells the user how many records will change before they approve it.
+
+Tables and their editable fields: ${Object.entries(EDITABLE_TABLES).map(([t, c]) => `${t} (${c.editable.join(", ")})`).join("; ")}.
+Money fields (amount/total/price) and workflow statuses (job status, invoice status, etc.) are deliberately NOT editable here — use the dedicated tool for those (update_job, record_payment, update_meta_lead_outcome, ...) since they carry logic this generic tool doesn't.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        table:   { type: "string", enum: Object.keys(EDITABLE_TABLES), description: "Which table to update." },
+        filters: { type: "object", description: "Which rows to update, as {field: value}. Use {\"id\": \"...\"} for one specific record, or any filterable field for a bulk edit. Must not be empty — never update a whole table unfiltered." },
+        updates: { type: "object", description: "Fields to change, as {field: new_value} — only fields from that table's editable list." },
+      },
+      required: ["summary", "table", "filters", "updates"],
+    },
+  },
+  {
     name: "update_meta_lead_outcome",
     description: "Log the outcome of a call to someone on the Meta Leads call list (query_crm table=meta_leads to find them). Mirrors the outcome buttons on the Meta Lead Jobs page: no_answer moves them to the second call list (or auto-archives at 10 missed calls — mention this if their missed_call_count from query_crm is close), answered_scheduled books the main appointment calendar, callback_later books the callback calendar and moves them to the callback list.",
     input_schema: {
@@ -470,6 +507,7 @@ const READ_ONLY_TOOLS = new Set(["list_reminders", "list_bank_transactions", "qu
 const ACTION_RISK: Record<string, "low" | "medium" | "high"> = {
   create_send_invoice: "medium",
   record_payment:      "medium",
+  update_crm_records:  "medium",
 }
 
 // ─── Read-only tool execution ─────────────────────────────────────────────────

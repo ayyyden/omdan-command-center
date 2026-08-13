@@ -838,6 +838,16 @@ function formatClaudeActionForTelegram(
     lines.push("✅ Complete To-Do / Reminder")
     lines.push("")
     if (p.title) lines.push(`📝 ${p.title}`)
+  } else if (action.type === "update_crm_records") {
+    const filters = (p.filters ?? {}) as Record<string, unknown>
+    const updates = (p.updates ?? {}) as Record<string, unknown>
+    lines.push("✏️ Edit Records")
+    lines.push("")
+    if (p.table) lines.push(`📋 Table: ${p.table}`)
+    const whereText = Object.entries(filters).map(([k, v]) => `${k}=${v}`).join(", ")
+    if (whereText) lines.push(`🔎 Where: ${whereText}`)
+    const setText = Object.entries(updates).map(([k, v]) => `${k}→${v}`).join(", ")
+    if (setText) lines.push(`✏️ Set: ${setText}`)
   } else if (action.type === "update_meta_lead_outcome") {
     const outcomeLabel: Record<string, string> = {
       answered_scheduled: "Answered — Scheduled",
@@ -1676,6 +1686,9 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         await sendTelegramMessage(chatId, `✅ Added to the list: ${result.title ?? "reminder"} (due ${result.due_date ?? "?"}).${calUrl}`)
       } else if (result.action_type === "complete_reminder") {
         await sendTelegramMessage(chatId, `✅ Marked done: ${result.title ?? "reminder"}.`)
+      } else if (result.action_type === "update_crm_records") {
+        const count = Number(result.count ?? 0)
+        await sendTelegramMessage(chatId, `✅ Updated ${count} record${count !== 1 ? "s" : ""} in ${result.table ?? "the CRM"}.`)
       } else if (result.action_type === "update_meta_lead_outcome") {
         const outcomeLabel: Record<string, string> = {
           answered_scheduled: "answered — scheduled",

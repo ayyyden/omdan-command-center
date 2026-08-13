@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   CheckCircle, XCircle, AlertCircle, Loader2,
   FileText, Calendar, StickyNote, Receipt, Send, UserPlus, Wallet, MapPin,
-  Briefcase, Pencil, PhoneCall,
+  Briefcase, Pencil, PhoneCall, DatabaseZap,
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -44,6 +44,7 @@ const ACTION_META: Record<string, { label: string; icon: React.ElementType; colo
   create_job:             { label: "Create Job",            icon: Briefcase,  color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300" },
   create_calendar_event:  { label: "Calendar Event",        icon: Calendar,   color: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300" },
   update_meta_lead_outcome: { label: "Log Call Outcome",     icon: PhoneCall,  color: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300" },
+  update_crm_records:     { label: "Edit Records",           icon: DatabaseZap, color: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
 }
 
 const RISK_COLOR: Record<string, string> = {
@@ -88,6 +89,18 @@ function renderPayload(type: string, payload: Record<string, unknown>) {
             <span className="font-medium text-foreground line-clamp-3 whitespace-pre-wrap">{payload.notes as string}</span>
           </div>
         ) : null}
+      </>
+    )
+  }
+
+  if (type === "update_crm_records") {
+    const filters = (payload.filters ?? {}) as Record<string, unknown>
+    const updates = (payload.updates ?? {}) as Record<string, unknown>
+    return (
+      <>
+        <PayloadRow label="Table"   value={payload.table as string} />
+        <PayloadRow label="Where"   value={Object.entries(filters).map(([k, v]) => `${k} = ${v}`).join(", ") || null} />
+        <PayloadRow label="Set to"  value={Object.entries(updates).map(([k, v]) => `${k} → ${v}`).join(", ") || null} />
       </>
     )
   }

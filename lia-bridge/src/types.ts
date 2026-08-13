@@ -246,6 +246,8 @@ export interface ExecuteResponse {
   list?: string
   scheduled_at?: string
   missed_call_count?: number
+  // update_crm_records fields (count reused from send_contracts above)
+  table?: string
 }
 
 export interface DailySummary {

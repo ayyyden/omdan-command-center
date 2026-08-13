@@ -10,6 +10,7 @@ import { notifyLia } from "@/lib/lia-notifications"
 import { normalizePaymentLabel } from "@/lib/lia-text-normalizer"
 import { deriveJobTitle } from "@/lib/job-title"
 import { createAppointmentEvent, createCalendarEvent } from "@/lib/google-calendar"
+import { EDITABLE_TABLES } from "@/lib/lia-brain"
 import { fromZonedTime } from "date-fns-tz"
 
 interface RouteCtx { params: Promise<{ id: string }> }
@@ -1665,6 +1666,72 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       start_time,
       event_id:      result.eventId,
       calendar_link: result.htmlLink,
+    })
+  }
+
+  // ─── update_crm_records ────────────────────────────────────────────────────
+  // Generic, allowlisted edit — single record (filters.id) or bulk (any other
+  // filter). Table/field allowlist lives in lib/lia-brain.ts (EDITABLE_TABLES)
+  // so the tool schema Claude sees and what's actually permitted here can
+  // never drift apart. Deliberately re-validated here too, server-side —
+  // never trust the model's own tool call to have respected the schema.
+
+  if (approval.action_type === "update_crm_records") {
+    const { table, filters, updates } = payload as {
+      table:   string
+      filters: Record<string, string>
+      updates: Record<string, string | number | null>
+    }
+
+    const config = EDITABLE_TABLES[table]
+    if (!config) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: `Table "${table}" is not editable`, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Table "${table}" is not editable` }, { status: 400 })
+    }
+
+    if (!filters || Object.keys(filters).length === 0) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "filters must not be empty — refusing to update an entire table", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "filters must not be empty — refusing to update an entire table" }, { status: 400 })
+    }
+
+    for (const key of Object.keys(filters)) {
+      if (key !== "id" && !config.filterable.includes(key)) {
+        await supabase.from("assistant_approvals")
+          .update({ status: "failed", error: `Cannot filter ${table} by "${key}"`, updated_at: now }).eq("id", id)
+        return NextResponse.json({ error: `Cannot filter ${table} by "${key}"` }, { status: 400 })
+      }
+    }
+
+    const invalidField = Object.keys(updates ?? {}).find((k) => !config.editable.includes(k))
+    if (!updates || Object.keys(updates).length === 0 || invalidField) {
+      const message = invalidField
+        ? `"${invalidField}" is not editable on ${table}. Editable fields: ${config.editable.join(", ")}`
+        : "updates must not be empty"
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: message }, { status: 400 })
+    }
+
+    let query = supabase.from(table).update(updates)
+    for (const [key, value] of Object.entries(filters)) query = query.eq(key, value)
+    const { data: updated, error: updErr } = await query.select("id")
+
+    if (updErr) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: updErr.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: updErr.message }, { status: 500 })
+    }
+
+    const count = updated?.length ?? 0
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now, result: { table, count, updated_ids: updated?.map((r) => r.id) ?? [] }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type: "update_crm_records", success: true, table, count,
     })
   }
 
