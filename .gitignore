@@ -44,3 +44,6 @@ lia-bridge/dist/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.vercel
+.env*

@@ -320,3 +320,48 @@ export function missingLeadFields(lead: ParsedLead): string[] {
   if (!lead.name) missing.push("customer name")
   return missing
 }
+
+// ─── Meta Ad lead bot (desertleads) ────────────────────────────────────────────
+// A separate Telegram bot posts a fixed-format message into the team group
+// whenever a new Meta/Facebook Lead Ad comes in, e.g.:
+//
+//   🚨 NEW META LEAD
+//
+//   👤 Name:Melissa Williams
+//   📞 Phone:+19514469545
+//   📧 Email:Mwilliamstssp@gmail.com
+//   📍 City:East Hemet
+//   🏠 Homeowner:yes
+//
+//   🔗 Meta Lead:
+//   https://business.facebook.com/latest/28139488725681549?nav_ref=thread_view_by_psid
+//
+// Colons may or may not be followed by a space, and the link sits on its own
+// line — parsed leniently rather than assuming exact spacing.
+
+export interface ParsedMetaAdLead {
+  name:      string
+  phone:     string | null
+  email:     string | null
+  city:      string | null
+  homeowner: string | null
+  link:      string | null
+}
+
+export function parseMetaAdLeadMessage(text: string): ParsedMetaAdLead | null {
+  if (!/NEW\s+META\s+LEAD/i.test(text)) return null
+
+  const grab = (re: RegExp) => text.match(re)?.[1]?.trim() || null
+
+  const name = grab(/Name:\s*(.+)/i)
+  if (!name) return null
+
+  return {
+    name,
+    phone:     grab(/Phone:\s*(.+)/i),
+    email:     grab(/Email:\s*(.+)/i),
+    city:      grab(/City:\s*(.+)/i),
+    homeowner: grab(/Homeowner:\s*(.+)/i),
+    link:      text.match(/https?:\/\/\S+/)?.[0] ?? null,
+  }
+}
