@@ -125,37 +125,41 @@ const SUMMARY_PROP = {
 // e.g. plaid_items.access_token is deliberately not queryable at all).
 // `filterable` bounds what query_crm will accept in `filters` to plain
 // exact-match `.eq()` calls, so this can never become arbitrary SQL.
-const QUERYABLE_TABLES: Record<string, { columns: string; filterable: string[]; orderBy: string }> = {
-  customers:         { columns: "id, name, phone, email, address, service_type, lead_source, status, created_at", filterable: ["status", "lead_source"], orderBy: "created_at" },
-  jobs:              { columns: "id, title, status, scheduled_date, completion_date, customer_id, created_at", filterable: ["status"], orderBy: "scheduled_date" },
-  estimates:         { columns: "id, title, status, total, customer_id, sent_at, approved_at, created_at", filterable: ["status"], orderBy: "created_at" },
+// `filterable` = exact match (.eq) — enum-like fields (status, category, type).
+// `searchable` = case-insensitive substring match (.ilike) — free-text fields
+// (description, name, vendor) where "find every expense with 'facebook ads'
+// in the description" needs to match partial text, not an exact string.
+const QUERYABLE_TABLES: Record<string, { columns: string; filterable: string[]; searchable?: string[]; orderBy: string }> = {
+  customers:         { columns: "id, name, phone, email, address, service_type, lead_source, status, created_at", filterable: ["status", "lead_source"], searchable: ["name", "email", "phone"], orderBy: "created_at" },
+  jobs:              { columns: "id, title, status, scheduled_date, completion_date, customer_id, created_at", filterable: ["status"], searchable: ["title"], orderBy: "scheduled_date" },
+  estimates:         { columns: "id, title, status, total, customer_id, sent_at, approved_at, created_at", filterable: ["status"], searchable: ["title"], orderBy: "created_at" },
   invoices:          { columns: "id, type, status, amount, due_date, job_id, customer_id, created_at", filterable: ["status", "type"], orderBy: "due_date" },
   payments:          { columns: "id, amount, method, date, job_id, customer_id", filterable: ["method"], orderBy: "date" },
-  expenses:          { columns: "id, category, description, amount, date, job_id", filterable: ["category"], orderBy: "date" },
-  reminders:         { columns: "id, title, due_date, due_time, type, completed_at, customer_id, job_id", filterable: ["type"], orderBy: "due_date" },
-  meta_leads:        { columns: "id, full_name, phone, city, list, last_outcome, missed_call_count, scheduled_at, created_at", filterable: ["list", "last_outcome"], orderBy: "created_at" },
-  propstream_leads:  { columns: "id, owner_name, property_address, property_city, status, next_follow_up_at, created_at", filterable: ["status"], orderBy: "created_at" },
+  expenses:          { columns: "id, category, description, amount, date, job_id", filterable: ["category"], searchable: ["description"], orderBy: "date" },
+  reminders:         { columns: "id, title, due_date, due_time, type, completed_at, customer_id, job_id", filterable: ["type"], searchable: ["title"], orderBy: "due_date" },
+  meta_leads:        { columns: "id, full_name, phone, city, list, last_outcome, missed_call_count, scheduled_at, created_at", filterable: ["list", "last_outcome"], searchable: ["full_name", "city"], orderBy: "created_at" },
+  propstream_leads:  { columns: "id, owner_name, property_address, property_city, status, next_follow_up_at, created_at", filterable: ["status"], searchable: ["owner_name", "property_address"], orderBy: "created_at" },
   sent_contracts:    { columns: "id, customer_id, job_id, recipient_email, status, signed_at, sent_at", filterable: ["status"], orderBy: "sent_at" },
-  change_orders:     { columns: "id, job_id, customer_id, title, amount, status, sent_at, approved_at, created_at", filterable: ["status"], orderBy: "created_at" },
-  bank_transactions: { columns: "id, amount, date, name, merchant_name, category, match_status", filterable: ["match_status"], orderBy: "date" },
-  team_members:      { columns: "id, name, email, role, status", filterable: ["role", "status"], orderBy: "created_at" },
+  change_orders:     { columns: "id, job_id, customer_id, title, amount, status, sent_at, approved_at, created_at", filterable: ["status"], searchable: ["title"], orderBy: "created_at" },
+  bank_transactions: { columns: "id, amount, date, name, merchant_name, category, match_status", filterable: ["match_status"], searchable: ["name", "merchant_name"], orderBy: "date" },
+  team_members:      { columns: "id, name, email, role, status", filterable: ["role", "status"], searchable: ["name", "email"], orderBy: "created_at" },
 }
 // Which fields update_crm_records is allowed to touch, per table — always a
 // SUBSET of that table's columns, deliberately excluding anything with real
 // business logic behind it (money fields, and statuses that drive side
 // effects like invoice paid/partial math or job completion) — those stay on
 // their dedicated tools (update_job, record_payment, etc.) which get that
-// logic right. "id" is always a valid filter key in addition to the list
-// below, for targeting one specific record.
-export const EDITABLE_TABLES: Record<string, { editable: string[]; filterable: string[] }> = {
-  customers:  { editable: ["name", "phone", "email", "address", "service_type", "lead_source", "status", "notes"], filterable: ["status", "lead_source"] },
-  jobs:       { editable: ["title", "description"], filterable: ["status"] },
-  expenses:   { editable: ["category", "description", "date", "job_id", "expense_type"], filterable: ["category", "expense_type"] },
+// logic right. "id" is always a valid filter key in addition to the lists
+// below. `searchable` fields match as a substring (.ilike), same as above.
+export const EDITABLE_TABLES: Record<string, { editable: string[]; filterable: string[]; searchable?: string[] }> = {
+  customers:  { editable: ["name", "phone", "email", "address", "service_type", "lead_source", "status", "notes"], filterable: ["status", "lead_source"], searchable: ["name", "email", "phone"] },
+  jobs:       { editable: ["title", "description"], filterable: ["status"], searchable: ["title"] },
+  expenses:   { editable: ["category", "description", "date", "job_id", "expense_type"], filterable: ["category", "expense_type"], searchable: ["description"] },
   payments:   { editable: ["notes", "method"], filterable: ["method"] },
-  reminders:  { editable: ["title", "due_date", "due_time", "type", "notes"], filterable: ["type"] },
+  reminders:  { editable: ["title", "due_date", "due_time", "type", "notes"], filterable: ["type"], searchable: ["title"] },
   invoices:   { editable: ["notes"], filterable: ["status", "type"] },
-  meta_leads: { editable: ["notes", "city", "email", "phone", "full_name"], filterable: ["list", "last_outcome"] },
-  change_orders: { editable: ["notes", "title", "description"], filterable: ["status"] },
+  meta_leads: { editable: ["notes", "city", "email", "phone", "full_name"], filterable: ["list", "last_outcome"], searchable: ["full_name", "city"] },
+  change_orders: { editable: ["notes", "title", "description"], filterable: ["status"], searchable: ["title"] },
 }
 
 // The orderBy column doubles as each table's primary date field for
@@ -414,12 +418,13 @@ const TOOLS: Anthropic.Tool[] = [
 
 Tables you can query: ${Object.keys(QUERYABLE_TABLES).join(", ")}.
 Set count_only=true for "how many" questions — much cheaper than listing rows. For sums ("how much money"), list the rows (not count_only) and add up the amount field yourself.
-For date-range questions ("today", "this week"), use date_from/date_to — each table's most relevant date field is used automatically (jobs→scheduled_date, expenses/payments/bank_transactions→date, invoices/reminders→due_date, meta_leads/estimates/change_orders→created_at, sent_contracts→sent_at). For "today" set both to the same date.`,
+For date-range questions ("today", "this week"), use date_from/date_to — each table's most relevant date field is used automatically (jobs→scheduled_date, expenses/payments/bank_transactions→date, invoices/reminders→due_date, meta_leads/estimates/change_orders→created_at, sent_contracts→sent_at). For "today" set both to the same date.
+Filters: enum-like fields (status, category, type, ...) match exactly. Free-text fields (description, name, title, ...) match as a case-insensitive substring — e.g. {"description": "facebook"} matches "Facebook Ads 5/7", "FACEBOOK ADS", etc.`,
     input_schema: {
       type: "object",
       properties: {
         table:      { type: "string", enum: Object.keys(QUERYABLE_TABLES), description: "Which table to query." },
-        filters:    { type: ["object", "null"], description: "Exact-match filters as {field: value}, e.g. {\"list\": \"call_list\"} or {\"status\": \"unpaid\"}. Only use fields from that table's filterable list (ask via a query with no filters first if unsure, or just try a sensible field name)." },
+        filters:    { type: ["object", "null"], description: "Filters as {field: value} — exact match for enum-like fields, substring match for free-text fields (see tool description). Only use fields that table actually has." },
         date_from:  { type: ["string", "null"], description: "YYYY-MM-DD, inclusive lower bound on that table's date field." },
         date_to:    { type: ["string", "null"], description: "YYYY-MM-DD, inclusive upper bound on that table's date field." },
         count_only: { type: ["boolean", "null"], description: "true = just return the count, not the rows. Use for \"how many\" questions." },
@@ -433,13 +438,14 @@ For date-range questions ("today", "this week"), use date_from/date_to — each 
     description: `Edit one or more EXISTING records anywhere in the CRM — single record (filter by id) or bulk (filter by a shared field, e.g. rename every "marketing" expense's description). Always requires approval, same as every other write tool here — for a bulk change, ALWAYS call query_crm with the same filters and count_only=true FIRST so your message tells the user how many records will change before they approve it.
 
 Tables and their editable fields: ${Object.entries(EDITABLE_TABLES).map(([t, c]) => `${t} (${c.editable.join(", ")})`).join("; ")}.
-Money fields (amount/total/price) and workflow statuses (job status, invoice status, etc.) are deliberately NOT editable here — use the dedicated tool for those (update_job, record_payment, update_meta_lead_outcome, ...) since they carry logic this generic tool doesn't.`,
+Money fields (amount/total/price) and workflow statuses (job status, invoice status, etc.) are deliberately NOT editable here — use the dedicated tool for those (update_job, record_payment, update_meta_lead_outcome, ...) since they carry logic this generic tool doesn't.
+Filters: enum-like fields (status, category, type, ...) match exactly; free-text fields (description, name, title, ...) match as a case-insensitive substring, same as query_crm — use query_crm first to confirm your filter actually matches what you expect before proposing the edit.`,
     input_schema: {
       type: "object",
       properties: {
         ...SUMMARY_PROP,
         table:   { type: "string", enum: Object.keys(EDITABLE_TABLES), description: "Which table to update." },
-        filters: { type: "object", description: "Which rows to update, as {field: value}. Use {\"id\": \"...\"} for one specific record, or any filterable field for a bulk edit. Must not be empty — never update a whole table unfiltered." },
+        filters: { type: "object", description: "Which rows to update, as {field: value}. Use {\"id\": \"...\"} for one specific record, exact match for enum-like fields, or substring match for free-text fields. Must not be empty — never update a whole table unfiltered." },
         updates: { type: "object", description: "Fields to change, as {field: new_value} — only fields from that table's editable list." },
       },
       required: ["summary", "table", "filters", "updates"],
@@ -576,8 +582,9 @@ async function runQueryCrm(input: { table?: string; filters?: Record<string, str
   }
 
   for (const key of Object.keys(input.filters ?? {})) {
-    if (!config.filterable.includes(key)) {
-      return `Cannot filter "${table}" by "${key}". Filterable fields for ${table}: ${config.filterable.join(", ") || "(none)"}.`
+    if (!config.filterable.includes(key) && !(config.searchable ?? []).includes(key)) {
+      const allowed = [...config.filterable, ...(config.searchable ?? [])]
+      return `Cannot filter "${table}" by "${key}". Allowed fields for ${table}: ${allowed.join(", ") || "(none)"}.`
     }
   }
 
@@ -588,22 +595,25 @@ async function runQueryCrm(input: { table?: string; filters?: Record<string, str
   ].filter(Boolean)
   const filterDesc = descParts.length ? ` ${descParts.join(" ")}` : ""
 
+  const applyFilters = (q: ReturnType<ReturnType<typeof createServiceClient>["from"]>["select"] extends (...a: never[]) => infer R ? R : never) => {
+    for (const [key, value] of Object.entries(input.filters ?? {})) {
+      q = (config.searchable ?? []).includes(key) ? q.ilike(key, `%${value}%`) : q.eq(key, value)
+    }
+    if (input.date_from) q = q.gte(config.orderBy, input.date_from)
+    if (input.date_to)   q = q.lte(config.orderBy, input.date_to)
+    return q
+  }
+
   if (input.count_only) {
-    let query = supabase.from(table).select("id", { count: "exact", head: true })
-    for (const [key, value] of Object.entries(input.filters ?? {})) query = query.eq(key, value)
-    if (input.date_from) query = query.gte(config.orderBy, input.date_from)
-    if (input.date_to)   query = query.lte(config.orderBy, input.date_to)
-    const { count, error } = await query
+    const { count, error } = await applyFilters(supabase.from(table).select("id", { count: "exact", head: true }))
     if (error) return `Error querying ${table}: ${error.message}`
     return `${count ?? 0} row(s) in ${table}${filterDesc}.`
   }
 
   const limit = Math.min(50, Math.max(1, input.limit ?? 20))
-  let query = supabase.from(table).select(config.columns)
-  for (const [key, value] of Object.entries(input.filters ?? {})) query = query.eq(key, value)
-  if (input.date_from) query = query.gte(config.orderBy, input.date_from)
-  if (input.date_to)   query = query.lte(config.orderBy, input.date_to)
-  const { data, error } = await query.order(config.orderBy, { ascending: false }).limit(limit)
+  const { data, error } = await applyFilters(supabase.from(table).select(config.columns))
+    .order(config.orderBy, { ascending: false })
+    .limit(limit)
 
   if (error) return `Error querying ${table}: ${error.message}`
   if (!data?.length) return `No rows found in ${table}${filterDesc}.`

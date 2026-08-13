@@ -11,7 +11,7 @@ import { sendWhatsAppText }         from "./openclaw-client"
 import { sendTelegramMessage, sendTelegramWithButtons, downloadTelegramPhotoBase64, type InlineKeyboardButton } from "./telegram-client"
 import { checkHealth, sendMessage, updateApproval, executeApproval, createApproval } from "./crm-client"
 import { isRawPartnerLead, parseRawPartnerLead, formatLeadApptPreview } from "./partner-lead-detector"
-import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch, ScheduleData, SchedulePreview, ContractData, ContractTemplate, ContractPreview, CrmMessageResponse } from "./types"
+import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch, ScheduleData, SchedulePreview, ContractData, ContractTemplate, ContractPreview, CrmMessageResponse, ExecuteResponse } from "./types"
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -1588,7 +1588,20 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       // Approve → execute
       await updateApproval(approvalId, "approved")
       await sendTelegramMessage(chatId, "✅ Approved. Processing...")
-      const result = await executeApproval(approvalId)
+
+      let result: ExecuteResponse
+      try {
+        result = await executeApproval(approvalId)
+      } catch (execErr) {
+        // executeApproval throws on a non-2xx response instead of returning
+        // {error}, e.g. an invalid field/table name — without this catch the
+        // outer handler's generic "Something went wrong" swallows the real
+        // reason, making these completely undiagnosable from Telegram alone.
+        const message = execErr instanceof Error ? execErr.message : String(execErr)
+        console.error(`[lia/telegram] executeApproval failed for ${approvalId}:`, message)
+        await sendTelegramMessage(chatId, `⚠️ Error: ${message.slice(0, 300)}`)
+        return
+      }
 
       if (result.error) {
         await sendTelegramMessage(chatId, `⚠️ Error: ${result.error}`)

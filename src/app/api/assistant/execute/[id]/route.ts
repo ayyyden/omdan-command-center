@@ -1696,11 +1696,13 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       return NextResponse.json({ error: "filters must not be empty — refusing to update an entire table" }, { status: 400 })
     }
 
+    const searchable = config.searchable ?? []
     for (const key of Object.keys(filters)) {
-      if (key !== "id" && !config.filterable.includes(key)) {
+      if (key !== "id" && !config.filterable.includes(key) && !searchable.includes(key)) {
+        const allowed = ["id", ...config.filterable, ...searchable]
         await supabase.from("assistant_approvals")
-          .update({ status: "failed", error: `Cannot filter ${table} by "${key}"`, updated_at: now }).eq("id", id)
-        return NextResponse.json({ error: `Cannot filter ${table} by "${key}"` }, { status: 400 })
+          .update({ status: "failed", error: `Cannot filter ${table} by "${key}". Allowed: ${allowed.join(", ")}`, updated_at: now }).eq("id", id)
+        return NextResponse.json({ error: `Cannot filter ${table} by "${key}". Allowed: ${allowed.join(", ")}` }, { status: 400 })
       }
     }
 
@@ -1715,7 +1717,9 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     }
 
     let query = supabase.from(table).update(updates)
-    for (const [key, value] of Object.entries(filters)) query = query.eq(key, value)
+    for (const [key, value] of Object.entries(filters)) {
+      query = searchable.includes(key) ? query.ilike(key, `%${value}%`) : query.eq(key, value)
+    }
     const { data: updated, error: updErr } = await query.select("id")
 
     if (updErr) {
