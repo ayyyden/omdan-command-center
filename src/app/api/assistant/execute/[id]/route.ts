@@ -9,7 +9,7 @@ import { generateInvoicePDFBuffer } from "@/lib/pdf/generate-invoice-pdf"
 import { notifyLia } from "@/lib/lia-notifications"
 import { normalizePaymentLabel } from "@/lib/lia-text-normalizer"
 import { deriveJobTitle } from "@/lib/job-title"
-import { createAppointmentEvent } from "@/lib/google-calendar"
+import { createAppointmentEvent, createCalendarEvent } from "@/lib/google-calendar"
 import { fromZonedTime } from "date-fns-tz"
 
 interface RouteCtx { params: Promise<{ id: string }> }
@@ -1665,6 +1665,127 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       start_time,
       event_id:      result.eventId,
       calendar_link: result.htmlLink,
+    })
+  }
+
+  // ─── update_meta_lead_outcome ─────────────────────────────────────────────
+  // Mirrors src/app/api/meta-leads/[id]/outcome/route.ts exactly — same
+  // missed-call counter / auto-archive / calendar-per-outcome logic, just
+  // driven from Lia instead of the outcome-menu button on the page.
+
+  if (approval.action_type === "update_meta_lead_outcome") {
+    const { meta_lead_id, full_name, outcome, scheduled_at } = payload as {
+      meta_lead_id: string
+      full_name:    string
+      outcome:      "answered_scheduled" | "no_answer" | "callback_later"
+      scheduled_at: string | null
+    }
+
+    if (!meta_lead_id || !outcome) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "meta_lead_id and outcome are required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "meta_lead_id and outcome are required" }, { status: 400 })
+    }
+
+    const MISSED_CALL_ARCHIVE_THRESHOLD = 10
+
+    if (outcome === "no_answer") {
+      const { data: current, error: fetchErr } = await supabase
+        .from("meta_leads")
+        .select("missed_call_count")
+        .eq("id", meta_lead_id)
+        .single()
+
+      if (fetchErr || !current) {
+        await supabase.from("assistant_approvals")
+          .update({ status: "failed", error: fetchErr?.message ?? "Lead not found", updated_at: now }).eq("id", id)
+        return NextResponse.json({ error: fetchErr?.message ?? "Lead not found" }, { status: 404 })
+      }
+
+      const newCount  = (current.missed_call_count ?? 0) + 1
+      const nextList  = newCount >= MISSED_CALL_ARCHIVE_THRESHOLD ? "archive" : "second_call_list"
+
+      const { error: updErr } = await supabase
+        .from("meta_leads")
+        .update({ list: nextList, last_outcome: "no_answer", missed_call_count: newCount })
+        .eq("id", meta_lead_id)
+
+      if (updErr) {
+        await supabase.from("assistant_approvals")
+          .update({ status: "failed", error: updErr.message, updated_at: now }).eq("id", id)
+        return NextResponse.json({ error: updErr.message }, { status: 500 })
+      }
+
+      await supabase.from("assistant_approvals")
+        .update({ status: "executed", executed_at: now, result: { meta_lead_id, list: nextList, missed_call_count: newCount }, updated_at: now })
+        .eq("id", id)
+
+      return NextResponse.json({
+        action_type: "update_meta_lead_outcome", success: true,
+        full_name, outcome, list: nextList, missed_call_count: newCount,
+      })
+    }
+
+    if (!scheduled_at) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "scheduled_at is required for this outcome", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "scheduled_at is required for this outcome" }, { status: 400 })
+    }
+
+    const { data: lead, error: fetchErr } = await supabase
+      .from("meta_leads")
+      .select("id, full_name, email, phone, city, address")
+      .eq("id", meta_lead_id)
+      .single()
+
+    if (fetchErr || !lead) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: fetchErr?.message ?? "Lead not found", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: fetchErr?.message ?? "Lead not found" }, { status: 404 })
+    }
+
+    const calendarId = outcome === "answered_scheduled"
+      ? process.env.META_LEADS_MAIN_CALENDAR_ID
+      : process.env.META_LEADS_CALLBACK_CALENDAR_ID
+
+    if (!calendarId) {
+      const missing = outcome === "answered_scheduled" ? "META_LEADS_MAIN_CALENDAR_ID" : "META_LEADS_CALLBACK_CALENDAR_ID"
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: `Calendar is not configured (${missing})`, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Calendar is not configured (${missing})` }, { status: 500 })
+    }
+
+    let eventId: string
+    try {
+      const result = await createCalendarEvent(calendarId, lead, scheduled_at)
+      eventId = result.eventId
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: `Failed to create calendar event: ${message}` }, { status: 502 })
+    }
+
+    const targetList = outcome === "answered_scheduled" ? "scheduled" : "schedule_call_list"
+
+    const { error: updErr } = await supabase
+      .from("meta_leads")
+      .update({ list: targetList, last_outcome: outcome, scheduled_at, calendar_event_id: eventId, calendar_id: calendarId })
+      .eq("id", meta_lead_id)
+
+    if (updErr) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: updErr.message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: updErr.message }, { status: 500 })
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now, result: { meta_lead_id, list: targetList, event_id: eventId }, updated_at: now })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type: "update_meta_lead_outcome", success: true,
+      full_name, outcome, list: targetList, scheduled_at, event_id: eventId,
     })
   }
 

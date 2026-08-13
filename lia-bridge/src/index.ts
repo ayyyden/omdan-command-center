@@ -838,6 +838,17 @@ function formatClaudeActionForTelegram(
     lines.push("✅ Complete To-Do / Reminder")
     lines.push("")
     if (p.title) lines.push(`📝 ${p.title}`)
+  } else if (action.type === "update_meta_lead_outcome") {
+    const outcomeLabel: Record<string, string> = {
+      answered_scheduled: "Answered — Scheduled",
+      no_answer:           "No Answer",
+      callback_later:      "Callback Later",
+    }
+    lines.push("📞 Log Call Outcome")
+    lines.push("")
+    if (p.full_name)    lines.push(`👤 ${p.full_name}`)
+    if (p.outcome)      lines.push(`📋 Outcome: ${outcomeLabel[String(p.outcome)] ?? p.outcome}`)
+    if (p.scheduled_at) lines.push(`🕐 When: ${p.scheduled_at}`)
   } else if (action.type === "create_calendar_event") {
     lines.push("📅 Calendar Event")
     lines.push("")
@@ -1665,6 +1676,14 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         await sendTelegramMessage(chatId, `✅ Added to the list: ${result.title ?? "reminder"} (due ${result.due_date ?? "?"}).${calUrl}`)
       } else if (result.action_type === "complete_reminder") {
         await sendTelegramMessage(chatId, `✅ Marked done: ${result.title ?? "reminder"}.`)
+      } else if (result.action_type === "update_meta_lead_outcome") {
+        const outcomeLabel: Record<string, string> = {
+          answered_scheduled: "answered — scheduled",
+          no_answer:           "no answer",
+          callback_later:      "callback later",
+        }
+        const label = outcomeLabel[String(result.outcome ?? "")] ?? String(result.outcome ?? "logged")
+        await sendTelegramMessage(chatId, `✅ ${result.full_name ?? "Lead"}: ${label}.`)
       } else if (result.action_type === "create_calendar_event") {
         const url = result.calendar_link ? `\n${result.calendar_link}` : ""
         await sendTelegramMessage(chatId, `✅ Calendar event created: ${result.title ?? "Appointment"} — ${result.date ?? "?"}${result.start_time ? ` at ${result.start_time}` : ""}.${url}`)

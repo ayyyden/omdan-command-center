@@ -86,7 +86,7 @@ function buildSystemPrompt(crmContext: string, today: string): string {
 
 TODAY: ${today}
 
-APPROVAL-FIRST RULE: You never execute anything directly. When a tool call would change data (create, update, complete, record — anything but looking something up), that tool call is only a *proposal* — the human always sees an approve/reject/edit card first, and nothing happens until they approve it. Only \`list_reminders\` and \`list_bank_transactions\` are lookups — call them freely, as many times as needed, to answer questions.
+APPROVAL-FIRST RULE: You never execute anything directly. When a tool call would change data (create, update, complete, record — anything but looking something up), that tool call is only a *proposal* — the human always sees an approve/reject/edit card first, and nothing happens until they approve it. \`list_reminders\`, \`list_bank_transactions\`, and \`query_crm\` are lookups — call them freely, as many times as needed, to answer questions.
 
 BANK TRANSACTIONS: You can see connected bank accounts' transactions via list_bank_transactions. If one clearly matches an expense or payment the user is describing (same amount, close date), mention it and set bank_transaction_id on the create_expense/record_payment proposal so it gets linked — but only when you're confident, and always let the user correct it via the approval card.
 
@@ -102,6 +102,8 @@ RULES:
 - If the user asks to cancel or change a pending approval, tell them to reject the card, then re-describe what they want.
 - If you're just greeting, chatting, or answering a question with no data-changing intent, reply naturally with no tool call at all.
 
+DATA ACCESS: CRM CONTEXT below is only a small recent-activity snapshot (customers, jobs, lead appointments) — it is NOT everything in the CRM. You have a lot more data than that: meta lead call lists, PropStream leads, estimates, invoices, payments, expenses, reminders, sent contracts, change orders, bank transactions, and team members. Never say you don't have access to something or can't check — call query_crm (as many times as needed) to look it up for real before answering. This applies to any "how many", "list", "who/what/when" question about CRM data, not just the tables shown in CRM CONTEXT.
+
 CRM CONTEXT:
 ${crmContext}`
 }
@@ -113,6 +115,27 @@ const SUMMARY_PROP = {
     type: "string" as const,
     description: "One-line, human-readable description of what this action will do, shown to the user on the approval card (e.g. \"Add customer Jane Doe\", \"Record $500 payment on the Smith job\").",
   },
+}
+
+// Read-only surface for query_crm — one entry per table Lia can look up.
+// `columns` is a hand-picked safe select list (never exposes credentials —
+// e.g. plaid_items.access_token is deliberately not queryable at all).
+// `filterable` bounds what query_crm will accept in `filters` to plain
+// exact-match `.eq()` calls, so this can never become arbitrary SQL.
+const QUERYABLE_TABLES: Record<string, { columns: string; filterable: string[]; orderBy: string }> = {
+  customers:         { columns: "id, name, phone, email, address, service_type, lead_source, status, created_at", filterable: ["status", "lead_source"], orderBy: "created_at" },
+  jobs:              { columns: "id, title, status, scheduled_date, completion_date, customer_id, created_at", filterable: ["status"], orderBy: "created_at" },
+  estimates:         { columns: "id, title, status, total, customer_id, sent_at, approved_at, created_at", filterable: ["status"], orderBy: "created_at" },
+  invoices:          { columns: "id, type, status, amount, due_date, job_id, customer_id, created_at", filterable: ["status", "type"], orderBy: "created_at" },
+  payments:          { columns: "id, amount, method, date, job_id, customer_id", filterable: ["method"], orderBy: "date" },
+  expenses:          { columns: "id, category, description, amount, date, job_id", filterable: ["category"], orderBy: "date" },
+  reminders:         { columns: "id, title, due_date, due_time, type, completed_at, customer_id, job_id", filterable: ["type"], orderBy: "due_date" },
+  meta_leads:        { columns: "id, full_name, phone, city, list, last_outcome, missed_call_count, scheduled_at, created_at", filterable: ["list", "last_outcome"], orderBy: "created_at" },
+  propstream_leads:  { columns: "id, owner_name, property_address, property_city, status, next_follow_up_at, created_at", filterable: ["status"], orderBy: "created_at" },
+  sent_contracts:    { columns: "id, customer_id, job_id, recipient_email, status, signed_at, sent_at", filterable: ["status"], orderBy: "sent_at" },
+  change_orders:     { columns: "id, job_id, customer_id, title, amount, status, sent_at, approved_at, created_at", filterable: ["status"], orderBy: "created_at" },
+  bank_transactions: { columns: "id, amount, date, name, merchant_name, category, match_status", filterable: ["match_status"], orderBy: "date" },
+  team_members:      { columns: "id, name, email, role, status", filterable: ["role", "status"], orderBy: "created_at" },
 }
 
 const TOOLS: Anthropic.Tool[] = [
@@ -363,6 +386,38 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "query_crm",
+    description: `Look up records from anywhere in the CRM — read-only, does not need approval, call it as many times as needed in one turn. Use this for ANY factual question you can't already answer from CRM CONTEXT: counts ("how many on the call list"), lists ("which invoices are unpaid"), lookups by status, etc. Never say you don't have access — query instead.
+
+Tables you can query: ${Object.keys(QUERYABLE_TABLES).join(", ")}.
+Set count_only=true for "how many" questions — much cheaper than listing rows.`,
+    input_schema: {
+      type: "object",
+      properties: {
+        table:      { type: "string", enum: Object.keys(QUERYABLE_TABLES), description: "Which table to query." },
+        filters:    { type: ["object", "null"], description: "Exact-match filters as {field: value}, e.g. {\"list\": \"call_list\"} or {\"status\": \"unpaid\"}. Only use fields from that table's filterable list (ask via a query with no filters first if unsure, or just try a sensible field name)." },
+        count_only: { type: ["boolean", "null"], description: "true = just return the count, not the rows. Use for \"how many\" questions." },
+        limit:      { type: ["number", "null"], description: "Max rows when not count_only. Defaults to 20, max 50." },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name: "update_meta_lead_outcome",
+    description: "Log the outcome of a call to someone on the Meta Leads call list (query_crm table=meta_leads to find them). Mirrors the outcome buttons on the Meta Lead Jobs page: no_answer moves them to the second call list (or auto-archives at 10 missed calls — mention this if their missed_call_count from query_crm is close), answered_scheduled books the main appointment calendar, callback_later books the callback calendar and moves them to the callback list.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        meta_lead_id: { type: "string", description: "From query_crm." },
+        full_name:    { type: "string", description: "For display only." },
+        outcome:      { type: "string", enum: ["answered_scheduled", "no_answer", "callback_later"] },
+        scheduled_at: { type: ["string", "null"], description: "ISO 8601 datetime — required for answered_scheduled and callback_later, omit for no_answer." },
+      },
+      required: ["summary", "meta_lead_id", "full_name", "outcome"],
+    },
+  },
+  {
     name: "create_lead_appointment",
     description: "Record a new lead/appointment someone told you about — a new person's name with contact info, a date/time, or a location, in any format (formal, forwarded, informal, with or without labels). scheduled_date and name are the minimum needed — ask for scheduled_date if it's missing rather than guessing. Do not create a job or estimate in the same call.",
     input_schema: {
@@ -404,7 +459,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ]
 
-const READ_ONLY_TOOLS = new Set(["list_reminders", "list_bank_transactions"])
+const READ_ONLY_TOOLS = new Set(["list_reminders", "list_bank_transactions", "query_crm"])
 
 const ACTION_RISK: Record<string, "low" | "medium" | "high"> = {
   create_send_invoice: "medium",
@@ -469,9 +524,43 @@ async function runListBankTransactions(input: { match_status?: string | null; se
     .join("\n")
 }
 
+async function runQueryCrm(input: { table?: string; filters?: Record<string, string> | null; count_only?: boolean | null; limit?: number | null }): Promise<string> {
+  const table  = input.table ?? ""
+  const config = QUERYABLE_TABLES[table]
+  if (!config) {
+    return `Unknown table "${table}". Valid tables: ${Object.keys(QUERYABLE_TABLES).join(", ")}.`
+  }
+
+  for (const key of Object.keys(input.filters ?? {})) {
+    if (!config.filterable.includes(key)) {
+      return `Cannot filter "${table}" by "${key}". Filterable fields for ${table}: ${config.filterable.join(", ") || "(none)"}.`
+    }
+  }
+
+  const supabase = createServiceClient()
+  const filterDesc = input.filters && Object.keys(input.filters).length ? ` matching ${JSON.stringify(input.filters)}` : ""
+
+  if (input.count_only) {
+    let query = supabase.from(table).select("id", { count: "exact", head: true })
+    for (const [key, value] of Object.entries(input.filters ?? {})) query = query.eq(key, value)
+    const { count, error } = await query
+    if (error) return `Error querying ${table}: ${error.message}`
+    return `${count ?? 0} row(s) in ${table}${filterDesc}.`
+  }
+
+  const limit = Math.min(50, Math.max(1, input.limit ?? 20))
+  let query = supabase.from(table).select(config.columns)
+  for (const [key, value] of Object.entries(input.filters ?? {})) query = query.eq(key, value)
+  const { data, error } = await query.order(config.orderBy, { ascending: false }).limit(limit)
+
+  if (error) return `Error querying ${table}: ${error.message}`
+  if (!data?.length) return `No rows found in ${table}${filterDesc}.`
+  return data.map((row) => JSON.stringify(row)).join("\n")
+}
+
 // ─── Claude call ──────────────────────────────────────────────────────────────
 
-const MAX_TOOL_ITERATIONS = 3
+const MAX_TOOL_ITERATIONS = 5
 
 export async function callLiaBrain(
   history: Array<{ role: string; content: string }>,
@@ -520,9 +609,10 @@ export async function callLiaBrain(
       console.log("[lia-brain] tool call:", toolUse.name, JSON.stringify(toolUse.input).slice(0, 300))
 
       if (READ_ONLY_TOOLS.has(toolUse.name)) {
-        const toolResultText = toolUse.name === "list_bank_transactions"
-          ? await runListBankTransactions(toolUse.input as { match_status?: string | null; search?: string | null; limit?: number | null })
-          : await runListReminders(toolUse.input as { scope?: string })
+        const toolResultText =
+          toolUse.name === "list_bank_transactions" ? await runListBankTransactions(toolUse.input as { match_status?: string | null; search?: string | null; limit?: number | null }) :
+          toolUse.name === "query_crm"              ? await runQueryCrm(toolUse.input as { table?: string; filters?: Record<string, string> | null; count_only?: boolean | null; limit?: number | null }) :
+          await runListReminders(toolUse.input as { scope?: string })
         messages.push({ role: "assistant", content: result.content })
         messages.push({
           role: "user",

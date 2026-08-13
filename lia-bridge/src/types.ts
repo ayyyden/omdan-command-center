@@ -235,6 +235,17 @@ export interface ExecuteResponse {
   // create_reminder / complete_reminder fields
   reminder_id?: string
   due_date?: string
+  // create_calendar_event fields
+  event_id?: string
+  calendar_link?: string | null
+  date?: string
+  start_time?: string
+  // update_meta_lead_outcome fields
+  full_name?: string
+  outcome?: string
+  list?: string
+  scheduled_at?: string
+  missed_call_count?: number
 }
 
 export interface DailySummary {

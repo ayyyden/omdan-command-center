@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   CheckCircle, XCircle, AlertCircle, Loader2,
   FileText, Calendar, StickyNote, Receipt, Send, UserPlus, Wallet, MapPin,
-  Briefcase, Pencil,
+  Briefcase, Pencil, PhoneCall,
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -43,6 +43,7 @@ const ACTION_META: Record<string, { label: string; icon: React.ElementType; colo
   send_contracts:         { label: "Send Contracts",        icon: Send,       color: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300" },
   create_job:             { label: "Create Job",            icon: Briefcase,  color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300" },
   create_calendar_event:  { label: "Calendar Event",        icon: Calendar,   color: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300" },
+  update_meta_lead_outcome: { label: "Log Call Outcome",     icon: PhoneCall,  color: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300" },
 }
 
 const RISK_COLOR: Record<string, string> = {
@@ -87,6 +88,21 @@ function renderPayload(type: string, payload: Record<string, unknown>) {
             <span className="font-medium text-foreground line-clamp-3 whitespace-pre-wrap">{payload.notes as string}</span>
           </div>
         ) : null}
+      </>
+    )
+  }
+
+  if (type === "update_meta_lead_outcome") {
+    const outcomeLabel: Record<string, string> = {
+      answered_scheduled: "Answered — Scheduled",
+      no_answer:           "No Answer",
+      callback_later:      "Callback Later",
+    }
+    return (
+      <>
+        <PayloadRow label="Lead"     value={payload.full_name as string} />
+        <PayloadRow label="Outcome"  value={outcomeLabel[payload.outcome as string] ?? (payload.outcome as string)} />
+        <PayloadRow label="Time"     value={payload.scheduled_at as string | null} />
       </>
     )
   }
