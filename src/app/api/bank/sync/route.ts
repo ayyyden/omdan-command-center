@@ -3,8 +3,9 @@ import { createServiceClient } from "@/lib/supabase/service"
 import { getPlaidClient, plaidErrorMessage } from "@/lib/plaid"
 
 // Plaid personal_finance_category.primary values that represent money moving
-// between the user's own accounts / debt, not a real purchase — never worth
-// auto-drafting as an "expense" (see https://plaid.com/documents/pfc-taxonomy-all.csv).
+// between the user's own accounts / debt, not a real purchase or payment —
+// never worth surfacing as an expense or payment
+// (see https://plaid.com/documents/pfc-taxonomy-all.csv).
 const NON_EXPENSE_CATEGORIES = new Set([
   "INCOME", "TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS", "LOAN_DISBURSEMENTS",
 ])
@@ -27,12 +28,12 @@ function guessExpenseCategory(plaidPrimary: string | null): string {
   return CATEGORY_MAP[plaidPrimary] ?? "misc"
 }
 
-interface DraftCandidate {
+interface TxCandidate {
   bankTransactionId: string
-  amount:            number
-  vendor:            string
+  amount:            number  // absolute value
+  name:              string
   date:              string
-  category:          string
+  category:          string | null
 }
 
 // POST /api/bank/sync
@@ -41,9 +42,15 @@ interface DraftCandidate {
 // cursor picks up exactly where the last sync left off.
 //
 // New charges found on a sync that already had a cursor (i.e. not the first
-// import of a newly connected account) get an auto-drafted create_expense
-// approval card in the requesting user's Lia chat — never posted without
-// their approval, just pre-filled so they don't have to ask for it.
+// import of a newly connected account) get surfaced in the requesting
+// user's Lia chat:
+//   - money OUT  → an auto-drafted create_expense approval card (job_id left
+//     blank — which job a charge belongs to isn't knowable from bank data
+//     alone; edit the card or tell Lia in chat and she'll attach one)
+//   - money IN   → a plain question asking which job/customer paid it,
+//     since record_payment requires a job_id + customer_id (no valid data to
+//     pre-fill), unlike create_expense
+// Either way: never auto-posts anything without a human approving it.
 export async function POST() {
   const session = await requirePermission("bank:manage")
   if (session instanceof Response) return session
@@ -61,7 +68,8 @@ export async function POST() {
   }
 
   const results: Array<{ item_id: string; institution_name: string | null; added: number; modified: number; removed: number; error?: string }> = []
-  const draftCandidates: DraftCandidate[] = []
+  const expenseCandidates: TxCandidate[] = []
+  const depositCandidates: TxCandidate[] = []
 
   for (const item of items ?? []) {
     let added = 0, modified = 0, removed = 0
@@ -103,15 +111,17 @@ export async function POST() {
             .single()
           if (!error) {
             added++
-            const isMoneyOut = tx.amount > 0
-            if (!isInitialSync && isMoneyOut && !tx.pending && inserted && !NON_EXPENSE_CATEGORIES.has(plaidPrimary ?? "")) {
-              draftCandidates.push({
+            const eligible = !isInitialSync && !tx.pending && inserted && !NON_EXPENSE_CATEGORIES.has(plaidPrimary ?? "")
+            if (eligible) {
+              const candidate: TxCandidate = {
                 bankTransactionId: inserted.id,
-                amount:            tx.amount,
-                vendor:            tx.merchant_name || tx.name,
+                amount:            Math.abs(tx.amount),
+                name:              tx.merchant_name || tx.name,
                 date:              tx.date,
-                category:          guessExpenseCategory(plaidPrimary),
-              })
+                category:          plaidPrimary,
+              }
+              if (tx.amount > 0) expenseCandidates.push(candidate)
+              else               depositCandidates.push(candidate)
             }
           }
         }
@@ -168,22 +178,52 @@ export async function POST() {
   }
 
   let drafted = 0
-  if (draftCandidates.length) {
-    drafted = await draftExpenseApprovals(service, session.userId, draftCandidates)
+  let flagged = 0
+  let autoIgnored = 0
+  if (expenseCandidates.length || depositCandidates.length) {
+    const summary = await draftBankActivity(service, session.userId, expenseCandidates, depositCandidates)
+    drafted = summary.drafted
+    flagged = summary.flagged
+    autoIgnored = summary.autoIgnored
   }
 
-  return Response.json({ ok: true, results, drafted })
+  return Response.json({ ok: true, results, drafted, flagged, auto_ignored: autoIgnored })
 }
 
-// Finds (or creates) the user's most recent Lia conversation and posts one
-// assistant message + pending create_expense approval per new charge — the
-// same shape Lia herself produces, so the existing chat UI and approve/
-// reject/edit flow just works with no special-casing.
-async function draftExpenseApprovals(
+// A same-amount record within a few days of the bank transaction's date is
+// very likely the same real-world purchase/payment already logged some
+// other way (manual entry, a different sync run, etc.) — skip re-proposing
+// it and just mark the bank row ignored instead of creating a duplicate.
+async function hasLikelyDuplicate(
+  service: ReturnType<typeof createServiceClient>,
+  table: "expenses" | "payments",
+  amount: number,
+  date: string,
+): Promise<boolean> {
+  const center = new Date(`${date}T00:00:00Z`)
+  const from = new Date(center); from.setUTCDate(from.getUTCDate() - 3)
+  const to   = new Date(center); to.setUTCDate(to.getUTCDate() + 3)
+  const { data } = await service
+    .from(table)
+    .select("id")
+    .eq("amount", amount)
+    .gte("date", from.toISOString().split("T")[0])
+    .lte("date", to.toISOString().split("T")[0])
+    .limit(1)
+  return !!data?.length
+}
+
+// Finds (or creates) the user's most recent Lia conversation and, per new
+// transaction: drafts a create_expense approval (money out), asks a plain
+// question (money in — record_payment needs a job_id + customer_id we can't
+// guess), or — if a likely-duplicate record already exists — skips both and
+// marks the bank row "ignored" instead.
+async function draftBankActivity(
   service: ReturnType<typeof createServiceClient>,
   userId: string,
-  candidates: DraftCandidate[],
-): Promise<number> {
+  expenseCandidates: TxCandidate[],
+  depositCandidates: TxCandidate[],
+): Promise<{ drafted: number; flagged: number; autoIgnored: number }> {
   const { data: recentConv } = await service
     .from("assistant_conversations")
     .select("id")
@@ -201,64 +241,68 @@ async function draftExpenseApprovals(
       .single()
     conversationId = newConv?.id
   }
-  if (!conversationId) return 0
+  if (!conversationId) return { drafted: 0, flagged: 0, autoIgnored: 0 }
 
   let drafted = 0
-  for (const c of candidates) {
-    // Skip if this transaction already has a pending draft (defensive — Plaid
-    // shouldn't repeat an id in `added`, but don't double-draft if it does).
-    const { data: existing } = await service
-      .from("assistant_approvals")
-      .select("id")
-      .eq("status", "pending")
-      .eq("action_type", "create_expense")
-      .contains("proposed_payload", { bank_transaction_id: c.bankTransactionId })
-      .limit(1)
-    if (existing?.length) continue
+  let flagged = 0
+  let autoIgnored = 0
 
-    const summary = `Log $${c.amount.toFixed(2)} expense — ${c.vendor}`
+  for (const c of expenseCandidates) {
+    if (await hasLikelyDuplicate(service, "expenses", c.amount, c.date)) {
+      await service.from("bank_transactions").update({ match_status: "ignored" }).eq("id", c.bankTransactionId)
+      autoIgnored++
+      continue
+    }
+
+    const summary = `Log $${c.amount.toFixed(2)} expense — ${c.name}`
     const payload = {
-      amount:              c.amount,
-      vendor:              c.vendor,
-      category:            c.category,
-      date:                c.date,
-      notes:               null,
-      job_id:              null,
-      bank_transaction_id: c.bankTransactionId,
+      amount: c.amount, vendor: c.name, category: guessExpenseCategory(c.category), date: c.date,
+      notes: null, job_id: null, bank_transaction_id: c.bankTransactionId,
     }
 
     const { data: approval } = await service
       .from("assistant_approvals")
       .insert({
-        channel:          "crm",
-        action_type:      "create_expense",
-        action_summary:   summary,
-        proposed_payload: payload,
-        conversation_id:  conversationId,
-        expires_at:       new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+        channel: "crm", action_type: "create_expense", action_summary: summary, proposed_payload: payload,
+        conversation_id: conversationId, expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
       })
-      .select("id")
-      .single()
+      .select("id").single()
     if (!approval) continue
 
     await service.from("assistant_messages").insert({
-      conversation_id: conversationId,
-      role:            "assistant",
-      content:         `New card charge — **${c.vendor}** for $${c.amount.toFixed(2)} on ${c.date}. Want me to log this as an expense?`,
-      action_id:       approval.id,
-      metadata: {
-        action: { type: "create_expense", summary, payload, risk_level: "low" },
-      },
+      conversation_id: conversationId, role: "assistant",
+      content: `New card charge — **${c.name}** for $${c.amount.toFixed(2)} on ${c.date}. Want me to log this as an expense? (Left as a business expense — tell me which job if it belongs to one.)`,
+      action_id: approval.id,
+      metadata: { action: { type: "create_expense", summary, payload, risk_level: "low" } },
     })
-
     drafted++
   }
 
-  if (drafted > 0) {
+  for (const c of depositCandidates) {
+    if (await hasLikelyDuplicate(service, "payments", c.amount, c.date)) {
+      await service.from("bank_transactions").update({ match_status: "ignored" }).eq("id", c.bankTransactionId)
+      autoIgnored++
+      continue
+    }
+
+    // No approval card here — record_payment requires job_id + customer_id,
+    // and there's no reliable way to guess either from bank data alone.
+    // Asking in chat lets Lia resolve it conversationally (she can look the
+    // transaction back up via list_bank_transactions and propose
+    // record_payment with bank_transaction_id once told which job it's for).
+    await service.from("assistant_messages").insert({
+      conversation_id: conversationId, role: "assistant",
+      content: `💰 New deposit — $${c.amount.toFixed(2)} from ${c.name} on ${c.date}. Which job (or customer) is this a payment for? Tell me and I'll record it.`,
+    })
+    await service.from("bank_transactions").update({ match_status: "suggested" }).eq("id", c.bankTransactionId)
+    flagged++
+  }
+
+  if (drafted > 0 || flagged > 0) {
     await service.from("assistant_conversations")
       .update({ updated_at: new Date().toISOString() })
       .eq("id", conversationId)
   }
 
-  return drafted
+  return { drafted, flagged, autoIgnored }
 }
