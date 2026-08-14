@@ -94,13 +94,14 @@ function startMetaLeadsRollover(): void {
   console.log("[scheduler] Meta leads rollover scheduled — daily at 00:00 America/Los_Angeles")
 }
 
-// Every 2 hours, 7am–11pm Los Angeles time: pull new bank transactions and
-// auto-draft/ask about them in Telegram (via /notify-action inside the sync
-// route itself) — this is what makes it "proactive" instead of only firing
-// when someone happens to click Sync Now on the Bank page.
+// Safety-net only — the primary, near-real-time trigger is now Plaid's
+// SYNC_UPDATES_AVAILABLE webhook (/api/bank/webhook), which fires the moment
+// Plaid itself notices new transactions instead of us guessing a polling
+// interval. This just catches anything a webhook ever fails to deliver
+// (rare, but webhooks can be missed) — 3x/day is plenty for a fallback.
 function startBankSync(): void {
   schedule(
-    "0 7-23/2 * * *",
+    "0 7,14,21 * * *",
     async () => {
       const localNow = new Date().toLocaleString("en-US", {
         timeZone: "America/Los_Angeles",
@@ -123,5 +124,5 @@ function startBankSync(): void {
     },
   )
 
-  console.log("[scheduler] Bank sync scheduled — every 2h, 07:00–23:00 America/Los_Angeles")
+  console.log("[scheduler] Bank sync (fallback) scheduled — 07:00/14:00/21:00 America/Los_Angeles")
 }

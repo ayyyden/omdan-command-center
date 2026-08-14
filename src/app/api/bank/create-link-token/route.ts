@@ -9,12 +9,19 @@ export async function POST() {
   try {
     const plaid = getPlaidClient()
 
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://omdan-command-center.vercel.app").replace(/\/+$/, "")
+
     const request: LinkTokenCreateRequest = {
       user:          { client_user_id: session.userId },
       client_name:   "Omdan Command Center",
       products:      [Products.Transactions],
       country_codes: [CountryCode.Us],
       language:      "en",
+      // Registers /api/bank/webhook on the resulting Item so new transactions
+      // get synced + drafted within moments of Plaid noticing them, instead
+      // of waiting for the next scheduled poll. Sandbox delivers webhooks
+      // too, so this is set unconditionally (not just in production).
+      webhook: `${appUrl}/api/bank/webhook`,
     }
 
     // OAuth institutions (Chase, BofA, Wells Fargo, etc.) require a
