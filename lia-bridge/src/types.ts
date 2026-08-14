@@ -248,6 +248,9 @@ export interface ExecuteResponse {
   missed_call_count?: number
   // update_crm_records fields (count reused from send_contracts above)
   table?: string
+  // bulk_create_expenses fields
+  created?: number
+  skipped?: number
 }
 
 export interface DailySummary {

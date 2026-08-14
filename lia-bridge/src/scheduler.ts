@@ -1,12 +1,14 @@
 import { schedule } from "node-cron"
-import { sendMessage, rolloverMetaLeads } from "./crm-client"
+import { sendMessage, rolloverMetaLeads, syncBank } from "./crm-client"
 import { formatDailySummary } from "./format-response"
 import { sendTelegramMessage } from "./telegram-client"
 
 // Exported so index.ts can pass in the already-parsed allowed IDs.
 export function startScheduler(allowedIds: Set<number>): void {
-  // Meta leads rollover has no Telegram dependency — always start it.
+  // Meta leads rollover and bank sync have no Telegram dependency to start —
+  // sync itself pushes to Telegram per-transaction via /notify-action.
   startMetaLeadsRollover()
+  startBankSync()
 
   if (allowedIds.size === 0) {
     console.log("[scheduler] No TELEGRAM_ALLOWED_USER_IDS configured — daily summary disabled")
@@ -90,4 +92,36 @@ function startMetaLeadsRollover(): void {
   )
 
   console.log("[scheduler] Meta leads rollover scheduled — daily at 00:00 America/Los_Angeles")
+}
+
+// Every 2 hours, 7am–11pm Los Angeles time: pull new bank transactions and
+// auto-draft/ask about them in Telegram (via /notify-action inside the sync
+// route itself) — this is what makes it "proactive" instead of only firing
+// when someone happens to click Sync Now on the Bank page.
+function startBankSync(): void {
+  schedule(
+    "0 7-23/2 * * *",
+    async () => {
+      const localNow = new Date().toLocaleString("en-US", {
+        timeZone: "America/Los_Angeles",
+        weekday: "long", month: "short", day: "numeric",
+        hour: "numeric", minute: "2-digit",
+      })
+      console.log(`[scheduler] Bank sync starting — ${localNow}`)
+      try {
+        const result = await syncBank()
+        const added = result.results.reduce((sum, r) => sum + r.added, 0)
+        console.log(`[scheduler] Bank sync complete — ${added} new transaction(s), ${result.drafted} drafted, ${result.flagged} flagged, ${result.auto_ignored} auto-ignored`)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error("[scheduler] Bank sync failed:", msg)
+      }
+    },
+    {
+      timezone:  "America/Los_Angeles",
+      noOverlap: true,
+    },
+  )
+
+  console.log("[scheduler] Bank sync scheduled — every 2h, 07:00–23:00 America/Los_Angeles")
 }

@@ -12,6 +12,7 @@ import { deriveJobTitle } from "@/lib/job-title"
 import { createAppointmentEvent, createCalendarEvent } from "@/lib/google-calendar"
 import { EDITABLE_TABLES } from "@/lib/lia-brain"
 import { fromZonedTime } from "date-fns-tz"
+import { resolveAssistantOwnerUserId } from "@/lib/assistant-owner"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -45,45 +46,9 @@ export async function POST(_req: Request, { params }: RouteCtx) {
 
   // Resolve owner user_id for record creation.
   // Priority: ASSISTANT_OWNER_EMAIL env var → role=owner/admin fallback.
-  let ownerUserId: string | null = null
-
-  const ownerEmail = process.env.ASSISTANT_OWNER_EMAIL
-  if (ownerEmail) {
-    const { data: byEmail, error: emailErr } = await supabase
-      .from("team_members")
-      .select("user_id, role")
-      .ilike("email", ownerEmail)
-      .not("user_id", "is", null)
-      .single()
-    if (emailErr) {
-      console.error("[execute] owner lookup by ASSISTANT_OWNER_EMAIL failed:", emailErr.message)
-    }
-    if (byEmail?.user_id && ["owner", "admin"].includes(byEmail.role)) {
-      ownerUserId = byEmail.user_id as string
-    } else if (byEmail?.user_id) {
-      console.error("[execute] ASSISTANT_OWNER_EMAIL maps to role:", byEmail.role, "— must be owner or admin")
-      return NextResponse.json({ error: "Configured ASSISTANT_OWNER_EMAIL is not an owner or admin" }, { status: 500 })
-    }
-  }
-
+  const { userId: ownerUserId, error: ownerErr } = await resolveAssistantOwnerUserId(supabase)
   if (!ownerUserId) {
-    const { data: byRole, error: roleErr } = await supabase
-      .from("team_members")
-      .select("user_id")
-      .eq("role", "owner")
-      .eq("status", "active")
-      .not("user_id", "is", null)
-      .single()
-    if (roleErr) {
-      console.error("[execute] owner fallback lookup failed:", roleErr.message, roleErr.details)
-    }
-    ownerUserId = (byRole?.user_id as string) ?? null
-  }
-
-  if (!ownerUserId) {
-    return NextResponse.json({
-      error: "Owner not found. Set ASSISTANT_OWNER_EMAIL in Vercel env vars to the owner's email address.",
-    }, { status: 500 })
+    return NextResponse.json({ error: ownerErr ?? "Owner not found" }, { status: 500 })
   }
 
   const payload = approval.proposed_payload as Record<string, unknown>
@@ -1407,6 +1372,110 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       amount:      Number(amount),
       vendor:      vendor ?? null,
       category:    category ?? "misc",
+    })
+  }
+
+  // ─── bulk_create_expenses ─────────────────────────────────────────────────
+  // Same shape as create_expense, looped — one approval covers the whole
+  // batch. Each item gets its own duplicate check: if it's linked to a bank
+  // transaction that's already confirmed/ignored, or a same-amount expense
+  // already exists within 3 days, skip it instead of double-entering.
+
+  if (approval.action_type === "bulk_create_expenses") {
+    const { expenses: items } = payload as {
+      expenses: Array<{
+        amount: number; vendor: string | null; category: string; date: string
+        notes: string | null; job_id: string | null; bank_transaction_id?: string | null
+      }>
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "expenses array is required", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "expenses array is required" }, { status: 400 })
+    }
+
+    const createdIds: string[] = []
+    const skipped: string[] = []
+    const errors: string[] = []
+
+    for (const item of items) {
+      if (item.bank_transaction_id) {
+        const { data: bankTx } = await supabase
+          .from("bank_transactions")
+          .select("match_status")
+          .eq("id", item.bank_transaction_id)
+          .single()
+        if (bankTx && bankTx.match_status !== "unmatched" && bankTx.match_status !== "suggested") {
+          skipped.push(`${item.vendor ?? item.category} $${item.amount} (already ${bankTx.match_status})`)
+          continue
+        }
+      } else {
+        const center = new Date(`${item.date}T00:00:00Z`)
+        const from = new Date(center); from.setUTCDate(from.getUTCDate() - 3)
+        const to   = new Date(center); to.setUTCDate(to.getUTCDate() + 3)
+        const { data: dup } = await supabase
+          .from("expenses")
+          .select("id")
+          .eq("amount", item.amount)
+          .gte("date", from.toISOString().split("T")[0])
+          .lte("date", to.toISOString().split("T")[0])
+          .limit(1)
+        if (dup?.length) {
+          skipped.push(`${item.vendor ?? item.category} $${item.amount} (likely duplicate)`)
+          continue
+        }
+      }
+
+      const expenseType = item.job_id ? "job" : "business"
+      const description = item.vendor ?? `${(item.category ?? "misc").charAt(0).toUpperCase() + (item.category ?? "misc").slice(1).replace(/_/g, " ")} expense`
+
+      const { data: expense, error: expErr } = await supabase
+        .from("expenses")
+        .insert({
+          user_id:      ownerUserId,
+          job_id:       item.job_id ?? null,
+          expense_type: expenseType,
+          category:     item.category ?? "misc",
+          description,
+          amount:       Number(item.amount),
+          date:         item.date,
+          notes:        item.notes ?? null,
+        })
+        .select("id")
+        .single()
+
+      if (expErr || !expense) {
+        errors.push(`${item.vendor ?? item.category} $${item.amount}: ${expErr?.message}`)
+        continue
+      }
+
+      if (item.bank_transaction_id) {
+        await supabase.from("bank_transactions")
+          .update({ match_status: "confirmed", matched_expense_id: expense.id })
+          .eq("id", item.bank_transaction_id)
+      }
+      createdIds.push(expense.id)
+    }
+
+    await supabase.from("assistant_approvals")
+      .update({
+        status: errors.length && !createdIds.length ? "failed" : "executed",
+        executed_at: now,
+        error: errors.length ? errors.join("; ") : null,
+        result: { created: createdIds.length, skipped: skipped.length, expense_ids: createdIds },
+        updated_at: now,
+      })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type: "bulk_create_expenses",
+      success:     true,
+      created:     createdIds.length,
+      skipped:     skipped.length,
+      failed:      errors.length,
+      skipped_detail: skipped,
+      error_detail:   errors,
     })
   }
 

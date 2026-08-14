@@ -38,6 +38,7 @@ const ACTION_META: Record<string, { label: string; icon: React.ElementType; colo
   create_estimate_draft:  { label: "Create Draft Estimate", icon: FileText,   color: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300" },
   create_estimate:        { label: "Create Draft Estimate", icon: FileText,   color: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300" },
   create_expense:         { label: "Record Expense",        icon: Wallet,     color: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300" },
+  bulk_create_expenses:   { label: "Record Multiple Expenses", icon: Wallet,  color: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300" },
   schedule_job:           { label: "Schedule Job",          icon: Calendar,   color: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300" },
   update_note:            { label: "Update Note",           icon: StickyNote, color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300" },
   send_contracts:         { label: "Send Contracts",        icon: Send,       color: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300" },
@@ -168,6 +169,26 @@ function renderPayload(type: string, payload: Record<string, unknown>) {
         <PayloadRow label="Category" value={payload.category ? String(payload.category).replace(/_/g, " ") : null} />
         <PayloadRow label="Date"     value={payload.date as string | null} />
         <PayloadRow label="Notes"    value={payload.notes as string | null} />
+      </>
+    )
+  }
+
+  if (type === "bulk_create_expenses") {
+    const items = (payload.expenses ?? []) as Array<{ amount: number; vendor: string | null; category: string; date: string }>
+    const total = items.reduce((sum, e) => sum + Number(e.amount || 0), 0)
+    return (
+      <>
+        <PayloadRow label="Count" value={`${items.length} expense${items.length !== 1 ? "s" : ""}`} />
+        <PayloadRow label="Total" value={`$${total.toLocaleString("en-US", { minimumFractionDigits: 2 })}`} />
+        <div className="space-y-0.5 pt-1">
+          {items.slice(0, 8).map((e, i) => (
+            <div key={i} className="text-xs text-muted-foreground flex justify-between gap-2">
+              <span className="truncate">{e.date} · {e.vendor ?? e.category}</span>
+              <span className="shrink-0 font-medium text-foreground">${Number(e.amount).toFixed(2)}</span>
+            </div>
+          ))}
+          {items.length > 8 && <div className="text-xs text-muted-foreground">…and {items.length - 8} more</div>}
+        </div>
       </>
     )
   }

@@ -41,6 +41,14 @@ const TELEGRAM_ALLOWED_CHAT_IDS: Set<number> = new Set(
     .filter(id => !isNaN(id))
 )
 
+// Telegram bot tokens are "<numeric bot id>:<hash>" — used to tell "someone
+// replied to Lia" apart from "someone replied to the desertleads bot" (both
+// are is_bot=true, only Lia's own id should count as being addressed).
+const LIA_BOT_ID: number | null = (() => {
+  const id = parseInt((process.env.TELEGRAM_BOT_TOKEN ?? "").split(":")[0], 10)
+  return isNaN(id) ? null : id
+})()
+
 // ─── Pending edit state ────────────────────────────────────────────────────────
 // Key = chatId (Telegram) or phone number (WhatsApp), value = old approval to reject.
 
@@ -763,6 +771,16 @@ function formatClaudeActionForTelegram(
         lines.push(`  • ${s.name}: ${fmt(s.amount)}`)
       }
     }
+  } else if (action.type === "bulk_create_expenses") {
+    const items = (Array.isArray(p.expenses) ? p.expenses : []) as Array<{ amount: number; vendor?: string | null; category?: string; date: string }>
+    const total = items.reduce((sum, e) => sum + Number(e.amount || 0), 0)
+    lines.push(`💸 Record ${items.length} Expenses`)
+    lines.push("")
+    lines.push(`💰 Total: ${fmt(total)}`)
+    for (const e of items.slice(0, 10)) {
+      lines.push(`  • ${e.date} · ${e.vendor ?? e.category ?? "?"} · ${fmt(e.amount)}`)
+    }
+    if (items.length > 10) lines.push(`  …and ${items.length - 10} more`)
   } else if (action.type === "create_expense") {
     lines.push("💸 Record Expense")
     lines.push("")
@@ -1030,6 +1048,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       text?:    string
       caption?: string
       photo?:   Array<{ file_id: string; file_unique_id: string; width: number; height: number; file_size?: number }>
+      reply_to_message?: { from?: { id?: number; is_bot?: boolean } }
     }
     callback_query?: {
       id?: string
@@ -1669,6 +1688,11 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         } else {
           await sendTelegramMessage(chatId, base)
         }
+      } else if (result.action_type === "bulk_create_expenses") {
+        const created = result.created ?? 0
+        const skipped = result.skipped ?? 0
+        const skipPart = skipped > 0 ? ` (${skipped} skipped as likely duplicates)` : ""
+        await sendTelegramMessage(chatId, `✅ Recorded ${created} expense${created !== 1 ? "s" : ""}${skipPart}.`)
       } else if (result.action_type === "create_expense") {
         const amtFmt = result.amount != null
           ? `$${Number(result.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
@@ -1738,11 +1762,14 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
     const crmSecret   = process.env.CRM_ASSISTANT_SECRET ?? ""
     const senderName  = message?.from?.first_name ?? message?.from?.username ?? "Someone"
 
-    // In a group chat, Lia only speaks up when addressed by name — otherwise
-    // she stays passively aware: the message is still logged into the shared
-    // conversation for context, just with no reply sent.
-    const isGroupChat = chatType === "group" || chatType === "supergroup"
-    const isAddressed = /\blia\b/i.test(text)
+    // In a group chat, Lia only speaks up when addressed by name, OR when
+    // someone replies directly to one of her own messages (Telegram's
+    // reply-to feature) — e.g. correcting a proposal with just "no put it
+    // in tools" shouldn't require saying "lia" first. Otherwise she stays
+    // passively aware: the message is still logged for context, no reply sent.
+    const isGroupChat  = chatType === "group" || chatType === "supergroup"
+    const isReplyToLia = LIA_BOT_ID != null && message?.reply_to_message?.from?.id === LIA_BOT_ID
+    const isAddressed  = /\blia\b/i.test(text) || isReplyToLia
 
     if (isGroupChat && !isAddressed) {
       fetch(`${crmBaseUrl}/api/assistant/telegram-chat`, {
@@ -1893,6 +1920,51 @@ app.post("/notify", async (req: Request, res: Response) => {
     sendTelegramMessage(chatId, message).catch((err) => {
       console.error(`[lia/notify] Telegram send failed for chat ${chatId}:`, err?.message)
     })
+  }
+})
+
+// ─── Proactive action notification (bank sync auto-drafts, etc.) ─────────────
+// Unlike /notify (a plain FYI ping), this can carry an actual pending
+// approval — used so a scheduled bank sync's auto-drafted expenses / deposit
+// questions show up in Telegram with real Approve/Reject buttons instead of
+// only appearing in the in-app CRM chat.
+app.post("/notify-action", async (req: Request, res: Response) => {
+  const incoming = req.headers["x-assistant-secret"]
+  const expected = process.env.CRM_ASSISTANT_SECRET
+  if (!incoming || incoming !== expected) {
+    res.status(401).json({ error: "Unauthorized" })
+    return
+  }
+
+  res.json({ ok: true })
+
+  const body = req.body as {
+    text?:            string
+    approval_id?:     string
+    action_type?:     string
+    action_summary?:  string
+    payload?:         Record<string, unknown>
+  }
+  if (!body?.text) return
+
+  if (TELEGRAM_ALLOWED_CHAT_IDS.size === 0) {
+    console.log("[lia/notify-action] No TELEGRAM_ALLOWED_CHAT_IDS configured — not delivered")
+    return
+  }
+
+  const hasApproval = body.approval_id && body.action_type && body.payload
+  for (const chatId of TELEGRAM_ALLOWED_CHAT_IDS) {
+    if (hasApproval) {
+      const preview = formatClaudeActionForTelegram(body.approval_id!, {
+        type: body.action_type!, summary: body.action_summary ?? "", payload: body.payload!,
+      })
+      sendTelegramWithButtons(chatId, `${body.text}\n\n${preview}`, [[
+        { text: "✅ Approve", callback_data: `approve:${body.approval_id}` },
+        { text: "❌ Reject",  callback_data: `reject:${body.approval_id}` },
+      ]]).catch((err) => console.error(`[lia/notify-action] send failed for ${chatId}:`, err?.message))
+    } else {
+      sendTelegramMessage(chatId, body.text!).catch((err) => console.error(`[lia/notify-action] send failed for ${chatId}:`, err?.message))
+    }
   }
 })
 

@@ -97,6 +97,23 @@ export async function rolloverMetaLeads(): Promise<{ moved: number }> {
   return res.json() as Promise<{ moved: number }>
 }
 
+export interface BankSyncResult {
+  ok: boolean
+  results: Array<{ item_id: string; institution_name: string | null; added: number; modified: number; removed: number; error?: string }>
+  drafted: number
+  flagged: number
+  auto_ignored: number
+}
+
+export async function syncBank(): Promise<BankSyncResult> {
+  const res = await crmFetch("/api/bank/sync", { method: "POST" })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`CRM bank sync failed (${res.status}): ${text}`)
+  }
+  return res.json() as Promise<BankSyncResult>
+}
+
 export async function createApproval(body: {
   channel:          string
   action_type:      string

@@ -107,6 +107,8 @@ DATA ACCESS: CRM CONTEXT below is only a small recent-activity snapshot (custome
 
 EDITING EXISTING RECORDS: Don't say "I can't edit that" or "I don't have a tool for that." For a specific, well-understood action (reschedule a job, log a payment, mark a call outcome), use the dedicated tool. For anything else — renaming/correcting a field on one record, or the same change across many ("rename every Facebook-related expense's description to 'Facebook Advertising'") — use update_crm_records. Always query_crm first (count_only for bulk) so your proposal message tells the user exactly how many records and what's changing before they approve it.
 
+CREATING MULTIPLE THINGS AT ONCE: A tool call only ever proposes ONE approval per turn — if you call create_expense multiple times, only the first one becomes a real proposal and the rest silently vanish. So whenever a request needs more than one new expense (catching up on several bank transactions, a batch of receipts, "insert all the new charges from last week"), use bulk_create_expenses instead — one array, one approval, one approve click creates all of them. Never call create_expense more than once in the same turn.
+
 CRM CONTEXT:
 ${crmContext}`
 }
@@ -343,6 +345,34 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "bulk_create_expenses",
+    description: "Record MULTIPLE expenses at once as a SINGLE approval — use this instead of calling create_expense repeatedly whenever more than one expense is being added in the same request (catching up on a batch of bank transactions, several receipts at once, etc.). One card, one approve click creates the whole batch. Look up candidates via query_crm/list_bank_transactions first so every item has real data — never invent amounts or dates.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ...SUMMARY_PROP,
+        expenses: {
+          type: "array",
+          description: "One entry per expense.",
+          items: {
+            type: "object",
+            properties: {
+              amount:              { type: "number" },
+              vendor:              { type: ["string", "null"] },
+              category:            { type: "string", enum: [...EXPENSE_CATEGORIES] },
+              date:                { type: "string", description: "YYYY-MM-DD" },
+              notes:               { type: ["string", "null"] },
+              job_id:              { type: ["string", "null"] },
+              bank_transaction_id: { type: ["string", "null"], description: "Set when this item matches a specific bank transaction — links them and prevents re-proposing it later." },
+            },
+            required: ["amount", "category", "date"],
+          },
+        },
+      },
+      required: ["summary", "expenses"],
+    },
+  },
+  {
     name: "create_reminder",
     description: "Add something to the to-do/reminders list — a task, follow-up, or thing to remember for a specific day. This is how you add to someone's daily to-do list.",
     input_schema: {
@@ -511,9 +541,10 @@ Filters: enum-like fields (status, category, type, ...) match exactly; free-text
 const READ_ONLY_TOOLS = new Set(["list_reminders", "list_bank_transactions", "query_crm"])
 
 const ACTION_RISK: Record<string, "low" | "medium" | "high"> = {
-  create_send_invoice: "medium",
-  record_payment:      "medium",
-  update_crm_records:  "medium",
+  create_send_invoice:  "medium",
+  record_payment:       "medium",
+  update_crm_records:   "medium",
+  bulk_create_expenses: "medium",
 }
 
 // ─── Read-only tool execution ─────────────────────────────────────────────────
