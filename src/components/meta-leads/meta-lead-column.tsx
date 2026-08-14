@@ -26,8 +26,11 @@ export function MetaLeadColumn({ title, leads, emptyLabel, onUpdated, onDeleted,
         </span>
       </div>
       <div className={cn(
-        "overflow-y-auto space-y-2 pr-1 pb-2 md:flex-1 md:max-h-none",
-        noMobileCap ? "max-h-none" : "max-h-[50vh]",
+        "space-y-2 pr-1 pb-2 md:flex-1 md:max-h-none md:overflow-y-auto",
+        // No max-height or overflow on mobile when noMobileCap — plain block
+        // flow, so the page itself is the only scrollable surface (a capped
+        // inner scrollbox traps the scroll gesture on iOS at its edges).
+        noMobileCap ? "" : "max-h-[50vh] overflow-y-auto",
       )}>
         {leads.length === 0 ? (
           <p className="text-xs text-muted-foreground py-8 text-center">{emptyLabel}</p>

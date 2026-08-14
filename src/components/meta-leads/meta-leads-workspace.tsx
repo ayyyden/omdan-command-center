@@ -4,16 +4,26 @@ import { useCallback, useEffect, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MetaLeadColumn } from "@/components/meta-leads/meta-lead-column"
+import { cn } from "@/lib/utils"
 import type { MetaLead, MetaLeadsGrouped } from "@/types"
 
 const EMPTY: MetaLeadsGrouped = {
   call_list: [], second_call_list: [], schedule_call_list: [], scheduled: [], archive: [],
 }
 
+type ActiveListKey = "schedule_call_list" | "call_list" | "second_call_list"
+
+const ACTIVE_LISTS: Array<{ key: ActiveListKey; label: string; shortLabel: string; title: string; emptyLabel: string }> = [
+  { key: "schedule_call_list", label: "Schedule Call List", shortLabel: "Schedule", title: "Schedule Call List", emptyLabel: "No calls scheduled for later." },
+  { key: "call_list",          label: "Call List",          shortLabel: "Call List", title: "Call List",          emptyLabel: "No leads to call right now." },
+  { key: "second_call_list",   label: "Second Call List",   shortLabel: "2nd Call",  title: "Second Call List",   emptyLabel: "No missed calls waiting." },
+]
+
 export function MetaLeadsWorkspace() {
   const [data, setData] = useState<MetaLeadsGrouped>(EMPTY)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [mobileList, setMobileList] = useState<ActiveListKey>("call_list")
 
   const load = useCallback(async () => {
     setError(null)
@@ -86,9 +96,42 @@ export function MetaLeadsWorkspace() {
       </TabsList>
 
       <TabsContent value="active" className="flex-1 min-h-0 mt-3">
-        {/* Mobile: 3 stacked sections, each independently scrollable (see MetaLeadColumn).
-            Desktop: side-by-side kanban columns filling the page height. */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:h-full">
+        {/* Mobile: one list at a time via a switcher, no internal scroll box —
+            the page itself is the only scrollable surface (nested scroll
+            boxes were trapping the scroll gesture on iOS). */}
+        <div className="md:hidden space-y-3">
+          <div className="flex rounded-lg border overflow-hidden text-xs font-medium">
+            {ACTIVE_LISTS.map(({ key, shortLabel }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMobileList(key)}
+                className={cn(
+                  "flex-1 px-2 py-2 transition-colors",
+                  mobileList === key
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:bg-muted",
+                )}
+              >
+                {shortLabel} ({data[key].length})
+              </button>
+            ))}
+          </div>
+          {ACTIVE_LISTS.filter((l) => l.key === mobileList).map((l) => (
+            <MetaLeadColumn
+              key={l.key}
+              title={l.title}
+              leads={data[l.key]}
+              emptyLabel={l.emptyLabel}
+              onUpdated={handleUpdated}
+              onDeleted={handleDeleted}
+              noMobileCap
+            />
+          ))}
+        </div>
+
+        {/* Desktop: unchanged side-by-side kanban columns filling the page height. */}
+        <div className="hidden md:grid md:grid-cols-3 gap-4 h-full">
           <MetaLeadColumn
             title="Schedule Call List"
             leads={data.schedule_call_list}
