@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { TWILIO_FROM_PHONE } from "@/lib/twilio-client"
+import { TWILIO_FROM_PHONE, verifyTwilioSignature } from "@/lib/twilio-client"
 
 // Public route — called by Twilio when a call needs to be connected.
 // Supports both bridge calls (GET/POST with query param) and browser SDK
@@ -32,14 +32,24 @@ async function handle(req: NextRequest): Promise<Response> {
 
   // Read destination from POST body first (browser SDK sends form-encoded body)
   let rawTo: string | null = null
+  let formParams: Record<string, string> = {}
 
   if (req.method === "POST") {
     try {
       const form = await req.formData()
+      for (const [key, value] of form.entries()) formParams[key] = String(value)
       rawTo = (form.get("To") ?? form.get("to") ?? form.get("phone")) as string | null
     } catch {
       // Body not form-encoded — fall through to query params
     }
+  }
+
+  // Only Twilio ever calls this route (nothing in our own code references
+  // this URL — it's only reachable via Twilio's own webhook/TwiML App
+  // config), so an unsigned request is never a legitimate caller.
+  if (!verifyTwilioSignature(req, formParams)) {
+    console.error("[twiml/dial] signature verification failed")
+    return new Response(errorTwiml("Unauthorized."), { status: 403, headers: xmlHeader })
   }
 
   // Fall back to URL query params (bridge call compat: ?to=+1xxx or ?To=+1xxx)

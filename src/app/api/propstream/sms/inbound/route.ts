@@ -1,10 +1,17 @@
 import { NextRequest } from "next/server"
 import { createServiceClient } from "@/lib/supabase/service"
-import { STOP_KEYWORDS } from "@/lib/twilio-client"
+import { STOP_KEYWORDS, verifyTwilioSignature } from "@/lib/twilio-client"
 
 // Public — Twilio webhook for inbound SMS replies from leads.
 export async function POST(req: NextRequest) {
   const formData = await req.formData()
+  const params: Record<string, string> = {}
+  for (const [key, value] of formData.entries()) params[key] = String(value)
+
+  if (!verifyTwilioSignature(req, params)) {
+    return new Response("", { status: 403 })
+  }
+
   const from  = (formData.get("From")  as string | null) ?? ""
   const to    = (formData.get("To")    as string | null) ?? ""
   const body  = (formData.get("Body")  as string | null) ?? ""

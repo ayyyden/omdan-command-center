@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
 import { createServiceClient } from "@/lib/supabase/service"
+import { verifyTwilioSignature } from "@/lib/twilio-client"
 
 // Public — Twilio posts call status updates here.
 export async function POST(req: NextRequest) {
@@ -8,6 +9,13 @@ export async function POST(req: NextRequest) {
   if (!call_log_id) return new Response("", { status: 204 })
 
   const formData = await req.formData()
+  const params: Record<string, string> = {}
+  for (const [key, value] of formData.entries()) params[key] = String(value)
+
+  if (!verifyTwilioSignature(req, params)) {
+    return new Response("", { status: 403 })
+  }
+
   const callStatus   = (formData.get("CallStatus") as string | null) ?? ""
   const callDuration = (formData.get("CallDuration") as string | null) ?? ""
 
