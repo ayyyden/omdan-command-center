@@ -78,7 +78,7 @@ export function MetaLeadsWorkspace() {
   }
 
   return (
-    <Tabs defaultValue="active" className="flex flex-col h-full">
+    <Tabs defaultValue="active" className="flex flex-col md:h-full">
       <TabsList className="shrink-0 w-fit">
         <TabsTrigger value="active">Active</TabsTrigger>
         <TabsTrigger value="scheduled">Scheduled ({data.scheduled.length})</TabsTrigger>
@@ -86,7 +86,9 @@ export function MetaLeadsWorkspace() {
       </TabsList>
 
       <TabsContent value="active" className="flex-1 min-h-0 mt-3">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
+        {/* Mobile: 3 stacked sections, each independently scrollable (see MetaLeadColumn).
+            Desktop: side-by-side kanban columns filling the page height. */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:h-full">
           <MetaLeadColumn
             title="Schedule Call List"
             leads={data.schedule_call_list}
@@ -118,6 +120,7 @@ export function MetaLeadsWorkspace() {
           emptyLabel="No scheduled appointments yet."
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
+          noMobileCap
         />
       </TabsContent>
 
@@ -128,6 +131,7 @@ export function MetaLeadsWorkspace() {
           emptyLabel="No archived leads."
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
+          noMobileCap
         />
       </TabsContent>
     </Tabs>

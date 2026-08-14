@@ -11,13 +11,15 @@ export default async function MetaLeadsPage() {
   if (!can(session.role, "meta_leads:view")) redirect("/access-denied")
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col md:h-full">
       <Topbar
         title="Meta Lead Jobs"
         subtitle="Facebook / Meta Lead Ads call list"
         actions={<AddLeadDialog />}
       />
-      <div className="flex-1 overflow-hidden p-4 sm:p-6">
+      {/* Mobile: normal page scroll, each list gets its own capped scroll box below.
+          Desktop (md+): fixed-height kanban board, unchanged — nothing scrolls but the columns themselves. */}
+      <div className="flex-1 md:overflow-hidden p-4 sm:p-6">
         <MetaLeadsWorkspace />
       </div>
     </div>
