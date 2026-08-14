@@ -42,10 +42,12 @@ export async function sendQuoSms(toPhone: string, content: string): Promise<{ ok
 
     if (!res.ok) {
       const text = await res.text().catch(() => "")
+      console.error(`[quo] send failed (${res.status}):`, text.slice(0, 500))
       return { ok: false, error: `Quo API error (${res.status}): ${text.slice(0, 300)}` }
     }
     return { ok: true }
   } catch (err) {
+    console.error("[quo] send threw:", err)
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
