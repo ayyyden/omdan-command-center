@@ -169,6 +169,7 @@ export interface CalendarEventSummary {
   end:         string | null
   location:    string | null
   description: string | null
+  htmlLink:    string | null  // link to open the real event in Google Calendar
 }
 
 /**
@@ -200,5 +201,6 @@ export async function listUpcomingEvents(
     end:         e.end?.dateTime ?? e.end?.date ?? null,
     location:    e.location ?? null,
     description: e.description ?? null,
+    htmlLink:    e.htmlLink ?? null,
   }))
 }
