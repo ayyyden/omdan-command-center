@@ -22,7 +22,7 @@ const navItems = [
   { href: "/customers",  label: "CRM / Leads", icon: Users,           roles: ["owner", "admin"] as TeamRole[] },
   { href: "/estimates",  label: "Estimates",   icon: FileText,        roles: ["owner", "admin", "office", "project_manager"] as TeamRole[] },
   { href: "/jobs",       label: "Jobs",        icon: Briefcase,       roles: ALL_ROLES },
-  { href: "/scheduler",  label: "Scheduler",   icon: Calendar,        roles: ALL_ROLES },
+  { href: "/scheduler",  label: "Calendar",    icon: Calendar,        roles: ALL_ROLES },
   { href: "/expenses",   label: "Expenses",    icon: Receipt,         roles: ["owner", "admin"] as TeamRole[] },
   { href: "/payments",   label: "Payments",    icon: DollarSign,      roles: ["owner", "admin"] as TeamRole[] },
   { href: "/reports",    label: "Reports",     icon: BarChart3,       roles: ["owner", "admin"] as TeamRole[] },

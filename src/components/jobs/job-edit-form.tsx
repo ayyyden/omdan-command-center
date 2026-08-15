@@ -144,6 +144,8 @@ export function JobEditForm({ job, pms, userId, canChangePm = true }: JobEditFor
         scheduledDate: scheduledDate || null,
         scheduledTime: scheduledTime || null,
       })
+
+      fetch(`/api/jobs/${job.id}/sync-calendar`, { method: "POST" }).catch(() => {})
     }
 
     if (pmChanged) {

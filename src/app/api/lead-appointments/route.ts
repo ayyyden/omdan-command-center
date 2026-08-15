@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSessionMember } from "@/lib/auth-helpers"
 import { createServiceClient } from "@/lib/supabase/service"
+import { syncLeadAppointmentCalendarEvent } from "@/lib/lead-appointment-calendar-sync"
 
 // GET /api/lead-appointments?date=YYYY-MM-DD
 export async function GET(req: Request) {
@@ -133,5 +134,15 @@ export async function POST(req: Request) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Best-effort — a calendar hiccup shouldn't fail the appointment itself.
+  // Awaited (not fire-and-forget): Vercel can freeze the function the
+  // instant the response is sent, so an un-awaited call might never run.
+  try {
+    await syncLeadAppointmentCalendarEvent(data.id)
+  } catch (err) {
+    console.error("[lead-appointments] calendar sync failed:", err)
+  }
+
   return NextResponse.json({ appointment_id: data.id, customer_id: customerId })
 }

@@ -13,6 +13,8 @@ import { createAppointmentEvent, createCalendarEvent } from "@/lib/google-calend
 import { EDITABLE_TABLES } from "@/lib/lia-brain"
 import { fromZonedTime } from "date-fns-tz"
 import { resolveAssistantOwnerUserId } from "@/lib/assistant-owner"
+import { syncJobCalendarEvent } from "@/lib/job-calendar-sync"
+import { syncLeadAppointmentCalendarEvent } from "@/lib/lead-appointment-calendar-sync"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -904,6 +906,14 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         description: `Updated via Lia`,
       })
     } catch { /* non-critical */ }
+
+    if (scheduled_date !== undefined || scheduled_time !== undefined || status !== undefined) {
+      try {
+        await syncJobCalendarEvent(job_id)
+      } catch (err) {
+        console.error("[execute/update_job] calendar sync failed:", err)
+      }
+    }
 
     await supabase.from("assistant_approvals")
       .update({ status: "executed", executed_at: now, result: { job_id }, updated_at: now })
@@ -2067,6 +2077,12 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       return NextResponse.json({ error: `Failed to create appointment: ${apptErr?.message}` }, { status: 500 })
     }
 
+    try {
+      await syncLeadAppointmentCalendarEvent(appt.id)
+    } catch (err) {
+      console.error("[execute/create_lead_appointment] calendar sync failed:", err)
+    }
+
     await supabase.from("assistant_approvals")
       .update({
         status:      "executed",
@@ -2157,6 +2173,14 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         description: `Job created via Lia: ${jobTitle}`,
       })
     } catch { /* non-critical */ }
+
+    if (scheduled_date) {
+      try {
+        await syncJobCalendarEvent(job.id)
+      } catch (err) {
+        console.error("[execute/create_job] calendar sync failed:", err)
+      }
+    }
 
     await supabase.from("assistant_approvals")
       .update({

@@ -123,6 +123,45 @@ export async function createAppointmentEvent(
   return { eventId: data.id, htmlLink: data.htmlLink ?? null }
 }
 
+/** Updates an existing event in place (job rescheduled, lead appointment moved, etc.). */
+export async function updateCalendarEvent(
+  calendarId: string,
+  eventId: string,
+  input: AppointmentEventInput,
+): Promise<void> {
+  const start = new Date(input.startISO)
+  if (Number.isNaN(start.getTime())) {
+    throw new Error(`Invalid start datetime: ${input.startISO}`)
+  }
+  const end = new Date(start.getTime() + (input.durationMinutes ?? EVENT_DURATION_MINUTES) * 60 * 1000)
+
+  const calendar = getCalendarClient()
+  await calendar.events.update({
+    calendarId,
+    eventId,
+    requestBody: {
+      summary:     input.title,
+      description: input.description || undefined,
+      location:    input.location || undefined,
+      start: { dateTime: start.toISOString(), timeZone: "America/Los_Angeles" },
+      end:   { dateTime: end.toISOString(),   timeZone: "America/Los_Angeles" },
+    },
+  })
+}
+
+/** Deletes an event — e.g. a job got cancelled or unscheduled. Treats "already
+ *  gone" (404/410, someone deleted it by hand) as success, not an error. */
+export async function deleteCalendarEvent(calendarId: string, eventId: string): Promise<void> {
+  const calendar = getCalendarClient()
+  try {
+    await calendar.events.delete({ calendarId, eventId })
+  } catch (err) {
+    const status = (err as { code?: number; response?: { status?: number } })?.response?.status
+      ?? (err as { code?: number })?.code
+    if (status !== 404 && status !== 410) throw err
+  }
+}
+
 export interface CalendarEventSummary {
   id:          string
   title:       string

@@ -127,6 +127,10 @@ export function AddJobDialog({ userId, pms }: Props) {
       },
     ])
 
+    if (scheduledDate) {
+      fetch(`/api/jobs/${job.id}/sync-calendar`, { method: "POST" }).catch(() => {})
+    }
+
     toast({ title: "Job added", description: `${jobTitle} for ${name.trim()}` })
     setOpen(false)
     reset()

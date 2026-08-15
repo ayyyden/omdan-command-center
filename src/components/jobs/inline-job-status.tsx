@@ -47,6 +47,7 @@ export function InlineJobStatus({ jobId, currentStatus }: InlineJobStatusProps) 
       toast({ title: "Error", description: error.message, variant: "destructive" })
       return
     }
+    fetch(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {})
     setStatus(newStatus)
     router.refresh()
   }

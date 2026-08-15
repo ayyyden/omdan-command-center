@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSessionMember } from "@/lib/auth-helpers"
 import { createServiceClient } from "@/lib/supabase/service"
+import { syncLeadAppointmentCalendarEvent } from "@/lib/lead-appointment-calendar-sync"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -35,5 +36,14 @@ export async function PATCH(req: Request, { params }: RouteCtx) {
     .eq("id", id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  if (body.status !== undefined || body.scheduled_date !== undefined || body.start_time !== undefined) {
+    try {
+      await syncLeadAppointmentCalendarEvent(id)
+    } catch (err) {
+      console.error("[lead-appointments] calendar sync failed:", err)
+    }
+  }
+
   return NextResponse.json({ success: true })
 }

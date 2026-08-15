@@ -93,6 +93,10 @@ export function CreateJobDialog({ customerId, customerName, address, serviceType
       job_id:      job.id,
     })
 
+    if (scheduledDate) {
+      fetch(`/api/jobs/${job.id}/sync-calendar`, { method: "POST" }).catch(() => {})
+    }
+
     toast({ title: "Job created", description: `${jobTitle} for ${customerName}` })
     setOpen(false)
     reset()

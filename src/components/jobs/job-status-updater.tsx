@@ -75,6 +75,11 @@ export function JobStatusUpdater({ jobId, currentStatus, customerId, userId }: J
       await advanceCustomerStatus(supabase, customerId, customerTarget)
     }
 
+    // Completed/cancelled removes the calendar event; other transitions
+    // just re-save the same event — cheap, and keeps things correct if a
+    // job un-completes back to an active status.
+    fetch(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {})
+
     setStatus(newStatus)
     toast({ title: STATUS_LABELS[newStatus], description: "Job status updated" })
     router.refresh()
