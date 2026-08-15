@@ -113,15 +113,15 @@ export function parseIntent(text: string): Intent {
     }
   }
 
-  // Schedule job — explicit scheduling requests
-  if (/\b(?:schedule|book)\b/.test(lower) && /\b(?:job|on\s+the\s+calendar|calendar)\b|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today|morning|afternoon|\d{1,2}am|\d{1,2}pm)\b/.test(lower)) {
-    if (!/\b(?:check|view|show|list|status)\b/.test(lower)) {
-      return { type: "schedule_job", rawText: trimmed }
-    }
-  }
-  if (/\bput\b.+\bon\s+the\s+calendar\b/.test(lower)) {
-    return { type: "schedule_job", rawText: trimmed }
-  }
+  // NOTE: there used to be a "schedule job" regex here (schedule/book +
+  // a day/time word) routing to a rigid legacy handler that only searched
+  // the customers table for an EXISTING customer + EXISTING job. It hijacked
+  // requests like "add Toni Leonidas to my schedule Monday 11-12" — a brand
+  // new person, not an existing customer — into a confusing "No customer
+  // found" dead end, instead of ever reaching Claude. Removed: the AI brain's
+  // update_job (reschedule an existing job), create_lead_appointment (a new
+  // person), and update_meta_lead_outcome (a known Meta Lead) tools now
+  // cover this — and understand it — far better than the regex ever did.
 
   // Add lead / new lead
   if (/add\s+(this\s+)?lead|new\s+lead|lia\s+add/.test(lower)) {

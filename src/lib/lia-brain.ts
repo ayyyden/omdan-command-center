@@ -11,6 +11,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { createServiceClient } from "@/lib/supabase/service"
 import { EXPENSE_CATEGORIES } from "@/lib/expense-categories"
+import { listUpcomingEvents } from "@/lib/google-calendar"
 
 export interface ActionDraft {
   type:       string
@@ -100,10 +101,13 @@ RULES:
 - A job's title should be the property's street address whenever one is known (e.g. "82388 Odlum Dr"), never a service description like "Pavers" — that convention is enforced elsewhere in the CRM too, so follow it when you set or change a job's title.
 - Do not invent brands, measurements, warranties, or anything the user did not specify.
 - Before proposing create_lead_appointment, check LEAD APPOINTMENTS in CRM CONTEXT — if the same customer already has one within 7 days of the requested date, mention that in your message, but still propose the action so the user can decide.
+- "Add/schedule X for [day/time]" does NOT require X to already exist as a formal customer — that's normal, most people asked about this way are brand new. Never respond with anything like "no customer found" for a person who just isn't in the system yet. Instead: (1) query_crm(meta_leads, full_name search for their name) — if they're already on a Meta Lead call list, use update_meta_lead_outcome (answered_scheduled) instead, which correctly moves them off the call list too; (2) if not found there or anywhere else, just use create_lead_appointment — it's built for exactly this, a brand new person with no existing record.
 - If the user asks to cancel or change a pending approval, tell them to reject the card, then re-describe what they want.
 - If you're just greeting, chatting, or answering a question with no data-changing intent, reply naturally with no tool call at all.
 
 DATA ACCESS: CRM CONTEXT below is only a small recent-activity snapshot (customers, jobs, lead appointments) — it is NOT everything in the CRM. You have a lot more data than that: meta lead call lists, PropStream leads, estimates, invoices, payments, expenses, reminders, sent contracts, change orders, bank transactions, and team members. Never say you don't have access to something or can't check — call query_crm (as many times as needed) to look it up for real before answering. This applies to any "how many", "list", "who/what/when" question about CRM data, not just the tables shown in CRM CONTEXT.
+
+You also have full read access to the real Google Calendar via list_calendar_events — not just what's in the database. Use it to check for a scheduling conflict before proposing a new appointment/call, and to answer any "what's coming up" / "do we have anything near [date]" question directly instead of guessing from CRM CONTEXT alone.
 
 EDITING EXISTING RECORDS: Don't say "I can't edit that" or "I don't have a tool for that." For a specific, well-understood action (reschedule a job, log a payment, mark a call outcome), use the dedicated tool. For anything else — renaming/correcting a field on one record, or the same change across many ("rename every Facebook-related expense's description to 'Facebook Advertising'") — use update_crm_records. Always query_crm first (count_only for bulk) so your proposal message tells the user exactly how many records and what's changing before they approve it.
 
@@ -536,9 +540,21 @@ Filters: enum-like fields (status, category, type, ...) match exactly; free-text
       required: ["summary", "title", "date", "start_time"],
     },
   },
+  {
+    name: "list_calendar_events",
+    description: "Look up what's actually on the Google Calendar — read-only, does not need approval. Use this to check for a conflict before proposing a new appointment, to answer \"what's coming up\" / \"do we have anything near [date]\", or to find an event's id. Covers both the main calendar and the callback calendar.",
+    input_schema: {
+      type: "object",
+      properties: {
+        calendar:    { type: ["string", "null"], enum: ["main", "callback", "both", null], description: "Which calendar to check. Defaults to \"both\"." },
+        days_ahead:  { type: ["number", "null"], description: "How many days out to look, starting now. Defaults to 14." },
+      },
+      required: [],
+    },
+  },
 ]
 
-const READ_ONLY_TOOLS = new Set(["list_reminders", "list_bank_transactions", "query_crm"])
+const READ_ONLY_TOOLS = new Set(["list_reminders", "list_bank_transactions", "query_crm", "list_calendar_events"])
 
 const ACTION_RISK: Record<string, "low" | "medium" | "high"> = {
   create_send_invoice:  "medium",
@@ -651,6 +667,34 @@ async function runQueryCrm(input: { table?: string; filters?: Record<string, str
   return data.map((row) => JSON.stringify(row)).join("\n")
 }
 
+async function runListCalendarEvents(input: { calendar?: string | null; days_ahead?: number | null }): Promise<string> {
+  const which = input.calendar ?? "both"
+  const targets: Array<{ label: string; id: string | undefined }> = []
+  if (which === "main" || which === "both")     targets.push({ label: "Main",     id: process.env.META_LEADS_MAIN_CALENDAR_ID })
+  if (which === "callback" || which === "both") targets.push({ label: "Callback", id: process.env.META_LEADS_CALLBACK_CALENDAR_ID })
+
+  const configured = targets.filter((t) => t.id)
+  if (!configured.length) return "No calendar is configured (META_LEADS_MAIN_CALENDAR_ID / META_LEADS_CALLBACK_CALENDAR_ID)."
+
+  const lines: string[] = []
+  for (const t of configured) {
+    try {
+      const events = await listUpcomingEvents(t.id!, { daysAhead: input.days_ahead ?? 14 })
+      if (!events.length) {
+        lines.push(`${t.label} calendar: nothing in this window.`)
+        continue
+      }
+      lines.push(`${t.label} calendar:`)
+      for (const e of events) {
+        lines.push(`  id=${e.id} | "${e.title}" | ${e.start ?? "?"} – ${e.end ?? "?"}${e.location ? ` | ${e.location}` : ""}`)
+      }
+    } catch (err) {
+      lines.push(`${t.label} calendar: error — ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  return lines.join("\n")
+}
+
 // ─── Claude call ──────────────────────────────────────────────────────────────
 
 const MAX_TOOL_ITERATIONS = 5
@@ -717,6 +761,7 @@ export async function callLiaBrain(
           const text =
             t.name === "list_bank_transactions" ? await runListBankTransactions(t.input as { match_status?: string | null; search?: string | null; limit?: number | null }) :
             t.name === "query_crm"              ? await runQueryCrm(t.input as { table?: string; filters?: Record<string, string> | null; date_from?: string | null; date_to?: string | null; count_only?: boolean | null; limit?: number | null }) :
+            t.name === "list_calendar_events"   ? await runListCalendarEvents(t.input as { calendar?: string | null; days_ahead?: number | null }) :
             await runListReminders(t.input as { scope?: string })
           return { type: "tool_result" as const, tool_use_id: t.id, content: text }
         }))

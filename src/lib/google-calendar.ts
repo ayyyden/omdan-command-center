@@ -40,11 +40,17 @@ function getCalendarClient() {
 /**
  * Creates a 1-hour event on the given calendar for the given lead at whenISO.
  * Throws on any failure — callers should NOT update the DB row until this resolves.
+ *
+ * `title` is required and caller-supplied on purpose — this is shared by two
+ * very different outcomes (an actual booked appointment vs. a callback
+ * reminder) that must NOT share a title: "{name} Lead Appointment" for
+ * answered_scheduled, "Call: {name}" only for callback_later.
  */
 export async function createCalendarEvent(
   calendarId: string,
   lead: MetaLeadCalendarInfo,
   whenISO: string,
+  title: string,
 ): Promise<{ eventId: string }> {
   const start = new Date(whenISO)
   if (Number.isNaN(start.getTime())) {
@@ -64,7 +70,7 @@ export async function createCalendarEvent(
   const { data } = await calendar.events.insert({
     calendarId,
     requestBody: {
-      summary: `Call: ${lead.full_name}`,
+      summary: title,
       description: description || undefined,
       start: { dateTime: start.toISOString(), timeZone: "America/Los_Angeles" },
       end:   { dateTime: end.toISOString(),   timeZone: "America/Los_Angeles" },
@@ -115,4 +121,45 @@ export async function createAppointmentEvent(
   if (!data.id) throw new Error("Google Calendar did not return an event id")
 
   return { eventId: data.id, htmlLink: data.htmlLink ?? null }
+}
+
+export interface CalendarEventSummary {
+  id:          string
+  title:       string
+  start:       string | null  // ISO datetime (or date-only for all-day events)
+  end:         string | null
+  location:    string | null
+  description: string | null
+}
+
+/**
+ * Lists upcoming events on a calendar — read-only, gives Lia visibility into
+ * what's actually on the calendar (avoid double-booking, answer "what's
+ * coming up") instead of only being able to create events blind.
+ */
+export async function listUpcomingEvents(
+  calendarId: string,
+  opts: { daysAhead?: number; maxResults?: number } = {},
+): Promise<CalendarEventSummary[]> {
+  const calendar = getCalendarClient()
+  const timeMin = new Date()
+  const timeMax = new Date(timeMin.getTime() + (opts.daysAhead ?? 14) * 24 * 60 * 60 * 1000)
+
+  const { data } = await calendar.events.list({
+    calendarId,
+    timeMin: timeMin.toISOString(),
+    timeMax: timeMax.toISOString(),
+    maxResults: opts.maxResults ?? 25,
+    singleEvents: true,
+    orderBy: "startTime",
+  })
+
+  return (data.items ?? []).map((e) => ({
+    id:          e.id ?? "",
+    title:       e.summary ?? "(no title)",
+    start:       e.start?.dateTime ?? e.start?.date ?? null,
+    end:         e.end?.dateTime ?? e.end?.date ?? null,
+    location:    e.location ?? null,
+    description: e.description ?? null,
+  }))
 }

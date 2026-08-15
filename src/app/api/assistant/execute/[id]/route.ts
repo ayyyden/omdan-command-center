@@ -1895,9 +1895,13 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       return NextResponse.json({ error: `Calendar is not configured (${missing})` }, { status: 500 })
     }
 
+    const eventTitle = outcome === "answered_scheduled"
+      ? `${lead.full_name} Lead Appointment`
+      : `Call: ${lead.full_name}`
+
     let eventId: string
     try {
-      const result = await createCalendarEvent(calendarId, lead, scheduled_at)
+      const result = await createCalendarEvent(calendarId, lead, scheduled_at, eventTitle)
       eventId = result.eventId
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

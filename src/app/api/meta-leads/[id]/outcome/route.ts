@@ -83,9 +83,13 @@ export async function POST(req: NextRequest, { params }: RouteCtx) {
     )
   }
 
+  const eventTitle = outcome === "answered_scheduled"
+    ? `${lead.full_name} Lead Appointment`
+    : `Call: ${lead.full_name}`
+
   let eventId: string
   try {
-    const result = await createCalendarEvent(calendarId, lead, scheduled_at)
+    const result = await createCalendarEvent(calendarId, lead, scheduled_at, eventTitle)
     eventId = result.eventId
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
