@@ -34,7 +34,12 @@ interface FieldValue {
 }
 
 function defaultVAlign(ft: FieldType): VAlign {
-  return ft === "signature" || ft === "initials" ? "bottom" : "center"
+  // Mirrors field-editor.tsx's defaultVAlign — text/date fields sit over a
+  // printed ruled line, so they should anchor to the bottom of their box
+  // (like handwriting on the line), not float centered.
+  if (ft === "signature" || ft === "initials" || ft === "text" || ft === "date") return "bottom"
+  if (ft === "rich_text") return "top"
+  return "center"
 }
 
 export async function POST(

@@ -78,7 +78,10 @@ const FIELD_COLORS: Record<FieldType, string> = {
 }
 
 function defaultVAlign(ft: FieldType): VAlign {
-  if (ft === "signature") return "bottom"
+  // text/date fields are almost always placed over a printed ruled line —
+  // text should sit just above it, like handwriting, not float centered in
+  // whatever height the box happens to be.
+  if (ft === "signature" || ft === "text" || ft === "date") return "bottom"
   if (ft === "rich_text") return "top"
   return "center"
 }
