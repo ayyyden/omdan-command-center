@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Upload } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { normalizePdfRotation } from "@/lib/pdf/normalize-rotation"
 
 interface Props {
   userId: string
@@ -47,9 +48,21 @@ export function UploadContractDialog({ userId, existingTemplates = [] }: Props) 
     const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_")
     const storagePath = `${userId}/contract_templates/${Date.now()}_${safe}`
 
+    // Some PDFs (scans/exports) declare a page rotation without actually
+    // being upright — bake any such rotation into the content on upload so
+    // the Field Editor and the signing stamper always agree on page size
+    // and orientation, instead of drawing fields/signatures sideways.
+    let uploadBytes: Uint8Array | File = file
+    try {
+      uploadBytes = await normalizePdfRotation(await file.arrayBuffer())
+    } catch {
+      // If normalization fails for any reason, fall back to the raw file
+      // rather than blocking the upload.
+    }
+
     const { error: upErr } = await supabase.storage
       .from("files")
-      .upload(storagePath, file, { contentType: "application/pdf" })
+      .upload(storagePath, uploadBytes, { contentType: "application/pdf" })
 
     if (upErr) {
       toast({ title: "Upload failed", description: upErr.message, variant: "destructive" })
