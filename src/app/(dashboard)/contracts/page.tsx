@@ -45,6 +45,9 @@ export default async function ContractsPage() {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ""
 
   const pairedIds = new Set(rows.map((t) => t.attached_to_template_id).filter(Boolean) as string[])
+  const pairedChildByParent = new Map(
+    rows.filter((t) => t.attached_to_template_id).map((t) => [t.attached_to_template_id as string, t.id])
+  )
   const documents = rows
     .filter((t) => t.is_active && !t.attached_to_template_id)
     .map((t) => ({
@@ -52,6 +55,7 @@ export default async function ContractsPage() {
       name: t.name,
       requiresSignature: t.requires_signature,
       hasPairedDoc: pairedIds.has(t.id),
+      pairedTemplateId: pairedChildByParent.get(t.id) ?? null,
     }))
 
   return (

@@ -67,7 +67,7 @@ async function handleSign(
     fieldValues?: Record<string, string>  // fieldId → value
   }
 
-  const { signerName, fieldValues = {} } = body
+  const { signerName, fieldValues: customerFieldValues = {} } = body
 
   if (!signerName) {
     return Response.json({ error: "Missing signer name" }, { status: 400 })
@@ -80,7 +80,7 @@ async function handleSign(
     .from("sent_contracts")
     .select(`
       id, user_id, customer_id, job_id,
-      signing_token, signed_at, recipient_email,
+      signing_token, signed_at, recipient_email, staff_field_values,
       contract_template:contract_templates (
         id, name, storage_path, bucket, file_name
       )
@@ -127,6 +127,16 @@ async function handleSign(
   const font     = await pdfDoc.embedFont(StandardFonts.Helvetica)
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
   const italicFont = await pdfDoc.embedFont(StandardFonts.HelveticaOblique)
+
+  // Staff filled their own fields (Sales Person Signature, license number,
+  // etc.) at Prepare time, before the customer ever saw this document —
+  // merge those in alongside what the customer just submitted. Customer
+  // values win on any (unexpected) overlap since they're the one actually
+  // completing this request right now.
+  const fieldValues: Record<string, string> = {
+    ...((sent.staff_field_values as Record<string, string> | null) ?? {}),
+    ...customerFieldValues,
+  }
 
   // ── Flatten fields ──────────────────────────────────────────────────────────
 

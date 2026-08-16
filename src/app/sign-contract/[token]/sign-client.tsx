@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { SignatureModal } from "./signature-modal"
+import { SignatureModal } from "@/components/contracts/signature-modal"
 import { ConsentScreen } from "./consent-screen"
 import { FillForm, type SigningField } from "./fill-form"
 
