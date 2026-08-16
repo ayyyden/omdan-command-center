@@ -1,12 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { RecipientPicker, type RecipientSelection } from "./recipient-picker"
+import { StaffPrepareForm } from "./staff-prepare-form"
+import type { FormField } from "./field-row"
+import { createClient } from "@/lib/supabase/client"
 import { FileSignature, Send, Loader2, ChevronLeft } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -15,6 +18,7 @@ export interface DocumentSummary {
   name: string
   requiresSignature: boolean
   hasPairedDoc: boolean
+  pairedTemplateId: string | null
 }
 
 interface Props {
@@ -24,18 +28,47 @@ interface Props {
   onClose: () => void
 }
 
-type Mode = "choose" | "send" | "sign"
+type Mode = "loading" | "prepare" | "choose" | "send" | "sign"
 
 export function DocumentActionSheet({ document, userId, companyName, onClose }: Props) {
   const { toast } = useToast()
-  const [mode, setMode] = useState<Mode>("choose")
+  const supabase = createClient()
+
+  const [mode, setMode] = useState<Mode>("loading")
+  const [staffFields, setStaffFields] = useState<FormField[]>([])
+  const [staffFieldValues, setStaffFieldValues] = useState<Record<string, string>>({})
   const [selection, setSelection] = useState<RecipientSelection | null>(null)
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
+  // Fetch staff-owned fields (for this template and its paired child, if
+  // any) whenever a document is opened — decides whether a Prepare step is
+  // needed before Sign Now / Send are even offered.
+  useEffect(() => {
+    if (!document) return
+    let cancelled = false
+    setMode("loading")
+    const templateIds = [document.id, document.pairedTemplateId].filter(Boolean) as string[]
+    supabase
+      .from("contract_fields")
+      .select("id, page_number, field_type, label, required")
+      .in("contract_template_id", templateIds)
+      .eq("fill_role", "staff")
+      .order("page_number")
+      .then(({ data }) => {
+        if (cancelled) return
+        const fields = (data ?? []) as FormField[]
+        setStaffFields(fields)
+        setMode(fields.length > 0 ? "prepare" : "choose")
+      })
+    return () => { cancelled = true }
+  }, [document]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function reset() {
-    setMode("choose")
+    setMode("loading")
+    setStaffFields([])
+    setStaffFieldValues({})
     setSelection(null)
     setSubject("")
     setBody("")
@@ -62,6 +95,7 @@ export function DocumentActionSheet({ document, userId, companyName, onClose }: 
       body: JSON.stringify({
         contractId: document.id, customerId: selection.customerId, jobId: selection.jobId,
         recipientEmail: selection.recipientEmail, subject, body,
+        staffFieldValues: Object.keys(staffFieldValues).length ? staffFieldValues : undefined,
       }),
     })
     setSubmitting(false)
@@ -83,6 +117,7 @@ export function DocumentActionSheet({ document, userId, companyName, onClose }: 
       body: JSON.stringify({
         contractId: document.id, customerId: selection.customerId, jobId: selection.jobId,
         recipientEmail: selection.recipientEmail,
+        staffFieldValues: Object.keys(staffFieldValues).length ? staffFieldValues : undefined,
       }),
     })
     if (!res.ok) {
@@ -100,7 +135,7 @@ export function DocumentActionSheet({ document, userId, companyName, onClose }: 
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <div className="flex items-center gap-2">
-            {mode !== "choose" && (
+            {(mode === "send" || mode === "sign") && (
               <button
                 type="button"
                 onClick={() => setMode("choose")}
@@ -114,8 +149,33 @@ export function DocumentActionSheet({ document, userId, companyName, onClose }: 
           </div>
         </DialogHeader>
 
+        {mode === "loading" && (
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            <Loader2 className="w-5 h-5 animate-spin" />
+          </div>
+        )}
+
+        {mode === "prepare" && document && (
+          <StaffPrepareForm
+            documentName={document.name}
+            fields={staffFields}
+            onContinue={({ fieldValues }) => {
+              setStaffFieldValues(fieldValues)
+              setMode("choose")
+            }}
+          />
+        )}
+
         {mode === "choose" && (
           <div className="space-y-2 pt-1">
+            {staffFields.length > 0 && (
+              <p className="text-xs text-muted-foreground pb-1">
+                Your part is filled in.{" "}
+                <button type="button" className="underline hover:text-foreground" onClick={() => setMode("prepare")}>
+                  Edit
+                </button>
+              </p>
+            )}
             {document?.requiresSignature && (
               <button
                 type="button"

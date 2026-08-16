@@ -4,14 +4,15 @@ import { createTransporter, buildHtmlEmail, smtpConfigured } from "@/lib/email"
 import { prepareContractsForRecipient } from "@/lib/contracts/prepare-signing"
 
 export async function POST(req: NextRequest) {
-  const { contractId, customerId, jobId, recipientEmail, subject, body } =
+  const { contractId, customerId, jobId, recipientEmail, subject, body, staffFieldValues } =
     await req.json() as {
-      contractId:     string
-      customerId:     string
-      jobId:          string | null
-      recipientEmail: string
-      subject:        string
-      body:           string
+      contractId:       string
+      customerId:       string
+      jobId:            string | null
+      recipientEmail:   string
+      subject:          string
+      body:             string
+      staffFieldValues?: Record<string, string> | null
     }
 
   if (!contractId || !customerId || !recipientEmail || !subject || !body) {
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
     result = await prepareContractsForRecipient({
       supabase, userId, templateId: contractId, customerId, jobId: jobId ?? null,
       recipientEmail, subject, body,
+      staffFieldValues,
     })
   } catch (err: any) {
     return Response.json({ error: err?.message ?? "Could not prepare document" }, { status: 500 })

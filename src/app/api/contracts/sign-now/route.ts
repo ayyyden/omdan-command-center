@@ -8,11 +8,12 @@ import { prepareContractsForRecipient } from "@/lib/contracts/prepare-signing"
 // signing token so the caller can navigate into /sign-contract or
 // /sign-bundle immediately.
 export async function POST(req: NextRequest) {
-  const { contractId, customerId, jobId, recipientEmail } = await req.json() as {
-    contractId:     string
-    customerId:     string
-    jobId:          string | null
-    recipientEmail: string
+  const { contractId, customerId, jobId, recipientEmail, staffFieldValues } = await req.json() as {
+    contractId:       string
+    customerId:       string
+    jobId:            string | null
+    recipientEmail:   string
+    staffFieldValues?: Record<string, string> | null
   }
 
   if (!contractId || !customerId || !recipientEmail) {
@@ -36,6 +37,7 @@ export async function POST(req: NextRequest) {
       recipientEmail,
       subject: "Signed in person",
       body: "",
+      staffFieldValues,
     })
 
     return Response.json({

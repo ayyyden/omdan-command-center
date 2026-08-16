@@ -72,11 +72,15 @@ export default async function SignContractPage({
     file_name: string
   }
 
-  // Load fields for this template
+  // Load fields for this template — customer-facing only. Staff-owned
+  // fields (Sales Person Signature, license number, etc.) were already
+  // collected in the Prepare step before this link was ever sent, and are
+  // merged back in server-side at final stamping (see sign/[token]/route.ts).
   const { data: fields } = await supabase
     .from("contract_fields")
     .select("id, page_number, field_type, label, required")
     .eq("contract_template_id", template.id)
+    .eq("fill_role", "customer")
     .order("page_number")
 
   // Generate a 2-hour signed URL for PDF viewing

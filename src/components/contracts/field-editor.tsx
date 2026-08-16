@@ -30,6 +30,8 @@ export interface FieldOptions {
   padding?: number            // PDF points, default 4
 }
 
+export type FillRole = "customer" | "staff"
+
 export interface ContractField {
   id: string
   contract_template_id: string
@@ -42,6 +44,7 @@ export interface ContractField {
   height: number
   required: boolean
   options: FieldOptions | null
+  fill_role: FillRole
 }
 
 const FIELD_TYPE_LABELS: Record<FieldType, string> = {
@@ -280,6 +283,7 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
       height:               defaults.height,
       required:             false,
       options:              defaultOptions(addingType),
+      fill_role:            "customer",
     }
     setFields((prev) => [...prev, newField])
     setAddingType(null)
@@ -388,6 +392,7 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
           height:               f.height,
           required:             f.required,
           options:              f.options,
+          fill_role:            f.fill_role,
         }))
       )
       if (error) {
@@ -462,6 +467,35 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                   onChange={(e) => updateField(selectedField.id, { required: e.target.checked })}
                 />
                 <Label htmlFor="req-check" className="text-xs cursor-pointer">Required</Label>
+              </div>
+
+              {/* Filled by */}
+              <div className="space-y-1">
+                <Label className="text-xs">Filled by</Label>
+                <div className="flex gap-1">
+                  {([
+                    { value: "customer", label: "Customer" },
+                    { value: "staff",    label: "Staff" },
+                  ] as const).map(({ value, label: l }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => updateField(selectedField.id, { fill_role: value })}
+                      className={`flex-1 h-7 text-xs rounded border transition-colors ${
+                        selectedField.fill_role === value
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background border-border hover:bg-muted"
+                      }`}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                {selectedField.fill_role === "staff" && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Filled by staff before sending/signing — the customer never sees this field.
+                  </p>
+                )}
               </div>
 
               {/* Position */}

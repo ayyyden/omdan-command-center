@@ -32,16 +32,20 @@ export interface PrepareSigningResult {
  * callers decide whether/how to notify the recipient.
  */
 export async function prepareContractsForRecipient(opts: {
-  supabase:       SupabaseClient
-  userId:         string
-  templateId:     string
-  customerId:     string
-  jobId:          string | null
-  recipientEmail: string
-  subject:        string
-  body:           string
+  supabase:          SupabaseClient
+  userId:            string
+  templateId:        string
+  customerId:        string
+  jobId:             string | null
+  recipientEmail:    string
+  subject:           string
+  body:               string
+  /** Values staff filled in for their own fields (Sales Person Signature,
+   *  license number, etc.) at Prepare time — merged with the customer's
+   *  own fieldValues at final stamping in /api/contracts/sign/[token]. */
+  staffFieldValues?: Record<string, string> | null
 }): Promise<PrepareSigningResult> {
-  const { supabase, userId, templateId, customerId, jobId, recipientEmail, subject, body } = opts
+  const { supabase, userId, templateId, customerId, jobId, recipientEmail, subject, body, staffFieldValues } = opts
 
   const { data: template, error: templateErr } = await supabase
     .from("contract_templates")
@@ -86,6 +90,7 @@ export async function prepareContractsForRecipient(opts: {
           user_id: userId, contract_template_id: templates[i].templateId, customer_id: customerId,
           job_id: jobId ?? null, recipient_email: recipientEmail, subject, body,
           status: "sent", bundle_id: bundle.id, bundle_sort_order: i,
+          staff_field_values: staffFieldValues ?? null,
         })
         .select("id")
         .single()
@@ -99,6 +104,7 @@ export async function prepareContractsForRecipient(opts: {
       .insert({
         user_id: userId, contract_template_id: templateId, customer_id: customerId,
         job_id: jobId ?? null, recipient_email: recipientEmail, subject, body, status: "sent",
+        staff_field_values: staffFieldValues ?? null,
       })
       .select("id, signing_token")
       .single()
