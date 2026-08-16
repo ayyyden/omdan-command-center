@@ -1,7 +1,7 @@
 import { createHash } from "crypto"
 import { createServiceClient } from "@/lib/supabase/service"
 
-export type AuditAction  = "viewed" | "signed" | "approved" | "declined"
+export type AuditAction  = "viewed" | "consented" | "signed" | "approved" | "declined"
 export type AuditDocType = "contract" | "estimate" | "change_order"
 
 export interface AuditEntry {

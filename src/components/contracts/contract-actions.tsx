@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Eye, ToggleLeft, ToggleRight, Trash2, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { FieldEditorDialog } from "./field-editor-dialog"
+import { TemplateSettingsDialog } from "./template-settings-dialog"
 
 interface ContractTemplate {
   id: string
@@ -15,13 +16,16 @@ interface ContractTemplate {
   storage_path: string
   bucket: string
   is_active: boolean
+  requires_signature: boolean
+  attached_to_template_id: string | null
 }
 
 interface Props {
   contract: ContractTemplate
+  otherTemplates: { id: string; name: string }[]
 }
 
-export function ContractActions({ contract }: Props) {
+export function ContractActions({ contract, otherTemplates }: Props) {
   const { toast } = useToast()
   const router = useRouter()
   const supabase = createClient()
@@ -101,6 +105,13 @@ export function ContractActions({ contract }: Props) {
           }
           Preview
         </Button>
+
+        <TemplateSettingsDialog
+          templateId={contract.id}
+          requiresSignature={contract.requires_signature}
+          attachedToTemplateId={contract.attached_to_template_id}
+          otherTemplates={otherTemplates}
+        />
 
         <Button
           size="sm"

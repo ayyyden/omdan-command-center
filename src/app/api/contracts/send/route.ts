@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
-import nodemailer from "nodemailer"
 import { requirePermission } from "@/lib/auth-helpers"
+import { createTransporter, buildHtmlEmail, smtpConfigured } from "@/lib/email"
+import { prepareContractsForRecipient } from "@/lib/contracts/prepare-signing"
 
 export async function POST(req: NextRequest) {
   const { contractId, customerId, jobId, recipientEmail, subject, body } =
@@ -21,158 +22,83 @@ export async function POST(req: NextRequest) {
   if (session instanceof Response) return session
   const { userId, supabase } = session
 
-  // Fetch contract template
-  const { data: contract, error: ctErr } = await supabase
-    .from("contract_templates")
-    .select("*")
-    .eq("id", contractId)
-    .single()
-
-  if (ctErr || !contract) return Response.json({ error: "Contract not found" }, { status: 404 })
-
-  // Fetch customer
   const { data: customer, error: custErr } = await supabase
     .from("customers")
     .select("id, name")
     .eq("id", customerId)
     .single()
-
   if (custErr || !customer) return Response.json({ error: "Customer not found" }, { status: 404 })
 
-  // Fetch job + PM if provided
-  let pmName: string | null = null
-  if (jobId) {
-    const { data: job } = await supabase
-      .from("jobs")
-      .select("id, title, project_manager:project_managers(name, email)")
-      .eq("id", jobId)
-      .single()
-    pmName = (job?.project_manager as any)?.name ?? null
+  if (!smtpConfigured()) {
+    return Response.json({ error: "SMTP credentials not configured" }, { status: 500 })
   }
 
-  // Fetch company settings for sender
   const { data: company } = await supabase
     .from("company_settings")
-    .select("company_name, email")
+    .select("company_name")
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle()
 
-  // Download contract PDF from storage
-  const { data: blob, error: dlErr } = await supabase.storage
-    .from(contract.bucket)
-    .download(contract.storage_path)
-
-  if (dlErr || !blob) {
-    return Response.json({ error: "Could not retrieve contract file" }, { status: 500 })
-  }
-
-  const pdfBuffer = Buffer.from(await blob.arrayBuffer())
-
-  // Insert sent_contracts record first so we get the signing_token
-  const { data: sentRecord, error: insertErr } = await supabase
-    .from("sent_contracts")
-    .insert({
-      user_id:              userId,
-      contract_template_id: contractId,
-      customer_id:          customerId,
-      job_id:               jobId ?? null,
-      recipient_email:      recipientEmail,
-      subject,
-      body,
-      status:               "sent",
+  let result
+  try {
+    result = await prepareContractsForRecipient({
+      supabase, userId, templateId: contractId, customerId, jobId: jobId ?? null,
+      recipientEmail, subject, body,
     })
-    .select("id, signing_token")
-    .single()
-
-  if (insertErr || !sentRecord) {
-    return Response.json({ error: "Could not save contract record" }, { status: 500 })
+  } catch (err: any) {
+    return Response.json({ error: err?.message ?? "Could not prepare document" }, { status: 500 })
   }
 
-  // Build signing link
+  const companyName = company?.company_name ?? "Omdan"
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
-  const signingLink = `${appUrl}/sign-contract/${sentRecord.signing_token}`
 
-  // Send email
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    return Response.json({ error: "SMTP credentials not configured" }, { status: 500 })
+  // Attach every PDF in the set (front + auto-paired back, if any) so the
+  // recipient has the documents even before/instead of clicking through.
+  const attachments = []
+  for (const c of result.contracts) {
+    const { data: blob } = await supabase.storage.from(c.bucket).download(c.storagePath)
+    if (blob) attachments.push({ filename: c.fileName, content: Buffer.from(await blob.arrayBuffer()), contentType: "application/pdf" })
   }
 
-  const transporter = nodemailer.createTransport({
-    host:   process.env.SMTP_HOST   ?? "smtp.gmail.com",
-    port:   Number(process.env.SMTP_PORT ?? 587),
-    secure: false,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  })
+  const signingLink = result.isBundle
+    ? `${appUrl}/sign-bundle/${result.token}`
+    : `${appUrl}/sign-contract/${result.token}`
 
-  const senderName = pmName ?? company?.company_name ?? ""
-  const fromAddress = process.env.SMTP_FROM ?? process.env.SMTP_USER
+  const transporter = createTransporter()
 
-  const emailBody = `${body}
+  if (result.requiresSignature) {
+    const htmlBody = buildHtmlEmail({
+      title: `Contract: ${result.contractName}`,
+      preheader: "Please review and sign your contract.",
+      companyName,
+      bodyLines: [body, "", "Click the button below to review and sign electronically. The document is also attached for your reference."],
+      ctaLabel: "Review & Sign",
+      ctaUrl: signingLink,
+    })
+    const plainText = `${body}\n\n---\nTo review and sign this document digitally, please visit:\n${signingLink}\n\nThe document is also attached to this email for your reference.`
 
----
-To review and sign this contract digitally, please visit:
-${signingLink}
-
-The contract PDF is also attached to this email for your reference.`
-
-  await transporter.sendMail({
-    from:    senderName ? `"${senderName}" <${fromAddress}>` : fromAddress,
-    to:      recipientEmail,
-    subject,
-    text:    emailBody,
-    attachments: [
-      {
-        filename:    contract.file_name,
-        content:     pdfBuffer,
-        contentType: "application/pdf",
-      },
-    ],
-  })
-
-  // Attach to customer's Files section (category = contracts)
-  await supabase.from("file_attachments").upsert(
-    {
-      user_id:      userId,
-      bucket:       contract.bucket,
-      storage_path: contract.storage_path,
-      file_name:    contract.file_name,
-      category:     "contracts",
-      entity_type:  "customers",
-      entity_id:    customerId,
-      size_bytes:   pdfBuffer.byteLength,
-      mime_type:    "application/pdf",
-    },
-    { onConflict: "bucket,storage_path,entity_type,entity_id" }
-  )
-
-  // Attach to job's Files section if a job was selected
-  if (jobId) {
-    await supabase.from("file_attachments").upsert(
-      {
-        user_id:      userId,
-        bucket:       contract.bucket,
-        storage_path: contract.storage_path,
-        file_name:    contract.file_name,
-        category:     "contracts",
-        entity_type:  "jobs",
-        entity_id:    jobId,
-        size_bytes:   pdfBuffer.byteLength,
-        mime_type:    "application/pdf",
-      },
-      { onConflict: "bucket,storage_path,entity_type,entity_id" }
-    )
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+      to: recipientEmail, subject, text: plainText, html: htmlBody, attachments,
+    })
+  } else {
+    // Send-only document — no signing step, just deliver the file(s).
+    const htmlBody = buildHtmlEmail({
+      title: result.contractName,
+      preheader: body.slice(0, 120),
+      companyName,
+      bodyLines: [body],
+    })
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+      to: recipientEmail, subject, text: body, html: htmlBody, attachments,
+    })
   }
 
-  // Log communication
   await supabase.from("communication_logs").insert({
-    user_id:     userId,
-    customer_id: customerId,
-    job_id:      jobId ?? null,
-    type:        "custom",
-    subject,
-    body:        emailBody,
-    channel:     "email",
+    user_id: userId, customer_id: customerId, job_id: jobId ?? null,
+    type: "custom", subject, body, channel: "email",
   })
 
   return Response.json({ success: true })
