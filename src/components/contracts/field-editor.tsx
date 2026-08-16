@@ -110,6 +110,84 @@ function getOpts(f: ContractField): FieldOptions {
   return (f.options ?? {}) as FieldOptions
 }
 
+// ── Live field preview ───────────────────────────────────────────────────────
+// Renders real sample text at the real font size/alignment/padding a value
+// would get when stamped by /api/contracts/sign/[token] — so placing a field
+// means seeing exactly what will print there, not eyeballing an empty box
+// against the line underneath it.
+
+const ALIGN_ITEMS: Record<VAlign, React.CSSProperties["alignItems"]> = {
+  top: "flex-start", center: "center", bottom: "flex-end",
+}
+const JUSTIFY: Record<"left" | "center" | "right", React.CSSProperties["justifyContent"]> = {
+  left: "flex-start", center: "center", right: "flex-end",
+}
+
+function sampleTextFor(ft: FieldType): string {
+  switch (ft) {
+    case "date":      return new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+    case "yes_no":     return "Yes"
+    case "multiline":
+    case "rich_text":  return "Sample text will wrap like this across multiple lines inside the box."
+    default:           return "Sample Text"
+  }
+}
+
+function FieldPreviewContent({ field, pdfScale }: { field: ContractField; pdfScale: number }) {
+  const ft = field.field_type
+
+  if (ft === "signature" || ft === "initials") {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-slate-400 text-[11px] italic select-none pointer-events-none">
+        {ft === "initials" ? "Initials" : "Signature"}
+      </div>
+    )
+  }
+
+  if (ft === "checkbox") {
+    return (
+      <div className="w-full h-full flex items-center justify-center select-none pointer-events-none">
+        <div className="w-1/2 h-1/2 min-w-3 min-h-3 border-2 border-green-700/70 rounded-sm flex items-center justify-center text-green-700/80 text-[10px] font-bold leading-none">
+          ✓
+        </div>
+      </div>
+    )
+  }
+
+  const opts = getOpts(field)
+  const d = TEXT_FORMAT_DEFAULTS[ft] ?? TEXT_FORMAT_DEFAULTS.text
+  const fontSize   = (opts.fontSize ?? d.fontSize) * pdfScale
+  const padding    = (opts.padding  ?? d.padding)  * pdfScale
+  const lineHeight = opts.lineHeight ?? d.lineHeight
+  const fontWeight = opts.fontWeight ?? d.fontWeight
+  const textAlign  = (opts.textAlign ?? d.textAlign) as "left" | "center" | "right"
+  const vAlign     = opts.vAlign ?? defaultVAlign(ft)
+  const multiline  = ft === "multiline" || ft === "rich_text"
+
+  return (
+    <div
+      className="w-full h-full flex select-none pointer-events-none"
+      style={{ alignItems: ALIGN_ITEMS[vAlign], justifyContent: JUSTIFY[textAlign], padding: `${padding}px`, boxSizing: "border-box" }}
+    >
+      <span
+        style={{
+          fontSize:   `${fontSize}px`,
+          lineHeight,
+          fontWeight,
+          textAlign,
+          fontFamily: "Helvetica, Arial, sans-serif",
+          color:      "rgba(15,23,42,0.6)",
+          whiteSpace: multiline ? "normal" : "nowrap",
+          overflow:   "hidden",
+          width:      "100%",
+        }}
+      >
+        {sampleTextFor(ft)}
+      </span>
+    </div>
+  )
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -586,6 +664,7 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
           <div className="space-y-4 p-4">
             {pages.map((pg) => {
               const pageFields = fields.filter((f) => f.page_number === pg.pageNumber)
+              const pdfScale = pg.width / pg.pdfWidth
               return (
                 <div key={pg.pageNumber}>
                   <p className="text-xs text-muted-foreground mb-1">Page {pg.pageNumber}</p>
@@ -608,20 +687,24 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                       const isSelected = f.id === selectedId
 
                       return (
-                        <div
-                          key={f.id}
-                          className={`absolute border-2 rounded-sm cursor-move flex items-start overflow-hidden ${FIELD_COLORS[f.field_type]} ${isSelected ? "ring-2 ring-primary ring-offset-0" : ""}`}
-                          style={{ left: fx, top: fy, width: fw, height: fh }}
-                          onMouseDown={(e) => startDrag(e, f.id, "move", pg.width, pg.height)}
-                          onClick={(e) => { e.stopPropagation(); setSelectedId(f.id); setAddingType(null) }}
-                        >
-                          <span className="text-[10px] font-medium px-1 pt-0.5 truncate select-none leading-none">
+                        <div key={f.id} className="absolute" style={{ left: fx, top: fy, width: fw, height: fh }}>
+                          {/* Label floats above the box so it never competes with the
+                              live text preview inside it — the box itself now shows
+                              exactly what will be stamped, not just an empty rectangle. */}
+                          <div className="absolute -top-4 left-0 text-[9px] font-medium px-1 rounded-sm bg-background/95 border border-border/60 text-foreground/70 whitespace-nowrap pointer-events-none select-none">
                             {f.required ? "* " : ""}{f.label}
-                          </span>
+                          </div>
                           <div
-                            className="absolute bottom-0 right-0 w-3 h-3 bg-primary/80 cursor-se-resize"
-                            onMouseDown={(e) => startDrag(e, f.id, "resize", pg.width, pg.height)}
-                          />
+                            className={`w-full h-full border-2 rounded-sm cursor-move overflow-hidden ${FIELD_COLORS[f.field_type]} ${isSelected ? "ring-2 ring-primary ring-offset-0" : ""}`}
+                            onMouseDown={(e) => startDrag(e, f.id, "move", pg.width, pg.height)}
+                            onClick={(e) => { e.stopPropagation(); setSelectedId(f.id); setAddingType(null) }}
+                          >
+                            <FieldPreviewContent field={f} pdfScale={pdfScale} />
+                            <div
+                              className="absolute bottom-0 right-0 w-3 h-3 bg-primary/80 cursor-se-resize"
+                              onMouseDown={(e) => { e.stopPropagation(); startDrag(e, f.id, "resize", pg.width, pg.height) }}
+                            />
+                          </div>
                         </div>
                       )
                     })}
