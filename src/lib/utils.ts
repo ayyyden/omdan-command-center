@@ -43,3 +43,14 @@ export function calcProfitMargin(revenue: number, expenses: number): number {
 export function getTodayLA(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date())
 }
+
+// Adds n calendar days to a YYYY-MM-DD date (LA or otherwise) and returns
+// YYYY-MM-DD — noon-anchored parse avoids the UTC-midnight day-shift bug
+// (see formatDate above). Use this instead of raw epoch-ms arithmetic
+// (Date.now() + n*86400000) when the input is already a calendar day, since
+// converting the result back via toISOString() reintroduces UTC skew.
+export function addDaysLA(dateStr: string, n: number): string {
+  const d = new Date(dateStr + "T12:00:00")
+  d.setDate(d.getDate() + n)
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(d)
+}

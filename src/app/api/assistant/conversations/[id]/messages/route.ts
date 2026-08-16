@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/auth-helpers"
 import { createServiceClient } from "@/lib/supabase/service"
 import { buildCrmContext, callLiaBrain } from "@/lib/lia-brain"
 import { isRawPartnerLead, parsePartnerLead } from "@/lib/partner-lead-parser"
+import { getTodayLA } from "@/lib/utils"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest, { params }: RouteCtx) {
       .limit(15),
   ])
 
-  const today      = new Date().toISOString().split("T")[0]
+  const today      = getTodayLA()  // LA-local, not server UTC
   const crmContext = buildCrmContext(customers, jobs, appointments)
 
   // ── Raw partner lead detection (bypasses Claude entirely) ─────────────────

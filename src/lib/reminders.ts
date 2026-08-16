@@ -1,3 +1,5 @@
+import { getTodayLA } from "@/lib/utils"
+
 function addDays(date: string, days: number): string {
   const d = new Date(date + "T12:00:00")
   d.setDate(d.getDate() + days)
@@ -5,7 +7,7 @@ function addDays(date: string, days: number): string {
 }
 
 function todayStr(): string {
-  return new Date().toISOString().split("T")[0]
+  return getTodayLA()  // LA-local, not server UTC — otherwise auto-created follow-up/job reminders land a day off
 }
 
 // Create an estimate follow-up reminder 2 days from now.

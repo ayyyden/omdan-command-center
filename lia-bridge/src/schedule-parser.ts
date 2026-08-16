@@ -1,6 +1,8 @@
 // Parses natural language scheduling requests into structured data.
 // All dates are resolved in America/Los_Angeles timezone.
 
+import { getLADate, toYMD } from "./date-utils"
+
 export interface ParsedScheduleMessage {
   customer_name: string | null
   job_title_hint: string | null
@@ -34,16 +36,6 @@ const MONTH_NAMES: Record<string, number> = {
 }
 
 // ── Date/time helpers ────────────────────────────────────────────────────────
-
-function getLADate(): Date {
-  const laStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date())
-  const [y, m, d] = laStr.split("-").map(Number)
-  return new Date(y, m - 1, d)
-}
-
-function toYMD(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-}
 
 function parseTime(text: string): string | null {
   const lower = text.toLowerCase()

@@ -12,6 +12,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import { createServiceClient } from "@/lib/supabase/service"
 import { EXPENSE_CATEGORIES } from "@/lib/expense-categories"
 import { listUpcomingEvents } from "@/lib/google-calendar"
+import { getTodayLA, addDaysLA } from "@/lib/utils"
 
 export interface ActionDraft {
   type:       string
@@ -567,8 +568,11 @@ const ACTION_RISK: Record<string, "low" | "medium" | "high"> = {
 
 async function runListReminders(input: { scope?: string }): Promise<string> {
   const supabase = createServiceClient()
-  const today = new Date().toISOString().split("T")[0]
-  const in7Days = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+  // LA-local "today," not server UTC — otherwise "today"/"overdue" flip a
+  // reminder's bucket for hours every evening whenever it's still today in
+  // LA but already tomorrow in UTC.
+  const today = getTodayLA()
+  const in7Days = addDaysLA(today, 7)
 
   let query = supabase
     .from("reminders")

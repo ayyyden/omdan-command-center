@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { verifyAssistantSecret } from "@/lib/assistant-auth"
 import { createServiceClient } from "@/lib/supabase/service"
 import { generateEstimateScope } from "@/lib/scope-generator"
+import { getTodayLA } from "@/lib/utils"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -95,10 +96,6 @@ interface MessageBody {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getTodayLA(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date())
-}
 
 type ParsedIntent = "health_check" | "daily_attention" | "unknown"
 

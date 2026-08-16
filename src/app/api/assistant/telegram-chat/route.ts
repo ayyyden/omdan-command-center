@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { verifyAssistantSecret } from "@/lib/assistant-auth"
 import { createServiceClient } from "@/lib/supabase/service"
 import { buildCrmContext, callLiaBrain } from "@/lib/lia-brain"
+import { getTodayLA } from "@/lib/utils"
 
 // POST /api/assistant/telegram-chat
 // Called by the lia-bridge for conversational AI fallback in Telegram.
@@ -145,7 +146,7 @@ export async function POST(req: Request) {
       .limit(15),
   ])
 
-  const today      = new Date().toISOString().split("T")[0]
+  const today      = getTodayLA()  // LA-local, not server UTC
   const crmContext = buildCrmContext(customers, jobs, appointments)
   const parsed     = await callLiaBrain(history ?? [], crmContext, today)
 
