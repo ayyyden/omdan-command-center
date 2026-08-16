@@ -41,7 +41,13 @@ export default async function SignBundlePage({
           <p className="text-gray-500">
             All {total} contract{total !== 1 ? "s" : ""} have been signed successfully.
           </p>
-          <p className="text-sm text-gray-400 mt-2">You may close this window.</p>
+          <p className="text-sm text-gray-400 mt-2 mb-6">You may close this window.</p>
+          <a
+            href="/contracts"
+            className="inline-flex items-center justify-center w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-4 py-3 transition-colors text-sm"
+          >
+            Back to Documents
+          </a>
         </div>
       </div>
     )

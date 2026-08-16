@@ -3,6 +3,7 @@
 import { useState } from "react"
 
 interface Props {
+  token: string
   contractName: string
   pdfUrl: string | null
   companyName: string
@@ -20,12 +21,17 @@ interface Props {
 // withdraw consent, what's needed to view/keep the record, and requires the
 // signer to actually look at the document before consenting.
 export function ConsentScreen({
-  contractName, pdfUrl, companyName, companyPhone, companyEmail, submitting, error, onContinue,
+  token, contractName, pdfUrl, companyName, companyPhone, companyEmail, submitting, error, onContinue,
 }: Props) {
   const [viewedChecked, setViewedChecked] = useState(false)
   const [consentChecked, setConsentChecked] = useState(false)
 
   const contactLine = [companyPhone, companyEmail].filter(Boolean).join(" or ")
+  // Shows whatever staff already filled in (Sales Person Signature, price,
+  // license number, etc.) stamped onto the document, not the raw blank
+  // original — the customer should see exactly what they're being asked
+  // to sign, not a template with someone else's part missing.
+  const previewUrl = `/api/contracts/preview-pdf/${token}`
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -92,7 +98,7 @@ export function ConsentScreen({
             </p>
             {pdfUrl ? (
               <a
-                href={pdfUrl}
+                href={previewUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2"

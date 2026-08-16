@@ -96,7 +96,13 @@ export function SignClient({
           <p className="text-gray-500 mb-1">
             Thank you, <span className="font-medium text-gray-700">{signerName}</span>.
           </p>
-          <p className="text-sm text-gray-400">A signed copy is on its way to your email. You may close this window.</p>
+          <p className="text-sm text-gray-400 mb-6">A signed copy is on its way to your email. You may close this window.</p>
+          <a
+            href="/contracts"
+            className="inline-flex items-center justify-center w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-4 py-3 transition-colors text-sm"
+          >
+            Back to Documents
+          </a>
         </div>
       </div>
     )
@@ -118,6 +124,7 @@ export function SignClient({
 
       {step === "consent" ? (
         <ConsentScreen
+          token={token}
           contractName={contractName}
           pdfUrl={pdfUrl}
           companyName={companyName}
@@ -129,6 +136,7 @@ export function SignClient({
         />
       ) : (
         <FillForm
+          token={token}
           contractName={contractName}
           pdfUrl={pdfUrl}
           fields={fields}
