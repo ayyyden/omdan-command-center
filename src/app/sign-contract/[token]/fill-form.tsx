@@ -5,6 +5,7 @@ import { FieldRow, type FormField } from "@/components/contracts/field-row"
 export type SigningField = FormField
 
 interface Props {
+  token: string
   contractName: string
   pdfUrl: string | null
   fields: SigningField[]
@@ -25,12 +26,13 @@ interface Props {
 // number, etc.) are collected separately in a Prepare step before this
 // screen ever loads, see staff-prepare-form.tsx.
 export function FillForm({
-  contractName, pdfUrl, fields, values, setValue, signerName, setSignerName,
+  token, contractName, pdfUrl, fields, values, setValue, signerName, setSignerName,
   onOpenSignature, submitting, error, onSubmit,
 }: Props) {
   const hasName = signerName.trim().length > 0
   const pages = Array.from(new Set(fields.map((f) => f.page_number))).sort((a, b) => a - b)
   const multiPage = pages.length > 1
+  const previewUrl = `/api/contracts/preview-pdf/${token}`
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -42,12 +44,12 @@ export function FillForm({
           </div>
           {pdfUrl && (
             <a
-              href={pdfUrl}
+              href={previewUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-700 underline underline-offset-2 whitespace-nowrap mt-1"
             >
-              View original document
+              View document
             </a>
           )}
         </div>
