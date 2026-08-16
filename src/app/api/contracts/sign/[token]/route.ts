@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service"
 import { createTransporter, buildHtmlEmail } from "@/lib/email"
 import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
 import { notifyLia } from "@/lib/lia-notifications"
+import { ensureJobForSigning } from "@/lib/contracts/auto-job"
 
 type FieldType = "text" | "multiline" | "date" | "signature" | "initials" | "checkbox" | "yes_no" | "rich_text"
 type VAlign = "top" | "center" | "bottom"
@@ -313,6 +314,30 @@ async function handleSign(
     .update({ status: "signed", signed_at: signedAt, signer_name: signerName, signed_pdf_path: signedPath })
     .eq("id", sent.id)
 
+  // A contract signed while only linked to a customer/lead (no job yet —
+  // the common case, since jobs are usually created only after a lead is
+  // sold) becomes the moment that customer becomes a real job. Reuses their
+  // most recent job if one already exists instead of creating a duplicate.
+  let jobId = sent.job_id as string | null
+  try {
+    jobId = await ensureJobForSigning(supabase, sent.user_id, sent.customer_id, sent.job_id)
+    if (jobId !== sent.job_id) {
+      await supabase.from("sent_contracts").update({ job_id: jobId }).eq("id", sent.id)
+      // Backfill bundle siblings too (e.g. the auto-attached "back" page)
+      // so they land in the same job's Files instead of being orphaned.
+      const { data: bundleRow } = await supabase
+        .from("sent_contracts")
+        .select("bundle_id")
+        .eq("id", sent.id)
+        .single()
+      if (bundleRow?.bundle_id) {
+        await supabase.from("sent_contracts").update({ job_id: jobId }).eq("bundle_id", bundleRow.bundle_id)
+      }
+    }
+  } catch (err) {
+    console.error("[sign] auto-job-creation failed (non-fatal):", err)
+  }
+
   void logAudit({
     documentType:  "contract",
     documentId:    sent.id,
@@ -338,10 +363,10 @@ async function handleSign(
     { onConflict: "bucket,storage_path,entity_type,entity_id" }
   )
 
-  if (sent.job_id) {
+  if (jobId) {
     await supabase.from("file_attachments").upsert(
       { user_id: sent.user_id, bucket: "files", storage_path: signedPath, file_name: signedFileName,
-        category: "signed_contracts", entity_type: "jobs", entity_id: sent.job_id,
+        category: "signed_contracts", entity_type: "jobs", entity_id: jobId,
         size_bytes: signedBuffer.byteLength, mime_type: "application/pdf" },
       { onConflict: "bucket,storage_path,entity_type,entity_id" }
     )
@@ -363,7 +388,7 @@ async function handleSign(
     .single()
 
   await supabase.from("communication_logs").insert({
-    user_id: sent.user_id, customer_id: sent.customer_id, job_id: sent.job_id ?? null,
+    user_id: sent.user_id, customer_id: sent.customer_id, job_id: jobId ?? null,
     type: "custom", subject: `Contract signed: ${template.name}`,
     body: `${signerName} signed "${template.name}" on ${dateStr}.`, channel: "email",
   })
@@ -432,8 +457,8 @@ async function handleSign(
         customer_name:  customer?.name ?? signerName,
         customer_email: customer?.email ?? sent.recipient_email ?? undefined,
         document_name:  template.name,
-        crm_url:        sent.job_id
-          ? `${appUrl}/jobs/${sent.job_id}`
+        crm_url:        jobId
+          ? `${appUrl}/jobs/${jobId}`
           : `${appUrl}/customers/${sent.customer_id}`,
       })
     } catch { /* non-fatal */ }

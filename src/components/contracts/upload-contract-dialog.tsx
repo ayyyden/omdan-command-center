@@ -8,14 +8,16 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Upload } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface Props {
   userId: string
+  existingTemplates?: { id: string; name: string }[]
 }
 
-export function UploadContractDialog({ userId }: Props) {
+export function UploadContractDialog({ userId, existingTemplates = [] }: Props) {
   const { toast } = useToast()
   const router = useRouter()
   const supabase = createClient()
@@ -24,6 +26,8 @@ export function UploadContractDialog({ userId }: Props) {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [file, setFile] = useState<File | null>(null)
+  const [requiresSignature, setRequiresSignature] = useState(true)
+  const [pairWith, setPairWith] = useState("none")
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -31,6 +35,8 @@ export function UploadContractDialog({ userId }: Props) {
     setName("")
     setDescription("")
     setFile(null)
+    setRequiresSignature(true)
+    setPairWith("none")
     if (fileRef.current) fileRef.current.value = ""
   }
 
@@ -58,6 +64,8 @@ export function UploadContractDialog({ userId }: Props) {
       storage_path: storagePath,
       bucket:       "files",
       file_name:    file.name,
+      requires_signature: requiresSignature,
+      attached_to_template_id: pairWith === "none" ? null : pairWith,
     })
 
     if (dbErr) {
@@ -136,6 +144,38 @@ export function UploadContractDialog({ userId }: Props) {
                 </div>
               </div>
             </div>
+
+            <label className="flex items-start gap-3 cursor-pointer rounded-lg border p-3">
+              <input
+                type="checkbox"
+                checked={requiresSignature}
+                onChange={(e) => setRequiresSignature(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+              />
+              <span>
+                <span className="block text-sm font-medium">Requires signature</span>
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  Off = send-only, no fill form (e.g. a license or warranty card).
+                </span>
+              </span>
+            </label>
+
+            {existingTemplates.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Pair as back page of… (optional)</Label>
+                <Select value={pairWith} onValueChange={setPairWith}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Not paired" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not paired — show on its own</SelectItem>
+                    {existingTemplates.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

@@ -75,9 +75,9 @@ export default async function SignContractPage({
   // Load fields for this template
   const { data: fields } = await supabase
     .from("contract_fields")
-    .select("id, page_number, field_type, label, x, y, width, height, required, options")
+    .select("id, page_number, field_type, label, required")
     .eq("contract_template_id", template.id)
-    .order("created_at")
+    .order("page_number")
 
   // Generate a 2-hour signed URL for PDF viewing
   const { data: urlData } = await supabase.storage
@@ -86,6 +86,13 @@ export default async function SignContractPage({
 
   const pdfUrl = urlData?.signedUrl ?? null
 
+  const { data: company } = await supabase
+    .from("company_settings")
+    .select("company_name, phone, email")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
   return (
     <SignClient
       token={token}
@@ -93,6 +100,9 @@ export default async function SignContractPage({
       pdfUrl={pdfUrl}
       fields={(fields ?? []) as any}
       bundleToken={bundleToken}
+      companyName={company?.company_name ?? "Omdan Development"}
+      companyPhone={company?.phone ?? null}
+      companyEmail={company?.email ?? null}
     />
   )
 }
