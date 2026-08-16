@@ -420,13 +420,18 @@ async function handleSign(
         })
       }
 
-      if (customer?.email) {
+      // Use the email this document was actually sent/signed to, not the
+      // customer's stored profile email — staff may have typed a different
+      // one in the recipient picker (or the customer record may have none
+      // on file at all), and that's the one the signer actually gave us.
+      const customerCopyEmail = sent.recipient_email ?? customer?.email ?? null
+      if (customerCopyEmail) {
         const custHtml = buildHtmlEmail({
           title: "Your Contract Has Been Signed",
           preheader: `Thank you for signing "${template.name}".`,
           companyName,
           bodyLines: [
-            `Hi ${customer.name ?? signerName},`,
+            `Hi ${customer?.name ?? signerName},`,
             "",
             `Thank you for signing the contract. We're all set to move forward.`,
             "",
@@ -438,14 +443,18 @@ async function handleSign(
         })
         await transporter.sendMail({
           from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
-          to:      customer.email,
+          to:      customerCopyEmail,
           subject: `Contract signed — ${template.name}`,
-          text:    `Hi ${customer.name ?? signerName}, thank you for signing the contract "${template.name}". The signed copy is attached.`,
+          text:    `Hi ${customer?.name ?? signerName}, thank you for signing the contract "${template.name}". The signed copy is attached.`,
           html:    custHtml,
           attachments: [{ filename: signedFileName, content: signedBuffer, contentType: "application/pdf" }],
         })
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      // Non-fatal — the signature itself is already saved — but log it so a
+      // real SMTP failure is diagnosable instead of silently vanishing.
+      console.error("[sign] confirmation email failed:", err)
+    }
   }
 
   // Lia notification (fire-and-forget)
