@@ -4,6 +4,8 @@
 //   "Lia, create invoice for Lisa Newell for $5000 final payment"
 //   "Lia, invoice Test Customer $1500 for materials deposit due Friday"
 
+import { getLADate, toYMD } from "./date-utils"
+
 export interface ParsedInvoice {
   customer_name?: string
   amount?: number
@@ -30,10 +32,6 @@ const WEEKDAYS = ["sunday","monday","tuesday","wednesday","thursday","friday","s
 const MONTHS_LONG  = ["january","february","march","april","may","june","july","august","september","october","november","december"]
 const MONTHS_SHORT = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
 
-function toLocalDate(d: Date): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(d)
-}
-
 function parseDueDate(text: string): string | undefined {
   const lower = text.toLowerCase()
 
@@ -44,7 +42,7 @@ function parseDueDate(text: string): string | undefined {
   // MM/DD or MM/DD/YYYY
   const mdM = lower.match(/due\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/)
   if (mdM) {
-    const year = mdM[3] ? parseInt(mdM[3], 10) : new Date().getFullYear()
+    const year = mdM[3] ? parseInt(mdM[3], 10) : getLADate().getFullYear()
     return `${year}-${mdM[1].padStart(2, "0")}-${mdM[2].padStart(2, "0")}`
   }
 
@@ -59,28 +57,30 @@ function parseDueDate(text: string): string | undefined {
       ? MONTHS_LONG.indexOf(name)
       : MONTHS_SHORT.indexOf(name)
     if (idx !== -1) {
-      const year = new Date().getFullYear()
+      const year = getLADate().getFullYear()
       return `${year}-${String(idx + 1).padStart(2, "0")}-${monthM[2].padStart(2, "0")}`
     }
   }
 
-  // Named weekday: "due Friday"
+  // Named weekday: "due Friday" — arithmetic starts from LA's current
+  // calendar day, not the server's (UTC on the VPS), so this can't resolve
+  // to the wrong Friday just because it's already tomorrow in UTC.
   for (let i = 0; i < WEEKDAYS.length; i++) {
     if (lower.includes(`due ${WEEKDAYS[i]}`)) {
-      const d = new Date()
+      const d = getLADate()
       let diff = i - d.getDay()
       if (diff <= 0) diff += 7
       d.setDate(d.getDate() + diff)
-      return toLocalDate(d)
+      return toYMD(d)
     }
   }
 
   // "due in N days"
   const daysM = lower.match(/due\s+in\s+(\d+)\s+days?/)
   if (daysM) {
-    const d = new Date()
+    const d = getLADate()
     d.setDate(d.getDate() + parseInt(daysM[1], 10))
-    return toLocalDate(d)
+    return toYMD(d)
   }
 
   return undefined

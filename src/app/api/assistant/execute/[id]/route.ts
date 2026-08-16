@@ -15,6 +15,7 @@ import { fromZonedTime } from "date-fns-tz"
 import { resolveAssistantOwnerUserId } from "@/lib/assistant-owner"
 import { syncJobCalendarEvent } from "@/lib/job-calendar-sync"
 import { syncLeadAppointmentCalendarEvent } from "@/lib/lead-appointment-calendar-sync"
+import { getTodayLA } from "@/lib/utils"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -1349,7 +1350,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         category:     category ?? "misc",
         description,
         amount:       Number(amount),
-        date:         date ?? new Date().toISOString().split("T")[0],
+        date:         date ?? getTodayLA(),
         notes:        notes ?? null,
       })
       .select("id")
@@ -1517,7 +1518,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         customer_id,
         amount:      Number(amount),
         method:      method ?? "other",
-        date:        date ?? new Date().toISOString().split("T")[0],
+        date:        date ?? getTodayLA(),
         notes:       notes ?? null,
       })
       .select("id")
@@ -2228,7 +2229,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       category:     e.category ?? "misc",
       description:  e.description,
       amount:       Number(e.amount),
-      date:         e.date ?? new Date().toISOString().split("T")[0],
+      date:         e.date ?? getTodayLA(),
       notes:        e.notes ?? null,
       card_last4:   e.card_last4 ?? null,
       source:       "telegram_screenshot",
