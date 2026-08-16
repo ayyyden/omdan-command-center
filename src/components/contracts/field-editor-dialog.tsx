@@ -53,11 +53,11 @@ export function FieldEditorDialog({
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-[95vw] w-[1100px] max-h-[92vh] flex flex-col p-0">
+        <DialogContent className="max-w-[95vw] w-[1100px] h-[92vh] max-h-[92vh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
             <DialogTitle>Field Editor — {contractName}</DialogTitle>
           </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-hidden px-5 pb-5 pt-4">
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-5 pt-4">
             {open && (
               <FieldEditor
                 contractTemplateId={contractTemplateId}
