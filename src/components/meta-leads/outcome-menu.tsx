@@ -49,6 +49,13 @@ export function OutcomeMenu({ lead, onUpdated, onDeleted }: OutcomeMenuProps) {
   }
 
   async function handleNoAnswer(language: SmsLanguage) {
+    // Guards against a fast double-tap re-invoking this before the first
+    // press's outcome POST resolves and lead.list actually updates — without
+    // this, both invocations read the same stale lead.list, both decide
+    // "first miss," and the text goes out twice for one real call.
+    if (loading) return
+    setLoading(true)
+
     // First miss of this call cycle (not already sitting in Second Call List)
     // — send the follow-up text via Quo. Pressing No Answer again on a lead
     // already in Second Call List doesn't re-send (already texted once
@@ -113,26 +120,26 @@ export function OutcomeMenu({ lead, onUpdated, onDeleted }: OutcomeMenuProps) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuItem onClick={() => setPending("answered_scheduled")}>
+          <DropdownMenuItem disabled={loading} onClick={() => setPending("answered_scheduled")}>
             Answered &amp; Scheduled
           </DropdownMenuItem>
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="flex items-center justify-between">
+            <DropdownMenuSubTrigger disabled={loading} className="flex items-center justify-between">
               No Answer
               <ChevronRight className="w-3.5 h-3.5 ml-1" />
             </DropdownMenuSubTrigger>
             <DropdownMenuPortal>
               <DropdownMenuSubContent>
-                <DropdownMenuItem onClick={() => handleNoAnswer("en")}>
+                <DropdownMenuItem disabled={loading} onClick={() => handleNoAnswer("en")}>
                   English
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleNoAnswer("es")}>
+                <DropdownMenuItem disabled={loading} onClick={() => handleNoAnswer("es")}>
                   Español
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
           </DropdownMenuSub>
-          <DropdownMenuItem onClick={() => setPending("callback_later")}>
+          <DropdownMenuItem disabled={loading} onClick={() => setPending("callback_later")}>
             Call Back Later
           </DropdownMenuItem>
           <DropdownMenuItem
