@@ -31,29 +31,21 @@ export async function POST(req: NextRequest, { params }: RouteCtx) {
   // No Answer needs no calendar call — just relocate the card.
   // missed_call_count is a lifetime counter (never auto-resets): every
   // No Answer increments it, and hitting the threshold auto-archives the
-  // lead instead of sending it back to Second Call List.
+  // lead instead of sending it back to Second Call List. Done as a single
+  // atomic UPDATE (increment_meta_lead_missed_call, migration 061) instead
+  // of a SELECT-then-UPDATE — two near-simultaneous "No Answer" presses on
+  // the same lead can no longer silently lose one of the increments.
   if (outcome === "no_answer") {
-    const { data: current, error: fetchErr } = await supabase
-      .from("meta_leads")
-      .select("missed_call_count")
-      .eq("id", id)
-      .single()
-
-    if (fetchErr || !current) {
-      return Response.json({ error: fetchErr?.message ?? "Lead not found" }, { status: 404 })
-    }
-
-    const newCount = (current.missed_call_count ?? 0) + 1
-    const nextList = newCount >= MISSED_CALL_ARCHIVE_THRESHOLD ? "archive" : "second_call_list"
-
     const { data, error } = await supabase
-      .from("meta_leads")
-      .update({ list: nextList, last_outcome: "no_answer", missed_call_count: newCount })
-      .eq("id", id)
-      .select(SELECT_FIELDS)
+      .rpc("increment_meta_lead_missed_call", {
+        p_lead_id: id,
+        p_archive_threshold: MISSED_CALL_ARCHIVE_THRESHOLD,
+      })
       .single()
 
     if (error) return Response.json({ error: error.message }, { status: 500 })
+    if (!data) return Response.json({ error: "Lead not found" }, { status: 404 })
+
     return Response.json({ lead: data })
   }
 

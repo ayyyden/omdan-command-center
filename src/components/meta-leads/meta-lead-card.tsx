@@ -83,7 +83,7 @@ export function MetaLeadCard({ lead, onUpdated, onDeleted }: MetaLeadCardProps) 
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-sm text-foreground leading-tight">{lead.full_name}</p>
-          {(isArchived || lead.missed_call_count >= 2) && (
+          {(isArchived || lead.missed_call_count >= 1) && (
             <Badge variant="warning" className="mt-1 text-[10px]">
               Missed {lead.missed_call_count}x
             </Badge>
