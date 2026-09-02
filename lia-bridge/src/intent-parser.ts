@@ -5,6 +5,10 @@ export type Intent =
   | { type: "daily_attention" }
   | { type: "approval_reply"; approvalId: string; action: "approve" | "reject" }
   | { type: "edit_approval"; approvalId: string }
+  | { type: "expense_edit_start"; approvalId: string }
+  | { type: "expense_pick"; index: number }
+  | { type: "expense_category_pick"; index: number }
+  | { type: "expense_edit_back" }
   | { type: "add_lead_estimate"; rawText: string }
   | { type: "create_invoice"; rawText: string }
   | { type: "schedule_job"; rawText: string }
@@ -37,6 +41,22 @@ export function parseIntent(text: string): Intent {
 
   const tgEdit = lower.match(/^edit:([0-9a-f-]{36})$/)
   if (tgEdit) return { type: "edit_approval", approvalId: tgEdit[1] }
+
+  // Expense-screenshot category-fix callbacks: "exp_edit:<uuid>" opens the
+  // per-expense picker, "exp_pick:N" picks which expense, "exp_cat:N" picks
+  // its new category (both plain indices — the approval id and which
+  // expense is being edited live in short-lived per-chat state so these
+  // callback_data strings stay well under Telegram's 64-byte limit).
+  const expEdit = lower.match(/^exp_edit:([0-9a-f-]{36})$/)
+  if (expEdit) return { type: "expense_edit_start", approvalId: expEdit[1] }
+
+  const expPick = lower.match(/^exp_pick:(\d+)$/)
+  if (expPick) return { type: "expense_pick", index: parseInt(expPick[1], 10) }
+
+  const expCat = lower.match(/^exp_cat:(\d+)$/)
+  if (expCat) return { type: "expense_category_pick", index: parseInt(expCat[1], 10) }
+
+  if (lower === "exp_back") return { type: "expense_edit_back" }
 
   // Customer disambiguation button callback: "pick_customer:N"
   const pickCustomer = lower.match(/^pick_customer:(\d+)$/)

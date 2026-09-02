@@ -8,6 +8,10 @@ const VALID_CATEGORIES = new Set<string>(EXPENSE_CATEGORIES)
 
 const client = new Anthropic()
 
+// Thinking + a 16000-token budget can run long on a busy screenshot — give
+// the function room to actually finish instead of getting killed mid-generation.
+export const maxDuration = 60
+
 const SYSTEM_PROMPT = `You are an expense tracking assistant. You will receive a screenshot of bank or credit card transactions.
 
 Extract ALL transactions visible in the image and return them as JSON.
@@ -43,9 +47,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "image_base64 and media_type are required" }, { status: 400 })
   }
 
-  const response = await client.messages.create({
+  const response = await client.messages.stream({
     model:      "claude-opus-5",
-    max_tokens: 4096,
+    // Extended thinking tokens count against max_tokens — at 4096 total, a
+    // busy statement screenshot (many transactions) could burn most of the
+    // budget on reasoning and leave the JSON output truncated mid-array,
+    // silently dropping trailing transactions. 16000 gives real headroom for
+    // both on even a long multi-page statement. Streamed (+ maxDuration
+    // above) so a run that takes a while doesn't get killed mid-generation.
+    max_tokens: 16000,
     thinking:   { type: "adaptive" },
     system:     SYSTEM_PROMPT,
     messages: [{
@@ -67,7 +77,13 @@ export async function POST(req: Request) {
         },
       ],
     }],
-  })
+  }).finalMessage()
+
+  if (response.stop_reason === "max_tokens") {
+    // Still possible on an extremely long statement — log it so a repeat of
+    // "she missed some" is diagnosable instead of a silent guess next time.
+    console.error("[expenses-screenshot] response hit max_tokens — output may be truncated")
+  }
 
   const textBlock = response.content.find((b) => b.type === "text")
   if (!textBlock || textBlock.type !== "text") {
