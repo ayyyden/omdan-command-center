@@ -9,7 +9,8 @@ import { parseContractMessage } from "./contract-parser"
 import { formatDailySummary }       from "./format-response"
 import { sendWhatsAppText }         from "./openclaw-client"
 import { sendTelegramMessage, sendTelegramWithButtons, downloadTelegramPhotoBase64, type InlineKeyboardButton } from "./telegram-client"
-import { checkHealth, sendMessage, updateApproval, executeApproval, createApproval } from "./crm-client"
+import { checkHealth, sendMessage, updateApproval, executeApproval, createApproval, getApproval } from "./crm-client"
+import { EXPENSE_CATEGORIES, expenseCategoryLabel } from "./expense-categories"
 import { isRawPartnerLead, parseRawPartnerLead, formatLeadApptPreview } from "./partner-lead-detector"
 import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch, ScheduleData, SchedulePreview, ContractData, ContractTemplate, ContractPreview, CrmMessageResponse, ExecuteResponse } from "./types"
 
@@ -53,6 +54,14 @@ const LIA_BOT_ID: number | null = (() => {
 // Key = chatId (Telegram) or phone number (WhatsApp), value = old approval to reject.
 
 const pendingEdits = new Map<string, { oldApprovalId: string }>()
+
+// ─── Pending expense-category fix (screenshot batch) ──────────────────────────
+// Set when the user taps "Fix Categories" on a save_expenses_batch approval;
+// `index` is filled in once they've picked which line item to correct.
+// Keeping the approval id + index here (instead of in every button's
+// callback_data) keeps exp_pick:N / exp_cat:N comfortably under Telegram's
+// 64-byte callback_data limit.
+const pendingExpenseEdit = new Map<string, { approvalId: string; index?: number }>()
 
 // ─── Pending customer disambiguation (invoice flow) ───────────────────────────
 // Stores parsed invoice data while waiting for the user to pick a customer.
@@ -344,6 +353,68 @@ function formatContractPreview(approvalId: string, preview: ContractPreview): st
   lines.push("", `⚠️ This will send a signing email to ${preview.customer_email}.`)
   lines.push("", `ID: ${approvalId}`)
   return lines.join("\n")
+}
+
+// ─── Expense-screenshot batch: category-fix flow ──────────────────────────────
+// Save All / Cancel were the only options — a wrong category (the common
+// case) meant retyping the whole batch by hand, so people just stopped
+// approving them. This adds a fully tap-driven fix: pick which line, pick
+// the right category from a list, done — no typing at all.
+
+interface ExpenseBatchItem {
+  date:        string
+  description: string
+  amount:      number
+  card_last4:  string | null
+  category:    string
+  notes:       string | null
+}
+
+function formatExpenseBatchPreview(expenses: ExpenseBatchItem[]): string {
+  const total = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0)
+  const lines = [
+    `📸 ${expenses.length} transaction${expenses.length !== 1 ? "s" : ""} — total $${total.toFixed(2)}`,
+    ...expenses.map((e, i) =>
+      `  ${i + 1}. ${e.date} · ${e.description} · $${Number(e.amount).toFixed(2)} (${expenseCategoryLabel(e.category)})`
+    ),
+  ]
+  return lines.join("\n")
+}
+
+function expenseBatchButtons(approvalId: string): InlineKeyboardButton[][] {
+  return [
+    [
+      { text: "✅ Save All",       callback_data: `approve:${approvalId}` },
+      { text: "❌ Cancel",         callback_data: `reject:${approvalId}` },
+    ],
+    [
+      { text: "✏️ Fix Categories", callback_data: `exp_edit:${approvalId}` },
+    ],
+  ]
+}
+
+function expensePickButtons(expenses: ExpenseBatchItem[]): InlineKeyboardButton[][] {
+  const rows = expenses.map((e, i) => [{
+    text: `${i + 1}. ${e.description} · $${Number(e.amount).toFixed(2)} (${expenseCategoryLabel(e.category)})`,
+    callback_data: `exp_pick:${i}`,
+  }])
+  rows.push([{ text: "◀️ Back", callback_data: "exp_back" }])
+  return rows
+}
+
+function categoryPickButtons(): InlineKeyboardButton[][] {
+  const rows: InlineKeyboardButton[][] = []
+  for (let i = 0; i < EXPENSE_CATEGORIES.length; i += 2) {
+    const row = [
+      { text: expenseCategoryLabel(EXPENSE_CATEGORIES[i]), callback_data: `exp_cat:${i}` },
+    ]
+    if (EXPENSE_CATEGORIES[i + 1]) {
+      row.push({ text: expenseCategoryLabel(EXPENSE_CATEGORIES[i + 1]), callback_data: `exp_cat:${i + 1}` })
+    }
+    rows.push(row)
+  }
+  rows.push([{ text: "◀️ Back", callback_data: "exp_back" }])
+  return rows
 }
 
 // ─── Shared contract handler ──────────────────────────────────────────────────
@@ -1191,13 +1262,9 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
           count:       number
           total:       number
         }
-        const buttons: InlineKeyboardButton[][] = [[
-          { text: "✅ Save All", callback_data: `approve:${data.approval_id}` },
-          { text: "❌ Cancel",   callback_data: `reject:${data.approval_id}` },
-        ]]
         await sendTG(
           `${data.preview}\n\nSave all ${data.count} expense${data.count !== 1 ? "s" : ""} to your records?`,
-          buttons,
+          expenseBatchButtons(data.approval_id),
         )
       } catch (photoErr) {
         console.error("[lia/telegram] photo handler error:", photoErr)
@@ -1595,6 +1662,82 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       return
     }
 
+    // ── Expense-screenshot batch: tap-driven category fix ────────────────────
+    if (intent.type === "expense_edit_start") {
+      try {
+        const approval = await getApproval(intent.approvalId)
+        const expenses = (approval.proposed_payload as { expenses: ExpenseBatchItem[] })?.expenses ?? []
+        if (!expenses.length) {
+          await sendTelegramMessage(chatId, "Couldn't find that batch anymore — try resending the screenshot.")
+          return
+        }
+        pendingExpenseEdit.set(chatKey, { approvalId: intent.approvalId })
+        await sendTG("Which line needs a different category?", expensePickButtons(expenses))
+      } catch (err) {
+        console.error("[lia/telegram] expense_edit_start failed:", err)
+        await sendTelegramMessage(chatId, "⚠️ Couldn't load that batch — try resending the screenshot.")
+      }
+      return
+    }
+
+    if (intent.type === "expense_pick") {
+      const pending = pendingExpenseEdit.get(chatKey)
+      if (!pending) {
+        await sendTelegramMessage(chatId, "That fix session expired — tap ✏️ Fix Categories again.")
+        return
+      }
+      pendingExpenseEdit.set(chatKey, { ...pending, index: intent.index })
+      await sendTG("Pick the correct category:", categoryPickButtons())
+      return
+    }
+
+    if (intent.type === "expense_category_pick") {
+      const pending = pendingExpenseEdit.get(chatKey)
+      if (!pending || pending.index === undefined) {
+        await sendTelegramMessage(chatId, "That fix session expired — tap ✏️ Fix Categories again.")
+        return
+      }
+      const category = EXPENSE_CATEGORIES[intent.index]
+      if (!category) {
+        await sendTelegramMessage(chatId, "Unrecognized category — try again.")
+        return
+      }
+      try {
+        const approval = await getApproval(pending.approvalId)
+        const payload = approval.proposed_payload as { expenses: ExpenseBatchItem[] }
+        const expenses = payload?.expenses ?? []
+        if (!expenses[pending.index]) {
+          await sendTelegramMessage(chatId, "That line no longer exists — tap ✏️ Fix Categories again.")
+          return
+        }
+        expenses[pending.index] = { ...expenses[pending.index], category }
+        await updateApproval(pending.approvalId, "edited", { proposed_payload: { expenses } })
+        pendingExpenseEdit.set(chatKey, { approvalId: pending.approvalId })
+        await sendTG(
+          `${formatExpenseBatchPreview(expenses)}\n\nUpdated line ${pending.index + 1} to ${expenseCategoryLabel(category)}. Fix another, or save all?`,
+          expenseBatchButtons(pending.approvalId),
+        )
+      } catch (err) {
+        console.error("[lia/telegram] expense_category_pick failed:", err)
+        await sendTelegramMessage(chatId, "⚠️ Couldn't save that correction — try again.")
+      }
+      return
+    }
+
+    if (intent.type === "expense_edit_back") {
+      const pending = pendingExpenseEdit.get(chatKey)
+      if (!pending) return
+      try {
+        const approval = await getApproval(pending.approvalId)
+        const expenses = (approval.proposed_payload as { expenses: ExpenseBatchItem[] })?.expenses ?? []
+        pendingExpenseEdit.set(chatKey, { approvalId: pending.approvalId })
+        await sendTG(formatExpenseBatchPreview(expenses), expenseBatchButtons(pending.approvalId))
+      } catch (err) {
+        console.error("[lia/telegram] expense_edit_back failed:", err)
+      }
+      return
+    }
+
     if (intent.type === "approval_reply") {
       const { approvalId, action } = intent
 
@@ -1693,6 +1836,12 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         const skipped = result.skipped ?? 0
         const skipPart = skipped > 0 ? ` (${skipped} skipped as likely duplicates)` : ""
         await sendTelegramMessage(chatId, `✅ Recorded ${created} expense${created !== 1 ? "s" : ""}${skipPart}.`)
+      } else if (result.action_type === "save_expenses_batch") {
+        const count = result.count ?? 0
+        const totalFmt = result.total != null
+          ? ` — total $${Number(result.total).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+          : ""
+        await sendTelegramMessage(chatId, `✅ Saved ${count} expense${count !== 1 ? "s" : ""}${totalFmt}.`)
       } else if (result.action_type === "create_expense") {
         const amtFmt = result.amount != null
           ? `$${Number(result.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
