@@ -1,8 +1,10 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { usePathname } from "next/navigation"
 import { Menu, HardHat, Search, Bell } from "lucide-react"
 import { Sidebar } from "./sidebar"
+import { StudioRail, StudioTopBar, StudioTabBar } from "./studio-nav"
 import { GlobalSearch } from "./global-search"
 import { NotificationBell } from "./notification-bell"
 import { UserRoleProvider } from "@/lib/user-role-context"
@@ -18,10 +20,14 @@ interface DashboardShellProps {
   pmId?: string | null
 }
 
+// Both looks are mounted; <html data-design> decides which chrome shows
+// (classic-only / studio-only in globals.css). See design-switch.tsx.
 export function DashboardShell({ children, logoUrl, companyName, userRole, userName, pmId }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [railOpen, setRailOpen] = useState(false)
   const [notifCount, setNotifCount] = useState(0)
   const canSeeNotifications = can(userRole, "notifications:view")
+  const pathname = usePathname()
 
   useEffect(() => {
     const handler = (e: Event) => setNotifCount((e as CustomEvent<number>).detail)
@@ -29,22 +35,29 @@ export function DashboardShell({ children, logoUrl, companyName, userRole, userN
     return () => window.removeEventListener("notification-count-update", handler)
   }, [])
 
+  useEffect(() => { setRailOpen(false) }, [pathname])
+
   return (
     <UserRoleProvider role={userRole}>
-      <div className="flex h-screen overflow-hidden bg-background">
-        <Sidebar
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-          logoUrl={logoUrl}
-          companyName={companyName}
-          userRole={userRole}
-          userName={userName}
-        />
+      <div className="studio-app flex h-screen overflow-hidden bg-background">
+        <div className="classic-only contents">
+          <Sidebar
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            logoUrl={logoUrl}
+            companyName={companyName}
+            userRole={userRole}
+            userName={userName}
+          />
+        </div>
+        <div className="studio-only contents">
+          <StudioRail userRole={userRole} userName={userName} open={railOpen} onClose={() => setRailOpen(false)} />
+        </div>
 
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {/* Mobile-only top strip */}
+          {/* Classic: mobile-only top strip */}
           <div
-            className="md:hidden flex items-center gap-3 px-4 pb-3 border-b bg-card shrink-0"
+            className="classic-only md:hidden flex items-center gap-3 px-4 pb-3 border-b bg-card shrink-0"
             style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
           >
             <button
@@ -98,12 +111,21 @@ export function DashboardShell({ children, logoUrl, companyName, userRole, userN
             </div>
           </div>
 
+          {/* Studio: phone top bar */}
+          <div className="studio-only contents">
+            <StudioTopBar userRole={userRole} />
+          </div>
+
           <main
-            className="flex-1 overflow-y-auto overscroll-none"
+            className="studio-main flex-1 overflow-y-auto overscroll-none"
             style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
           >
             {children}
           </main>
+        </div>
+
+        <div className="studio-only contents">
+          <StudioTabBar userRole={userRole} onMore={() => setRailOpen(true)} />
         </div>
 
         <GlobalSearch />
