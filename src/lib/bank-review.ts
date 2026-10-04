@@ -152,7 +152,11 @@ async function loadCandidates(service: ServiceClient, opts: BankReviewOptions): 
 // (screenshot, manual entry). Checks can take weeks to clear, so large
 // amounts get a wider window. Exact-date matches win over nearby ones so a
 // recurring same-amount charge (daily $188 ads) never grabs its neighbor.
-async function autoLinkExisting(service: ServiceClient, candidates: Candidate[]): Promise<{ remaining: Candidate[]; linked: number }> {
+async function autoLinkExisting(
+  service: ServiceClient,
+  candidates: Candidate[],
+  persist: boolean,
+): Promise<{ remaining: Candidate[]; linked: number }> {
   if (!candidates.length) return { remaining: [], linked: 0 }
   const minDate = addDaysLA(candidates[0].date, -25)
   const maxDate = addDaysLA(candidates[candidates.length - 1].date, 25)
@@ -180,7 +184,9 @@ async function autoLinkExisting(service: ServiceClient, candidates: Candidate[])
 
     if (match) {
       claimed.add(match.id)
-      await service.from("bank_transactions")
+      // A dry run must be side-effect free — two overlapping dry runs once
+      // both "linked" different charges to the same logged expense.
+      if (persist) await service.from("bank_transactions")
         .update(c.amount > 0
           ? { match_status: "confirmed", matched_expense_id: match.id }
           : { match_status: "confirmed", matched_payment_id: match.id })
@@ -409,7 +415,7 @@ export async function runBankReview(
   opts: BankReviewOptions = {},
 ): Promise<BankReviewResult & { items?: BankReviewItem[] }> {
   const all = await loadCandidates(service, opts)
-  const { remaining, linked } = await autoLinkExisting(service, all)
+  const { remaining, linked } = await autoLinkExisting(service, all, !opts.dryRun)
   const toSort = remaining.slice(0, opts.limit ?? MAX_PER_RUN)
 
   if (!toSort.length) return { considered: all.length, auto_linked: linked, proposed: 0, batches: 0, items: [] }
