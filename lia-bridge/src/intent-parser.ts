@@ -17,6 +17,7 @@ export type Intent =
   | { type: "bank_cat"; index: number }
   | { type: "bank_job"; index: number | "none" }
   | { type: "bank_back" }
+  | { type: "bank_skip_questions" }
   | { type: "add_lead_estimate"; rawText: string }
   | { type: "create_invoice"; rawText: string }
   | { type: "schedule_job"; rawText: string }
@@ -91,6 +92,7 @@ export function parseIntent(text: string): Intent {
   if (bkJob) return { type: "bank_job", index: bkJob[1] === "none" ? "none" : parseInt(bkJob[1], 10) }
 
   if (lower === "bk_back") return { type: "bank_back" }
+  if (lower === "bk_skipq") return { type: "bank_skip_questions" }
 
   // Customer disambiguation button callback: "pick_customer:N"
   const pickCustomer = lower.match(/^pick_customer:(\d+)$/)

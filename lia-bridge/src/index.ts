@@ -13,7 +13,7 @@ import { checkHealth, sendMessage, updateApproval, executeApproval, createApprov
 import { EXPENSE_CATEGORIES, expenseCategoryLabel } from "./expense-categories"
 import {
   formatBankDigest, bankDigestButtons, bankPickButtons, bankFieldButtons, bankCategoryButtons, bankJobButtons,
-  setKind, setCategory, setJob, type BankReviewPayload,
+  setKind, setCategory, setJob, skipAllQuestions, type BankReviewPayload,
 } from "./bank-digest"
 import { isRawPartnerLead, parseRawPartnerLead, formatLeadApptPreview } from "./partner-lead-detector"
 import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch, ScheduleData, SchedulePreview, ContractData, ContractTemplate, ContractPreview, CrmMessageResponse, ExecuteResponse } from "./types"
@@ -1736,7 +1736,7 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
     if (
       intent.type === "bank_edit_start" || intent.type === "bank_later" || intent.type === "bank_pick" ||
       intent.type === "bank_field" || intent.type === "bank_type" || intent.type === "bank_cat" ||
-      intent.type === "bank_job" || intent.type === "bank_back"
+      intent.type === "bank_job" || intent.type === "bank_back" || intent.type === "bank_skip_questions"
     ) {
       const expired = "That fix session expired — tap ✏️ Fix on the digest again."
 
@@ -1776,6 +1776,19 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         return
       }
       if (intent.type === "bank_back") { await showDigest(); return }
+
+      if (intent.type === "bank_skip_questions") {
+        const n = skipAllQuestions(payload)
+        try {
+          await updateApproval(approvalId, "edited", { proposed_payload: payload })
+        } catch (err) {
+          console.error("[lia/telegram] bank digest save failed:", err)
+          await sendTelegramMessage(chatId, "⚠️ Couldn't save that change — try again.")
+          return
+        }
+        await showDigest(`⏭ Marked ${n} line${n !== 1 ? "s" : ""} as skip. Save All when ready.`)
+        return
+      }
 
       if (intent.type === "bank_pick") {
         const it = payload.items[intent.index]

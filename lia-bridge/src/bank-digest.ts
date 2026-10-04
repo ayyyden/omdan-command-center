@@ -91,8 +91,21 @@ export function bankPickButtons(payload: BankReviewPayload): InlineKeyboardButto
     text: `${it.confidence === "low" || isUnresolved(it) ? "❓ " : ""}${i + 1}. ${money(it.amount)} ${it.description}`.slice(0, 60),
     callback_data: `bk_pick:${i}`,
   }])
+  const questions = payload.items.filter((it) => it.confidence === "low" || isUnresolved(it)).length
+  if (questions > 1) rows.push([{ text: `⏭ Skip all ${questions} ❓ lines (personal / not business)`, callback_data: "bk_skipq" }])
   rows.push([{ text: "◀️ Back", callback_data: "bk_back" }])
   return rows
+}
+
+// "These are all personal" in one tap — e.g. a trip's worth of charges.
+export function skipAllQuestions(payload: BankReviewPayload): number {
+  let n = 0
+  payload.items = payload.items.map((it) => {
+    if (it.confidence !== "low" && !isUnresolved(it)) return it
+    n++
+    return { ...it, kind: "skip", confidence: "high", question: null }
+  })
+  return n
 }
 
 export function bankFieldButtons(it: BankReviewItem): InlineKeyboardButton[][] {
