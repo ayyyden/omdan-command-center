@@ -218,6 +218,13 @@ export interface ExecuteResponse {
   customer_name?: string
   // create_estimate_draft fields (send_approval_id also used by create_lead_estimate)
   total?: number
+  // save_bank_batch fields
+  expenses?: number
+  expense_total?: number
+  payments?: number
+  payment_total?: number
+  already_handled?: number
+  unresolved?: string[]
   // create_expense fields
   expense_id?: string
   amount?: number

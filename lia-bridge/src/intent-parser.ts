@@ -9,6 +9,14 @@ export type Intent =
   | { type: "expense_pick"; index: number }
   | { type: "expense_category_pick"; index: number }
   | { type: "expense_edit_back" }
+  | { type: "bank_edit_start"; approvalId: string }
+  | { type: "bank_later"; approvalId: string }
+  | { type: "bank_pick"; index: number }
+  | { type: "bank_field"; field: "cat" | "job" }
+  | { type: "bank_type"; kind: "expense" | "payment" | "skip" }
+  | { type: "bank_cat"; index: number }
+  | { type: "bank_job"; index: number | "none" }
+  | { type: "bank_back" }
   | { type: "add_lead_estimate"; rawText: string }
   | { type: "create_invoice"; rawText: string }
   | { type: "schedule_job"; rawText: string }
@@ -57,6 +65,32 @@ export function parseIntent(text: string): Intent {
   if (expCat) return { type: "expense_category_pick", index: parseInt(expCat[1], 10) }
 
   if (lower === "exp_back") return { type: "expense_edit_back" }
+
+  // Daily bank digest callbacks. Only bk_edit/bk_later carry the approval id;
+  // the rest are short indices resolved against per-chat state (Telegram's
+  // callback_data is capped at 64 bytes).
+  const bkEdit = lower.match(/^bk_edit:([0-9a-f-]{36})$/)
+  if (bkEdit) return { type: "bank_edit_start", approvalId: bkEdit[1] }
+
+  const bkLater = lower.match(/^bk_later:([0-9a-f-]{36})$/)
+  if (bkLater) return { type: "bank_later", approvalId: bkLater[1] }
+
+  const bkPick = lower.match(/^bk_pick:(\d+)$/)
+  if (bkPick) return { type: "bank_pick", index: parseInt(bkPick[1], 10) }
+
+  const bkField = lower.match(/^bk_field:(cat|job)$/)
+  if (bkField) return { type: "bank_field", field: bkField[1] as "cat" | "job" }
+
+  const bkType = lower.match(/^bk_type:(expense|payment|skip)$/)
+  if (bkType) return { type: "bank_type", kind: bkType[1] as "expense" | "payment" | "skip" }
+
+  const bkCat = lower.match(/^bk_cat:(\d+)$/)
+  if (bkCat) return { type: "bank_cat", index: parseInt(bkCat[1], 10) }
+
+  const bkJob = lower.match(/^bk_job:(\d+|none)$/)
+  if (bkJob) return { type: "bank_job", index: bkJob[1] === "none" ? "none" : parseInt(bkJob[1], 10) }
+
+  if (lower === "bk_back") return { type: "bank_back" }
 
   // Customer disambiguation button callback: "pick_customer:N"
   const pickCustomer = lower.match(/^pick_customer:(\d+)$/)

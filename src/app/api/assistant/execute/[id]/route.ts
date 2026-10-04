@@ -16,6 +16,7 @@ import { resolveAssistantOwnerUserId } from "@/lib/assistant-owner"
 import { syncJobCalendarEvent } from "@/lib/job-calendar-sync"
 import { syncLeadAppointmentCalendarEvent } from "@/lib/lead-appointment-calendar-sync"
 import { getTodayLA } from "@/lib/utils"
+import type { BankReviewPayload } from "@/lib/bank-review"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -2265,6 +2266,120 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       success:     true,
       count:       inserted?.length ?? rows.length,
       total,
+    })
+  }
+
+  // ─── save_bank_batch ─────────────────────────────────────────────────────
+  // The daily bank digest (src/lib/bank-review.ts). Each item is an expense
+  // (attached to its job when one was assigned), a customer payment
+  // (requires a job — unresolved ones are left for the next digest), or a
+  // skip (card payoff / transfer / refund → marked ignored). Items whose
+  // bank transaction was already handled some other way are skipped, so a
+  // late approval can never double-enter anything.
+
+  if (approval.action_type === "save_bank_batch") {
+    const { items } = payload as unknown as BankReviewPayload
+    if (!Array.isArray(items) || !items.length) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "No items in payload", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "No items to save" }, { status: 400 })
+    }
+
+    let expensesSaved = 0, paymentsSaved = 0, skipped = 0, alreadyHandled = 0
+    let expenseTotal = 0, paymentTotal = 0
+    const unresolved: string[] = []
+    const errors: string[] = []
+
+    for (const it of items) {
+      const { data: bankTx } = await supabase
+        .from("bank_transactions")
+        .select("match_status")
+        .eq("id", it.bank_transaction_id)
+        .single()
+      if (!bankTx || (bankTx.match_status !== "unmatched" && bankTx.match_status !== "suggested")) {
+        alreadyHandled++
+        continue
+      }
+
+      if (it.kind === "skip") {
+        await supabase.from("bank_transactions").update({ match_status: "ignored" }).eq("id", it.bank_transaction_id)
+        skipped++
+        continue
+      }
+
+      if (it.kind === "expense") {
+        const { data: expense, error: expErr } = await supabase
+          .from("expenses")
+          .insert({
+            user_id:      ownerUserId,
+            job_id:       it.job_id ?? null,
+            expense_type: it.job_id ? "job" : "business",
+            category:     it.category ?? "misc",
+            description:  it.description,
+            amount:       Number(it.amount),
+            date:         it.date,
+            notes:        it.bank_name !== it.description ? `Bank: ${it.bank_name}` : null,
+            source:       "bank_sync",
+          })
+          .select("id")
+          .single()
+        if (expErr || !expense) { errors.push(`${it.description}: ${expErr?.message}`); continue }
+        await supabase.from("bank_transactions")
+          .update({ match_status: "confirmed", matched_expense_id: expense.id })
+          .eq("id", it.bank_transaction_id)
+        expensesSaved++
+        expenseTotal += Number(it.amount)
+        continue
+      }
+
+      // payment
+      if (!it.job_id || !it.customer_id) {
+        unresolved.push(`$${Number(it.amount).toFixed(2)} ${it.bank_name}`)
+        continue
+      }
+      const { data: payment, error: payErr } = await supabase
+        .from("payments")
+        .insert({
+          user_id:     ownerUserId,
+          job_id:      it.job_id,
+          customer_id: it.customer_id,
+          amount:      Number(it.amount),
+          method:      it.method ?? "other",
+          date:        it.date,
+          notes:       it.description,
+        })
+        .select("id")
+        .single()
+      if (payErr || !payment) { errors.push(`${it.description}: ${payErr?.message}`); continue }
+      await supabase.from("bank_transactions")
+        .update({ match_status: "confirmed", matched_payment_id: payment.id })
+        .eq("id", it.bank_transaction_id)
+      paymentsSaved++
+      paymentTotal += Number(it.amount)
+    }
+
+    const anySaved = expensesSaved + paymentsSaved + skipped > 0
+    await supabase.from("assistant_approvals")
+      .update({
+        status:      errors.length && !anySaved ? "failed" : "executed",
+        executed_at: now,
+        error:       errors.length ? errors.join("; ") : null,
+        result:      { expenses: expensesSaved, payments: paymentsSaved, skipped, already_handled: alreadyHandled, unresolved },
+        updated_at:  now,
+      })
+      .eq("id", id)
+
+    return NextResponse.json({
+      action_type:     "save_bank_batch",
+      success:         true,
+      expenses:        expensesSaved,
+      expense_total:   expenseTotal,
+      payments:        paymentsSaved,
+      payment_total:   paymentTotal,
+      skipped,
+      already_handled: alreadyHandled,
+      unresolved,
+      error_detail:    errors,
     })
   }
 

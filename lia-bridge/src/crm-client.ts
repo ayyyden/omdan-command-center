@@ -100,9 +100,6 @@ export async function rolloverMetaLeads(): Promise<{ moved: number }> {
 export interface BankSyncResult {
   ok: boolean
   results: Array<{ item_id: string; institution_name: string | null; added: number; modified: number; removed: number; error?: string }>
-  drafted: number
-  flagged: number
-  auto_ignored: number
 }
 
 export async function syncBank(): Promise<BankSyncResult> {
@@ -112,6 +109,24 @@ export async function syncBank(): Promise<BankSyncResult> {
     throw new Error(`CRM bank sync failed (${res.status}): ${text}`)
   }
   return res.json() as Promise<BankSyncResult>
+}
+
+export interface BankReviewResult {
+  ok: boolean
+  considered: number
+  auto_linked: number
+  proposed: number
+  batches: number
+}
+
+// Sorts new bank transactions and has the CRM push Lia a one-tap digest.
+export async function reviewBank(): Promise<BankReviewResult> {
+  const res = await crmFetch("/api/bank/review", { method: "POST" })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`CRM bank review failed (${res.status}): ${text}`)
+  }
+  return res.json() as Promise<BankReviewResult>
 }
 
 export async function createApproval(body: {

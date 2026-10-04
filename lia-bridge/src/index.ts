@@ -11,6 +11,10 @@ import { sendWhatsAppText }         from "./openclaw-client"
 import { sendTelegramMessage, sendTelegramWithButtons, downloadTelegramPhotoBase64, type InlineKeyboardButton } from "./telegram-client"
 import { checkHealth, sendMessage, updateApproval, executeApproval, createApproval, getApproval } from "./crm-client"
 import { EXPENSE_CATEGORIES, expenseCategoryLabel } from "./expense-categories"
+import {
+  formatBankDigest, bankDigestButtons, bankPickButtons, bankFieldButtons, bankCategoryButtons, bankJobButtons,
+  setKind, setCategory, setJob, type BankReviewPayload,
+} from "./bank-digest"
 import { isRawPartnerLead, parseRawPartnerLead, formatLeadApptPreview } from "./partner-lead-detector"
 import type { IncomingWebhook, EstimatePreview, LeadData, EstimateData, InvoiceData, InvoicePreview, CustomerMatch, JobMatch, ScheduleData, SchedulePreview, ContractData, ContractTemplate, ContractPreview, CrmMessageResponse, ExecuteResponse } from "./types"
 
@@ -62,6 +66,10 @@ const pendingEdits = new Map<string, { oldApprovalId: string }>()
 // callback_data) keeps exp_pick:N / exp_cat:N comfortably under Telegram's
 // 64-byte callback_data limit.
 const pendingExpenseEdit = new Map<string, { approvalId: string; index?: number }>()
+
+// ─── Pending bank-digest fix (save_bank_batch) ────────────────────────────────
+// Same idea: which digest is being fixed, and which line, once picked.
+const pendingBankEdit = new Map<string, { approvalId: string; index?: number }>()
 
 // ─── Pending customer disambiguation (invoice flow) ───────────────────────────
 // Stores parsed invoice data while waiting for the user to pick a customer.
@@ -1724,6 +1732,99 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
       return
     }
 
+    // ── Daily bank digest: tap-only fixes (type / category / job) ───────────
+    if (
+      intent.type === "bank_edit_start" || intent.type === "bank_later" || intent.type === "bank_pick" ||
+      intent.type === "bank_field" || intent.type === "bank_type" || intent.type === "bank_cat" ||
+      intent.type === "bank_job" || intent.type === "bank_back"
+    ) {
+      const expired = "That fix session expired — tap ✏️ Fix on the digest again."
+
+      if (intent.type === "bank_later") {
+        await updateApproval(intent.approvalId, "rejected").catch(() => {})
+        pendingBankEdit.delete(chatKey)
+        await sendTelegramMessage(chatId, "⏭ No problem — I'll bring these back in tomorrow's digest.")
+        return
+      }
+
+      const approvalId = intent.type === "bank_edit_start" ? intent.approvalId : pendingBankEdit.get(chatKey)?.approvalId
+      if (!approvalId) { await sendTelegramMessage(chatId, expired); return }
+
+      let payload: BankReviewPayload
+      try {
+        const approval = await getApproval(approvalId)
+        if (approval.status !== "pending" && approval.status !== "edited") {
+          pendingBankEdit.delete(chatKey)
+          await sendTelegramMessage(chatId, `That digest was already ${approval.status}.`)
+          return
+        }
+        payload = approval.proposed_payload as BankReviewPayload
+      } catch (err) {
+        console.error("[lia/telegram] bank digest load failed:", err)
+        await sendTelegramMessage(chatId, "⚠️ Couldn't load that digest — try again in a minute.")
+        return
+      }
+
+      const showDigest = async (note?: string) => {
+        pendingBankEdit.set(chatKey, { approvalId })
+        await sendTG(formatBankDigest(payload, note), bankDigestButtons(approvalId))
+      }
+
+      if (intent.type === "bank_edit_start") {
+        pendingBankEdit.set(chatKey, { approvalId })
+        await sendTG("Which line needs fixing?", bankPickButtons(payload))
+        return
+      }
+      if (intent.type === "bank_back") { await showDigest(); return }
+
+      if (intent.type === "bank_pick") {
+        const it = payload.items[intent.index]
+        if (!it) { await sendTelegramMessage(chatId, expired); return }
+        pendingBankEdit.set(chatKey, { approvalId, index: intent.index })
+        await sendTG(`Line ${intent.index + 1}: ${it.description} — $${it.amount.toFixed(2)} (${it.bank_name})\nWhat is it?`, bankFieldButtons(it))
+        return
+      }
+
+      const index = pendingBankEdit.get(chatKey)?.index
+      const current = index !== undefined ? payload.items[index] : undefined
+      if (index === undefined || !current) { await sendTelegramMessage(chatId, expired); return }
+
+      if (intent.type === "bank_field") {
+        await sendTG(
+          intent.field === "cat" ? "Pick the category:" : "Which job?",
+          intent.field === "cat" ? bankCategoryButtons() : bankJobButtons(payload, current),
+        )
+        return
+      }
+
+      let updated = current
+      if (intent.type === "bank_type") {
+        updated = setKind(current, intent.kind, payload)
+      } else if (intent.type === "bank_cat") {
+        updated = setCategory(current, intent.index) ?? current
+      } else if (intent.type === "bank_job") {
+        updated = setJob(current, intent.index, payload) ?? current
+      }
+      payload.items[index] = updated
+
+      try {
+        await updateApproval(approvalId, "edited", { proposed_payload: payload })
+      } catch (err) {
+        console.error("[lia/telegram] bank digest save failed:", err)
+        await sendTelegramMessage(chatId, "⚠️ Couldn't save that change — try again.")
+        return
+      }
+
+      // A payment with no job yet → go straight to the job picker instead of
+      // making the owner find "Change job" themselves.
+      if (intent.type === "bank_type" && updated.kind === "payment" && !updated.job_id) {
+        await sendTG("Which job is this payment for?", bankJobButtons(payload, updated))
+        return
+      }
+      await showDigest(`✏️ Updated line ${index + 1}. Fix another, or Save All?`)
+      return
+    }
+
     if (intent.type === "expense_edit_back") {
       const pending = pendingExpenseEdit.get(chatKey)
       if (!pending) return
@@ -1836,6 +1937,16 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         const skipped = result.skipped ?? 0
         const skipPart = skipped > 0 ? ` (${skipped} skipped as likely duplicates)` : ""
         await sendTelegramMessage(chatId, `✅ Recorded ${created} expense${created !== 1 ? "s" : ""}${skipPart}.`)
+      } else if (result.action_type === "save_bank_batch") {
+        const fmt = (n: number) => `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        const parts: string[] = []
+        if (result.expenses) parts.push(`🧾 ${result.expenses} expense${result.expenses !== 1 ? "s" : ""} (${fmt(result.expense_total ?? 0)})`)
+        if (result.payments) parts.push(`💰 ${result.payments} payment${result.payments !== 1 ? "s" : ""} (${fmt(result.payment_total ?? 0)})`)
+        if (result.skipped)  parts.push(`⏭ ${result.skipped} skipped`)
+        if (result.already_handled) parts.push(`${result.already_handled} already in the CRM`)
+        const lines = [`✅ Saved — ${parts.join(" · ") || "nothing new"}.`]
+        if (result.unresolved?.length) lines.push(`❓ Still need a job for: ${result.unresolved.join(", ")} — I'll ask again tomorrow.`)
+        await sendTelegramMessage(chatId, lines.join("\n"))
       } else if (result.action_type === "save_expenses_batch") {
         const count = result.count ?? 0
         const totalFmt = result.total != null
@@ -2103,7 +2214,13 @@ app.post("/notify-action", async (req: Request, res: Response) => {
 
   const hasApproval = body.approval_id && body.action_type && body.payload
   for (const chatId of TELEGRAM_ALLOWED_CHAT_IDS) {
-    if (hasApproval) {
+    if (hasApproval && body.action_type === "save_bank_batch") {
+      sendTelegramWithButtons(
+        chatId,
+        formatBankDigest(body.payload as unknown as BankReviewPayload, body.text),
+        bankDigestButtons(body.approval_id!),
+      ).catch((err) => console.error(`[lia/notify-action] digest send failed for ${chatId}:`, err?.message))
+    } else if (hasApproval) {
       const preview = formatClaudeActionForTelegram(body.approval_id!, {
         type: body.action_type!, summary: body.action_summary ?? "", payload: body.payload!,
       })
