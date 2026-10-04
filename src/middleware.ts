@@ -9,6 +9,10 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith("/api/assistant/")) {
     return NextResponse.next()
   }
+  // Website booking webhook: authenticated by x-website-secret inside the route.
+  if (pathname === "/api/meta-leads/website") {
+    return NextResponse.next()
+  }
 
   let supabaseResponse = NextResponse.next({ request })
 
