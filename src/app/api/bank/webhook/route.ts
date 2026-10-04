@@ -1,7 +1,8 @@
 import { createServiceClient } from "@/lib/supabase/service"
 import { verifyPlaidWebhook } from "@/lib/plaid-webhook"
-import { resolveAssistantOwnerUserId } from "@/lib/assistant-owner"
-import { syncOneItem, draftBankActivity, type PlaidItemRow } from "@/lib/bank-sync"
+import { syncOneItem, type PlaidItemRow } from "@/lib/bank-sync"
+
+export const maxDuration = 300
 
 // POST /api/bank/webhook
 // Plaid calls this the moment IT has new transaction data for an Item —
@@ -42,37 +43,23 @@ export async function POST(req: Request) {
 
   const service = createServiceClient()
 
+  // Any non-revoked item — one stuck in "error" from an earlier transient
+  // failure must still be able to recover when Plaid pings us.
   const { data: item, error: itemErr } = await service
     .from("plaid_items")
-    .select("id, access_token, institution_name, cursor")
+    .select("id, access_token, institution_name, cursor, status")
     .eq("item_id", body.item_id)
-    .eq("status", "active")
+    .neq("status", "revoked")
     .single()
 
   if (itemErr || !item) {
-    console.error("[bank/webhook] unknown or inactive item_id:", body.item_id, itemErr?.message)
+    console.error("[bank/webhook] unknown or revoked item_id:", body.item_id, itemErr?.message)
     return Response.json({ ok: true, skipped: true }) // still 200 — nothing Plaid should retry over
   }
 
-  const { userId, error: ownerErr } = await resolveAssistantOwnerUserId(service)
-  if (!userId) {
-    console.error("[bank/webhook] could not resolve owner:", ownerErr)
-    return Response.json({ ok: true, skipped: true })
-  }
-
-  try {
-    const { result, expenseCandidates, depositCandidates } = await syncOneItem(service, item as PlaidItemRow)
-    let drafted = 0, flagged = 0, autoIgnored = 0
-    if (expenseCandidates.length || depositCandidates.length) {
-      const summary = await draftBankActivity(service, userId, expenseCandidates, depositCandidates)
-      drafted = summary.drafted
-      flagged = summary.flagged
-      autoIgnored = summary.autoIgnored
-    }
-    console.log(`[bank/webhook] synced item ${item.id} — added=${result.added} drafted=${drafted} flagged=${flagged} auto_ignored=${autoIgnored}`)
-    return Response.json({ ok: true, result, drafted, flagged, auto_ignored: autoIgnored })
-  } catch (err) {
-    console.error("[bank/webhook] sync failed:", err)
-    return Response.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 })
-  }
+  // Store only — sorting into expenses/payments happens in the daily
+  // /api/bank/review digest, so Lia sends one message instead of one per charge.
+  const result = await syncOneItem(service, item as PlaidItemRow)
+  console.log(`[bank/webhook] synced item ${item.id} — added=${result.added} modified=${result.modified} removed=${result.removed}${result.error ? ` error=${result.error}` : ""}`)
+  return Response.json({ ok: !result.error, result })
 }

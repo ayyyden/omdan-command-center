@@ -1,12 +1,12 @@
 import { schedule } from "node-cron"
-import { sendMessage, rolloverMetaLeads, syncBank } from "./crm-client"
+import { sendMessage, rolloverMetaLeads, syncBank, reviewBank } from "./crm-client"
 import { formatDailySummary } from "./format-response"
 import { sendTelegramMessage } from "./telegram-client"
 
 // Exported so index.ts can pass in the already-parsed allowed IDs.
 export function startScheduler(allowedIds: Set<number>): void {
   // Meta leads rollover and bank sync have no Telegram dependency to start —
-  // sync itself pushes to Telegram per-transaction via /notify-action.
+  // the daily bank review pushes its digest to Telegram via /notify-action.
   startMetaLeadsRollover()
   startBankSync()
 
@@ -94,35 +94,53 @@ function startMetaLeadsRollover(): void {
   console.log("[scheduler] Meta leads rollover scheduled — daily at 00:00 America/Los_Angeles")
 }
 
-// Safety-net only — the primary, near-real-time trigger is now Plaid's
-// SYNC_UPDATES_AVAILABLE webhook (/api/bank/webhook), which fires the moment
-// Plaid itself notices new transactions instead of us guessing a polling
-// interval. This just catches anything a webhook ever fails to deliver
-// (rare, but webhooks can be missed) — 3x/day is plenty for a fallback.
+// Safety-net sync — the primary, near-real-time trigger is Plaid's
+// SYNC_UPDATES_AVAILABLE webhook (/api/bank/webhook). This catches anything a
+// webhook ever fails to deliver, and retries a connection that's in an error
+// state so a transient failure recovers on its own.
+//
+// Then once a day (6:30pm LA, after the workday's charges have posted) Lia
+// sorts everything new and sends ONE digest — expense vs customer payment vs
+// skip, business vs which job, category — saved with one tap.
 function startBankSync(): void {
   schedule(
     "0 7,14,21 * * *",
     async () => {
-      const localNow = new Date().toLocaleString("en-US", {
-        timeZone: "America/Los_Angeles",
-        weekday: "long", month: "short", day: "numeric",
-        hour: "numeric", minute: "2-digit",
-      })
-      console.log(`[scheduler] Bank sync starting — ${localNow}`)
+      console.log(`[scheduler] Bank sync starting — ${laNow()}`)
       try {
         const result = await syncBank()
         const added = result.results.reduce((sum, r) => sum + r.added, 0)
-        console.log(`[scheduler] Bank sync complete — ${added} new transaction(s), ${result.drafted} drafted, ${result.flagged} flagged, ${result.auto_ignored} auto-ignored`)
+        const errors = result.results.filter((r) => r.error).map((r) => `${r.institution_name}: ${r.error}`)
+        console.log(`[scheduler] Bank sync complete — ${added} new transaction(s)${errors.length ? ` — errors: ${errors.join("; ")}` : ""}`)
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error("[scheduler] Bank sync failed:", msg)
+        console.error("[scheduler] Bank sync failed:", err instanceof Error ? err.message : String(err))
       }
     },
-    {
-      timezone:  "America/Los_Angeles",
-      noOverlap: true,
-    },
+    { timezone: "America/Los_Angeles", noOverlap: true },
   )
 
-  console.log("[scheduler] Bank sync (fallback) scheduled — 07:00/14:00/21:00 America/Los_Angeles")
+  schedule(
+    "30 18 * * *",
+    async () => {
+      console.log(`[scheduler] Bank review starting — ${laNow()}`)
+      try {
+        await syncBank().catch((err) => console.error("[scheduler] pre-review sync failed:", err?.message ?? err))
+        const r = await reviewBank()
+        console.log(`[scheduler] Bank review complete — ${r.considered} considered, ${r.auto_linked} auto-linked, ${r.proposed} proposed in ${r.batches} digest(s)`)
+      } catch (err: unknown) {
+        console.error("[scheduler] Bank review failed:", err instanceof Error ? err.message : String(err))
+      }
+    },
+    { timezone: "America/Los_Angeles", noOverlap: true },
+  )
+
+  console.log("[scheduler] Bank sync scheduled — 07:00/14:00/21:00, daily review digest 18:30 America/Los_Angeles")
+}
+
+function laNow(): string {
+  return new Date().toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "long", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit",
+  })
 }
