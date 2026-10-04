@@ -14,10 +14,11 @@ import { useState, useEffect } from "react"
 import { can } from "@/lib/permissions"
 import type { TeamRole } from "@/lib/permissions"
 import { RoleBadge } from "@/components/team/role-badge"
+import { DesignSwitchButton } from "@/components/providers/design-switch"
 
 const ALL_ROLES: TeamRole[] = ["owner", "admin", "project_manager"]
 
-const navItems = [
+export const navItems = [
   { href: "/dashboard",  label: "Dashboard",  icon: LayoutDashboard, roles: ALL_ROLES },
   { href: "/customers",  label: "CRM / Leads", icon: Users,           roles: ["owner", "admin"] as TeamRole[] },
   { href: "/estimates",  label: "Estimates",   icon: FileText,        roles: ["owner", "admin", "office", "project_manager"] as TeamRole[] },
@@ -187,6 +188,8 @@ export function Sidebar({ isOpen = false, onClose, logoUrl, companyName, userRol
               )}
             </button>
           )}
+
+          <DesignSwitchButton className="px-3 py-2.5 rounded-lg text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground" />
 
           <button
             onClick={handleLogout}

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./studio.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -37,10 +38,25 @@
   --radius-xl: calc(var(--radius) + 4px);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-title: var(--font-gilda), Georgia, serif;
 }
 
 :root {
   --radius: 0.5rem;
+
+  /* Shape + brand tokens. Classic values reproduce the original look exactly;
+     the studio design overrides them below. */
+  --radius-card: 0.5rem;
+  --radius-control: calc(0.5rem - 2px);
+  --radius-pop: calc(0.5rem - 2px);
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-pop: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-dialog: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --brass: #B8913A;
+  --brass-light: #DDBE6C;
+  --brass-text: #85661C;
+  --brick: #B4382A;
+  --basalt: #1A1E1C;
 
   --background: oklch(0.985 0 0);
   --foreground: oklch(0.145 0 0);

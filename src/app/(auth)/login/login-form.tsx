@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2, HardHat } from "lucide-react"
+import { OmdanMark } from "@/components/brand/omdan-mark"
 
 interface Props {
   logoUrl: string | null
@@ -39,8 +40,15 @@ export function LoginForm({ logoUrl }: Props) {
   }
 
   return (
-    <Card className="w-full max-w-sm shadow-2xl border-0">
-      <CardHeader className="space-y-1 text-center">
+    <div className="w-full max-w-sm">
+      {/* Studio look: the tower mark draws itself on its ground line */}
+      <div className="studio-only flex flex-col items-center text-center mb-8">
+        <OmdanMark id="login" animated strokeWidth={1.8} className="h-24 w-24" title="Omdan Development" />
+        <p className="font-title text-[30px] tracking-[0.28em] pl-[0.28em] text-[#E4C979] mt-4 leading-none">OMDAN</p>
+        <p className="text-[13px] text-white/50 mt-2.5">Command Center</p>
+      </div>
+    <Card className="w-full shadow-2xl border-0">
+      <CardHeader className="classic-only space-y-1 text-center">
         <div className="flex justify-center mb-2">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -59,7 +67,7 @@ export function LoginForm({ logoUrl }: Props) {
         <CardDescription>Sign in to manage your business</CardDescription>
       </CardHeader>
       <form onSubmit={handleLogin}>
-        <CardContent className="space-y-4">
+        <CardContent className="login-fields space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -92,5 +100,6 @@ export function LoginForm({ logoUrl }: Props) {
         </CardFooter>
       </form>
     </Card>
+    </div>
   )
 }

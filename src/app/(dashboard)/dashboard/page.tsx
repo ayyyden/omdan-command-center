@@ -10,6 +10,7 @@ import {
 import Link from "next/link"
 import type { Reminder } from "@/types"
 import { ReminderRow } from "@/components/reminders/reminder-row"
+import { StudioDashboardHero } from "@/components/dashboard/studio-hero"
 import { getSessionMember, NO_ROWS_ID } from "@/lib/auth-helpers"
 import { can } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -196,7 +197,22 @@ export default async function DashboardPage() {
   const isAdmin = can(role, "dashboard:financials")
   const canViewEstimates = can(role, "estimates:view")
   const isScopedPM = role === "project_manager"
-  const data = await getDashboardData(supabase, isAdmin, canViewEstimates, pmId, isScopedPM, userId)
+  const [data, { data: me }] = await Promise.all([
+    getDashboardData(supabase, isAdmin, canViewEstimates, pmId, isScopedPM, userId),
+    supabase.from("team_members").select("name").eq("user_id", userId).maybeSingle(),
+  ])
+  const firstName = (me?.name ?? "").trim().split(/\s+/)[0] || null
+
+  // Studio hero: the month in four figures (admins), or the PM/crew view
+  const heroFigures = [
+    ...(isAdmin ? [
+      { label: "Collected this month", value: formatCurrency(data.monthRevenue), href: "/payments" },
+      { label: "Profit this month",    value: formatCurrency(data.monthProfit),  href: "/reports", negative: data.monthProfit < 0 },
+      { label: "Still owed on jobs",   value: formatCurrency(data.unpaidTotal),  href: "/jobs" },
+    ] : []),
+    ...(isScopedPM ? [{ label: "My sales this month", value: formatCurrency(data.pmSalesThisMonth) }] : []),
+    { label: isScopedPM ? "My jobs today" : "Jobs today", value: String(data.todayJobs.length), href: "/scheduler" },
+  ]
 
   const financialStats = [
     { label: "Revenue This Month", value: formatCurrency(data.monthRevenue),  icon: DollarSign,  iconClass: "text-success",     bgClass: "bg-success/10" },
@@ -206,11 +222,29 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <Topbar title="Dashboard" subtitle="Welcome back — here's your business at a glance" />
+      <div className="classic-only">
+        <Topbar title="Dashboard" subtitle="Welcome back — here's your business at a glance" />
+      </div>
 
       <div className="p-4 sm:p-6 space-y-6">
-        {/* Stats Row */}
-        <div className={`grid grid-cols-1 gap-4 ${isAdmin ? "sm:grid-cols-2 lg:grid-cols-4" : isScopedPM ? "sm:grid-cols-2" : "sm:grid-cols-1 max-w-xs"}`}>
+        <div className="studio-only">
+          <StudioDashboardHero
+            firstName={firstName}
+            figures={heroFigures}
+            counts={{
+              todayJobs: data.todayJobs.length,
+              overdueJobs: data.overdueJobs.length,
+              waitingEstimates: data.pendingEstimates.length,
+              overdueEstimates: data.overdueEstimates.length,
+              newLeads: data.newLeads.length,
+              followUps: data.followUps.length,
+              overdueReminders: data.overdueReminders.length,
+            }}
+          />
+        </div>
+
+        {/* Stats Row (classic look) */}
+        <div className={`classic-only grid grid-cols-1 gap-4 ${isAdmin ? "sm:grid-cols-2 lg:grid-cols-4" : isScopedPM ? "sm:grid-cols-2" : "sm:grid-cols-1 max-w-xs"}`}>
           {isAdmin && financialStats.map((stat) => (
             <Card key={stat.label}>
               <CardContent className="flex items-center gap-4 pt-6">
