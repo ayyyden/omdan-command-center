@@ -11,6 +11,7 @@ export interface CalendarEventWithSource {
   description: string | null
   htmlLink:    string | null
   calendar:    "main" | "callback"
+  confirmed:   boolean
   /** Customer phone — from the linked CRM record, else parsed from the description */
   phone:       string | null
 }
