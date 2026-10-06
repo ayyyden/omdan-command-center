@@ -104,14 +104,17 @@ export async function ensureLeadFromAppointment(
 
   // 3. Details: a linked Meta lead is the best source, then the event itself
   const parsed = parseAppointment(ev)
-  const { data: meta } = await supabase.from("meta_leads").select("full_name, phone, email, address, city").eq("calendar_event_id", ev.id).maybeSingle()
+  const { data: meta } = await supabase.from("meta_leads").select("full_name, phone, email, address, city, notes").eq("calendar_event_id", ev.id).maybeSingle()
   const lead = {
     name:         meta?.full_name || parsed.name,
     phone:        meta?.phone || parsed.phone,
     email:        meta?.email || parsed.email,
     address:      meta?.address || parsed.address,
     service_type: parsed.service_type,
-    lead_source:  meta ? "facebook" : parsed.lead_source,
+    // Website bookings land in Meta Lead Jobs too (notes say "Source: Website"),
+    // so a linked meta lead only means Facebook when nothing says otherwise.
+    lead_source:  parsed.lead_source
+      ?? (meta ? (/website|desertgreenbuilders/i.test(meta.notes ?? "") ? "website" : "facebook") : null),
   }
 
   if (!lead.phone) return { status: "skipped", reason: "No phone number on this appointment, so it wasn't added to leads." }
