@@ -123,7 +123,9 @@ export async function createAppointmentEvent(
   return { eventId: data.id, htmlLink: data.htmlLink ?? null }
 }
 
-/** Updates an existing event in place (job rescheduled, lead appointment moved, etc.). */
+/** Updates an existing event in place (job rescheduled, lead appointment moved, etc.).
+ *  A patch, not a full replace — so the appointment's "confirmed" mark (and
+ *  its colour) survive edits to the job or appointment. */
 export async function updateCalendarEvent(
   calendarId: string,
   eventId: string,
@@ -136,13 +138,13 @@ export async function updateCalendarEvent(
   const end = new Date(start.getTime() + (input.durationMinutes ?? EVENT_DURATION_MINUTES) * 60 * 1000)
 
   const calendar = getCalendarClient()
-  await calendar.events.update({
+  await calendar.events.patch({
     calendarId,
     eventId,
     requestBody: {
       summary:     input.title,
-      description: input.description || undefined,
-      location:    input.location || undefined,
+      description: input.description || null,
+      location:    input.location || null,
       start: { dateTime: start.toISOString(), timeZone: "America/Los_Angeles" },
       end:   { dateTime: end.toISOString(),   timeZone: "America/Los_Angeles" },
     },
@@ -170,6 +172,7 @@ export interface CalendarEventSummary {
   location:    string | null
   description: string | null
   htmlLink:    string | null  // link to open the real event in Google Calendar
+  confirmed:   boolean        // customer confirmed the appointment (Calendar page button)
 }
 
 /**
@@ -202,5 +205,39 @@ export async function listUpcomingEvents(
     location:    e.location ?? null,
     description: e.description ?? null,
     htmlLink:    e.htmlLink ?? null,
+    confirmed:   e.extendedProperties?.private?.omdan_confirmed === "1",
   }))
+}
+
+// Google Calendar colour "Basil" (green) — a confirmed appointment shows
+// green in the Google Calendar app too, not just in the CRM.
+const CONFIRMED_COLOR_ID = "10"
+
+/**
+ * Marks an appointment confirmed / not confirmed. Stored on the event itself
+ * (private extended property), so it works for every event on the calendar,
+ * CRM-created or not. Confirming turns the event green; un-confirming puts
+ * back whatever colour it had before.
+ */
+export async function setEventConfirmed(calendarId: string, eventId: string, confirmed: boolean): Promise<void> {
+  const calendar = getCalendarClient()
+  const { data: current } = await calendar.events.get({ calendarId, eventId })
+  const priv = current.extendedProperties?.private ?? {}
+  const wasConfirmed = priv.omdan_confirmed === "1"
+  if (wasConfirmed === confirmed) return
+
+  const previousColor = confirmed ? (current.colorId ?? "") : (priv.omdan_prev_color ?? "")
+  await calendar.events.patch({
+    calendarId,
+    eventId,
+    requestBody: {
+      colorId: confirmed ? CONFIRMED_COLOR_ID : (previousColor || null),
+      extendedProperties: {
+        private: {
+          omdan_confirmed:  confirmed ? "1" : "0",
+          omdan_prev_color: confirmed ? previousColor : "",
+        },
+      },
+    },
+  })
 }

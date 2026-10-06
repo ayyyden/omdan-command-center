@@ -1,11 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Loader2, MapPin, ExternalLink, RefreshCw, CalendarDays } from "lucide-react"
+import { Loader2, MapPin, ExternalLink, RefreshCw, CalendarDays, CircleCheck, Circle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { PhoneCopyButton } from "@/components/meta-leads/phone-copy-button"
+import { useUserRole } from "@/lib/user-role-context"
+import { can } from "@/lib/permissions"
+import { useToast } from "@/hooks/use-toast"
 
 interface CalendarEvent {
   id:          string
@@ -17,6 +20,7 @@ interface CalendarEvent {
   htmlLink:    string | null
   calendar:    "main" | "callback"
   phone:       string | null
+  confirmed:   boolean
 }
 
 // Opens the Apple Maps app on iPhone (maps.apple.com is a universal link);
@@ -49,6 +53,10 @@ function timeLabel(start: string | null, end: string | null): string {
 }
 
 export function CalendarAgenda() {
+  const role = useUserRole()
+  const canConfirm = !!role && can(role, "scheduler:edit")
+  const { toast } = useToast()
+  const [saving, setSaving] = useState<string | null>(null)
   const [events, setEvents]   = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)
@@ -72,6 +80,28 @@ export function CalendarAgenda() {
   }, [])
 
   useEffect(() => { load(daysAhead) }, [load, daysAhead])
+
+  // Tap to confirm, tap again to undo — flips on screen right away, and
+  // goes back if Google Calendar refuses the change.
+  async function toggleConfirmed(ev: CalendarEvent) {
+    const next = !ev.confirmed
+    setSaving(ev.id)
+    setEvents((list) => list.map((x) => (x.id === ev.id ? { ...x, confirmed: next } : x)))
+    try {
+      const res = await fetch("/api/calendar/events/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_id: ev.id, calendar: ev.calendar, confirmed: next }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? "Couldn't update the appointment")
+    } catch (err) {
+      setEvents((list) => list.map((x) => (x.id === ev.id ? { ...x, confirmed: !next } : x)))
+      toast({ title: "Not saved", description: err instanceof Error ? err.message : "Try again", variant: "destructive" })
+    } finally {
+      setSaving(null)
+    }
+  }
 
   if (!configured.main && !configured.callback) {
     return (
@@ -154,6 +184,16 @@ export function CalendarAgenda() {
                       </a>
                     )}
                     {e.phone && <PhoneCopyButton phone={e.phone} className="mt-1.5" />}
+                    {e.calendar === "main" && (
+                      <div>
+                        <ConfirmToggle
+                          confirmed={e.confirmed}
+                          disabled={!canConfirm || saving === e.id}
+                          readOnly={!canConfirm}
+                          onToggle={() => toggleConfirmed(e)}
+                        />
+                      </div>
+                    )}
                   </div>
                   {e.htmlLink && (
                     <a
@@ -173,5 +213,29 @@ export function CalendarAgenda() {
         ))}
       </div>
     </div>
+  )
+}
+
+function ConfirmToggle({ confirmed, disabled, readOnly, onToggle }: { confirmed: boolean; disabled: boolean; readOnly: boolean; onToggle: () => void }) {
+  const label = confirmed ? "Confirmed" : "Not confirmed"
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={disabled}
+      aria-pressed={confirmed}
+      title={readOnly ? label : confirmed ? "Tap to mark not confirmed" : "Tap to mark confirmed"}
+      className={cn(
+        "mt-2.5 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+        confirmed
+          ? "border-transparent bg-green-600 text-white hover:bg-green-700"
+          : "border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/30",
+        readOnly && "cursor-default",
+        disabled && !readOnly && "opacity-70",
+      )}
+    >
+      {confirmed ? <CircleCheck className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+      {label}
+    </button>
   )
 }
