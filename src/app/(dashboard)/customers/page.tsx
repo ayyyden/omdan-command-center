@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 import { Topbar } from "@/components/shared/topbar"
 import { Button } from "@/components/ui/button"
 import { CustomersBulkTable } from "@/components/customers/customers-bulk-table"
+import { CanceledLeadsTable } from "@/components/customers/canceled-leads-table"
 import { AlertTriangle, Plus } from "lucide-react"
 import Link from "next/link"
 import type { LeadStatus } from "@/types"
@@ -39,6 +40,10 @@ interface PageProps {
 export default async function CustomersPage({ searchParams }: PageProps) {
   const { status, q, archived } = await searchParams
   const isArchived = archived === "true"
+  // The Leads page opens on New Leads; "All" is ?status=all.
+  const showAll = status === "all"
+  const view = isArchived || showAll ? undefined : (status || "New Lead")
+  const isCanceledView = view === "Closed Lost"
   const session = await getSessionMember()
   if (!session) redirect("/login")
   if (!can(session.role, "customers:view")) redirect("/access-denied")
@@ -66,7 +71,7 @@ export default async function CustomersPage({ searchParams }: PageProps) {
       ? filteredQuery.in("id", scopedCustomerIds)
       : filteredQuery.eq("id", NO_ROWS_ID)
   }
-  if (!isArchived && status) filteredQuery = filteredQuery.eq("status", status)
+  if (view) filteredQuery = filteredQuery.eq("status", view)
   if (q) filteredQuery = filteredQuery.ilike("name", `%${q}%`)
 
   const [
@@ -110,7 +115,11 @@ export default async function CustomersPage({ searchParams }: PageProps) {
     <div>
       <Topbar
         title="CRM / Leads"
-        subtitle={`${totalActive} active leads`}
+        subtitle={
+          view === "New Lead"  ? `${stageCounts["New Lead"] ?? 0} new leads` :
+          isCanceledView       ? `${stageCounts["Closed Lost"] ?? 0} canceled leads` :
+                                 `${totalActive} active leads`
+        }
         actions={
           <Button asChild>
             <Link href="/customers/new"><Plus className="w-4 h-4 mr-2" />Add Lead</Link>
@@ -125,10 +134,10 @@ export default async function CustomersPage({ searchParams }: PageProps) {
           <div className="flex items-stretch gap-0 min-w-max rounded-lg border bg-card overflow-hidden">
             {/* All tab */}
             <Link
-              href="/customers"
+              href="/customers?status=all"
               className={[
                 "flex flex-col items-center justify-center px-4 py-2.5 text-xs font-medium border-r transition-colors min-w-[72px]",
-                !status && !isArchived
+                showAll
                   ? "bg-primary text-primary-foreground"
                   : "hover:bg-muted/60 text-muted-foreground",
               ].join(" ")}
@@ -140,7 +149,7 @@ export default async function CustomersPage({ searchParams }: PageProps) {
             {/* Pipeline stages */}
             {PIPELINE_STAGES.map((stage, i) => {
               const count   = stageCounts[stage.status] ?? 0
-              const active  = !isArchived && status === stage.status
+              const active  = view === stage.status
               const isLast  = i === PIPELINE_STAGES.length - 1
               return (
                 <Link
@@ -169,13 +178,13 @@ export default async function CustomersPage({ searchParams }: PageProps) {
               href="/customers?status=Closed+Lost"
               className={[
                 "flex flex-col items-center justify-center px-4 py-2.5 text-xs font-medium border-r transition-colors min-w-[80px]",
-                !isArchived && status === "Closed Lost"
+                isCanceledView
                   ? "bg-primary text-primary-foreground"
                   : "hover:bg-muted/60 text-muted-foreground",
               ].join(" ")}
             >
               <span className="text-base font-bold">{stageCounts["Closed Lost"] ?? 0}</span>
-              <span>Closed</span>
+              <span>Canceled</span>
             </Link>
 
             <Link
@@ -192,7 +201,7 @@ export default async function CustomersPage({ searchParams }: PageProps) {
         </div>
 
         {/* ── Follow-up alert banner ──────────────────────────────── */}
-        {!isArchived && !status && (() => {
+        {(showAll || view === "New Lead") && (() => {
           const needsFollowUp = (allActive ?? []).filter(c => c.status === "Follow-Up Needed").length
           const staleCount    = (allActive ?? []).filter(c => {
             const lastActivity = lastContactMap.get(c.id) ?? c.updated_at
@@ -216,12 +225,20 @@ export default async function CustomersPage({ searchParams }: PageProps) {
           )
         })()}
 
-        {/* ── Leads table ────────────────────────────────────────── */}
-        <CustomersBulkTable
-          customers={displayList}
-          userId={userId}
-          lastContact={Object.fromEntries(lastContactMap)}
-        />
+        {/* ── Leads table (Canceled has its own list with CSV export) ── */}
+        {isCanceledView ? (
+          <CanceledLeadsTable leads={displayList} />
+        ) : (
+          <CustomersBulkTable
+            customers={displayList}
+            userId={userId}
+            lastContact={Object.fromEntries(lastContactMap)}
+            {...(view === "New Lead" ? {
+              emptyTitle: "No new leads",
+              emptyText:  "Confirm an appointment on the Calendar and the person is added here automatically, or add a lead by hand.",
+            } : {})}
+          />
+        )}
       </div>
     </div>
   )
