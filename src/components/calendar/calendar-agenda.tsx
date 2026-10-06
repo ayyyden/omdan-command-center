@@ -95,6 +95,10 @@ export function CalendarAgenda() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error ?? "Couldn't update the appointment")
+      const lead = data.lead as { status: string; name?: string; reason?: string } | null
+      if (lead?.status === "created")  toast({ title: "Confirmed and added to leads", description: lead.name })
+      if (lead?.status === "existing") toast({ title: "Confirmed", description: `${lead.name} is already in your leads` })
+      if (lead?.status === "skipped")  toast({ title: "Confirmed", description: lead.reason })
     } catch (err) {
       setEvents((list) => list.map((x) => (x.id === ev.id ? { ...x, confirmed: !next } : x)))
       toast({ title: "Not saved", description: err instanceof Error ? err.message : "Try again", variant: "destructive" })

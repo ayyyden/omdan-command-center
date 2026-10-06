@@ -14,6 +14,10 @@ import { Clock, UserPlus } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { LeadStatus } from "@/types"
+import { HowItWentSelect } from "@/components/customers/lead-outcome"
+
+// "How it went" applies while a lead is still open (or once it has an outcome)
+const OUTCOME_STAGES = new Set<string>(["New Lead", "Contacted", "Estimate Sent", "Follow-Up Needed"])
 
 const ACTIVE_STAGES = new Set<string>([
   "New Lead", "Contacted", "Estimate Sent", "Follow-Up Needed", "Approved",
@@ -29,6 +33,7 @@ const SOURCE_LABELS: Record<string, string> = {
   yard_sign:       "Yard Sign",
   nextdoor:        "Nextdoor",
   yelp:            "Yelp",
+  website:         "Website",
   other:           "Other",
 }
 
@@ -44,6 +49,7 @@ interface CustomerRow {
   service_type: string | null
   lead_source: string | null
   status: string
+  lead_outcome?: string | null
   created_at: string
   updated_at: string
 }
@@ -52,9 +58,11 @@ interface Props {
   customers: CustomerRow[]
   userId: string
   lastContact: Record<string, string>
+  emptyTitle?: string
+  emptyText?: string
 }
 
-export function CustomersBulkTable({ customers, userId, lastContact }: Props) {
+export function CustomersBulkTable({ customers, userId, lastContact, emptyTitle, emptyText }: Props) {
   const router = useRouter()
   const { toast } = useToast()
   const allIds = customers.map((c) => c.id)
@@ -82,8 +90,8 @@ export function CustomersBulkTable({ customers, userId, lastContact }: Props) {
     <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
       <UserPlus className="w-8 h-8 text-muted-foreground/40" />
       <div>
-        <p className="font-medium text-muted-foreground">No leads yet</p>
-        <p className="text-sm text-muted-foreground/60 mt-0.5">Add your first customer or lead to get started.</p>
+        <p className="font-medium text-muted-foreground">{emptyTitle ?? "No leads yet"}</p>
+        <p className="text-sm text-muted-foreground/60 mt-0.5 max-w-sm">{emptyText ?? "Add your first customer or lead to get started."}</p>
       </div>
       <Link href="/customers/new" className="text-sm font-medium text-primary hover:underline">
         Add your first lead →
@@ -153,6 +161,11 @@ export function CustomersBulkTable({ customers, userId, lastContact }: Props) {
                         </span>
                       )}
                     </div>
+                    {(OUTCOME_STAGES.has(c.status) || c.lead_outcome) && (
+                      <div className="mt-2">
+                        <HowItWentSelect customerId={c.id} name={c.name} current={c.lead_outcome ?? null} />
+                      </div>
+                    )}
                     {isStale && (
                       <div className={cn(
                         "flex items-center gap-1 mt-1.5",
@@ -182,6 +195,7 @@ export function CustomersBulkTable({ customers, userId, lastContact }: Props) {
                   <TableHead>Source</TableHead>
                   <TableHead>Last Contact</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>How it went</TableHead>
                   <TableHead>Added</TableHead>
                 </TableRow>
               </TableHeader>
@@ -246,6 +260,11 @@ export function CustomersBulkTable({ customers, userId, lastContact }: Props) {
                       </TableCell>
                       <TableCell>
                         <InlineLeadStatus customerId={c.id} currentStatus={c.status as LeadStatus} />
+                      </TableCell>
+                      <TableCell>
+                        {(OUTCOME_STAGES.has(c.status) || c.lead_outcome)
+                          ? <HowItWentSelect customerId={c.id} name={c.name} current={c.lead_outcome ?? null} />
+                          : <span className="text-sm text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{formatDate(c.created_at)}</TableCell>
                     </TableRow>

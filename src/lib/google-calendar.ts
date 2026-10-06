@@ -219,12 +219,22 @@ const CONFIRMED_COLOR_ID = "10"
  * CRM-created or not. Confirming turns the event green; un-confirming puts
  * back whatever colour it had before.
  */
-export async function setEventConfirmed(calendarId: string, eventId: string, confirmed: boolean): Promise<void> {
+export async function setEventConfirmed(calendarId: string, eventId: string, confirmed: boolean): Promise<CalendarEventSummary> {
   const calendar = getCalendarClient()
   const { data: current } = await calendar.events.get({ calendarId, eventId })
   const priv = current.extendedProperties?.private ?? {}
   const wasConfirmed = priv.omdan_confirmed === "1"
-  if (wasConfirmed === confirmed) return
+  const summary: CalendarEventSummary = {
+    id:          current.id ?? eventId,
+    title:       current.summary ?? "(no title)",
+    start:       current.start?.dateTime ?? current.start?.date ?? null,
+    end:         current.end?.dateTime ?? current.end?.date ?? null,
+    location:    current.location ?? null,
+    description: current.description ?? null,
+    htmlLink:    current.htmlLink ?? null,
+    confirmed,
+  }
+  if (wasConfirmed === confirmed) return summary
 
   const previousColor = confirmed ? (current.colorId ?? "") : (priv.omdan_prev_color ?? "")
   await calendar.events.patch({
@@ -240,4 +250,5 @@ export async function setEventConfirmed(calendarId: string, eventId: string, con
       },
     },
   })
+  return summary
 }
