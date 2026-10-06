@@ -11,6 +11,22 @@ export interface CalendarEventWithSource {
   description: string | null
   htmlLink:    string | null
   calendar:    "main" | "callback"
+  /** Customer phone — from the linked CRM record, else parsed from the description */
+  phone:       string | null
+}
+
+type Contact = { phone: string | null; address: string | null }
+
+function one<T>(v: T | T[] | null | undefined): T | null {
+  return Array.isArray(v) ? (v[0] ?? null) : (v ?? null)
+}
+
+// Lead-appointment events write "Phone: …" into the description; anything
+// else typed into an event by hand may carry a number too.
+function phoneFromText(text: string | null): string | null {
+  if (!text) return null
+  const m = text.match(/(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/)
+  return m ? m[0].trim() : null
 }
 
 // GET /api/calendar/events?days_ahead=30
@@ -33,10 +49,41 @@ export async function GET(req: NextRequest) {
     callbackId ? listUpcomingEvents(callbackId, { daysAhead, maxResults: 100 }).catch(() => []) : Promise.resolve([]),
   ])
 
-  const events: CalendarEventWithSource[] = [
+  const raw = [
     ...mainEvents.map((e) => ({ ...e, calendar: "main" as const })),
     ...callbackEvents.map((e) => ({ ...e, calendar: "callback" as const })),
-  ].sort((a, b) => (a.start ?? "").localeCompare(b.start ?? ""))
+  ]
+
+  // Match each event back to the CRM record that created it (jobs, lead
+  // appointments and meta leads all store their calendar_event_id) so the
+  // Calendar page can show a tap-to-call phone and a tap-to-navigate address.
+  // Uses the caller's own session, so RLS still decides what they can see.
+  const ids = raw.map((e) => e.id).filter(Boolean)
+  const contacts = new Map<string, Contact>()
+  if (ids.length) {
+    const { supabase } = session
+    const [jobs, appts, metas] = await Promise.all([
+      supabase.from("jobs").select("calendar_event_id, customer:customers(phone, address)").in("calendar_event_id", ids),
+      supabase.from("lead_appointments").select("calendar_event_id, customer:customers(phone, address)").in("calendar_event_id", ids),
+      supabase.from("meta_leads").select("calendar_event_id, phone, address").in("calendar_event_id", ids),
+    ])
+    for (const row of [...(jobs.data ?? []), ...(appts.data ?? [])]) {
+      const c = one(row.customer as Contact | Contact[] | null)
+      if (row.calendar_event_id && c) contacts.set(row.calendar_event_id, { phone: c.phone ?? null, address: c.address ?? null })
+    }
+    for (const row of metas.data ?? []) {
+      if (row.calendar_event_id) contacts.set(row.calendar_event_id, { phone: row.phone ?? null, address: row.address ?? null })
+    }
+  }
+
+  const events: CalendarEventWithSource[] = raw.map((e) => {
+    const c = contacts.get(e.id)
+    return {
+      ...e,
+      location: e.location || c?.address || null,
+      phone:    c?.phone || phoneFromText(e.description) || null,
+    }
+  }).sort((a, b) => (a.start ?? "").localeCompare(b.start ?? ""))
 
   return NextResponse.json({
     events,

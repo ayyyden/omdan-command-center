@@ -28,7 +28,8 @@ export function formatDate(date: string | Date | null | undefined): string {
 }
 
 export function formatPhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "")
+  let digits = phone.replace(/\D/g, "")
+  if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1) // +1 country code
   if (digits.length === 10) {
     return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
   }
