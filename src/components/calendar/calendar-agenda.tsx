@@ -5,6 +5,7 @@ import { Loader2, MapPin, ExternalLink, RefreshCw, CalendarDays } from "lucide-r
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { PhoneCopyButton } from "@/components/meta-leads/phone-copy-button"
 
 interface CalendarEvent {
   id:          string
@@ -15,6 +16,13 @@ interface CalendarEvent {
   description: string | null
   htmlLink:    string | null
   calendar:    "main" | "callback"
+  phone:       string | null
+}
+
+// Opens the Apple Maps app on iPhone (maps.apple.com is a universal link);
+// on a computer it opens Apple Maps on the web.
+function appleMapsUrl(address: string): string {
+  return `https://maps.apple.com/?q=${encodeURIComponent(address)}`
 }
 
 const CALENDAR_BADGE: Record<CalendarEvent["calendar"], { label: string; className: string }> = {
@@ -134,11 +142,18 @@ export function CalendarAgenda() {
                       </Badge>
                     </div>
                     {e.location && (
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
-                        <MapPin className="w-3 h-3 shrink-0" />
+                      <a
+                        href={appleMapsUrl(e.location)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open in Apple Maps"
+                        className="flex items-center gap-1.5 text-sm text-foreground underline decoration-muted-foreground/40 underline-offset-[3px] hover:decoration-foreground mt-1.5 min-w-0"
+                      >
+                        <MapPin className="w-3.5 h-3.5 shrink-0" />
                         <span className="truncate">{e.location}</span>
-                      </div>
+                      </a>
                     )}
+                    {e.phone && <PhoneCopyButton phone={e.phone} className="mt-1.5" />}
                   </div>
                   {e.htmlLink && (
                     <a

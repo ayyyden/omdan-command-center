@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Copy, Check, Phone, PhoneCall } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, formatPhone } from "@/lib/utils"
 
 interface PhoneCopyButtonProps {
   phone: string
@@ -49,7 +49,7 @@ export function PhoneCopyButton({ phone, className }: PhoneCopyButtonProps) {
       {mobile
         ? <PhoneCall className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
         : <Phone className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-      <span>{phone}</span>
+      <span>{formatPhone(phone)}</span>
       {!mobile && (copied
         ? <Check className="w-3.5 h-3.5 text-green-600 shrink-0" />
         : <Copy className="w-3.5 h-3.5 text-muted-foreground shrink-0" />)}
