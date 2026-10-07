@@ -68,6 +68,8 @@ export interface BankReviewResult {
   auto_linked: number
   proposed:    number
   batches:     number
+  /** digests Lia actually received (batches minus failed sends) */
+  delivered?:  number
 }
 
 interface Candidate {
@@ -426,6 +428,7 @@ export async function runBankReview(
   const jobOptions = ctx.jobs.slice(0, 20)
 
   let batches = 0
+  let delivered = 0
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const chunk = items.slice(i, i + BATCH_SIZE)
     const payload: BankReviewPayload = { items: chunk, job_options: jobOptions }
@@ -443,13 +446,14 @@ export async function runBankReview(
     if (error || !approval) { console.error("[bank-review] failed to create digest approval:", error?.message); continue }
 
     const unsure = chunk.filter((c) => c.confidence === "low").length
-    notifyLiaAction({
+    const sent = await notifyLiaAction({
       text: `🏦 New bank activity — I sorted ${chunk.length} transaction${chunk.length !== 1 ? "s" : ""}${unsure ? ` (${unsure} need your input ❓)` : ""}.`,
       approvalId: approval.id, actionType: "save_bank_batch", actionSummary: summary,
       payload: payload as unknown as Record<string, unknown>,
     })
+    if (sent) delivered++
     batches++
   }
 
-  return { considered: all.length, auto_linked: linked, proposed: items.length, batches }
+  return { considered: all.length, auto_linked: linked, proposed: items.length, batches, delivered }
 }

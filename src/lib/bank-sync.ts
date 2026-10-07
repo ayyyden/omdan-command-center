@@ -156,7 +156,7 @@ export async function syncOneItem(service: ServiceClient, item: PlaidItemRow): P
       .eq("id", item.id)
 
     if (!wasHealthy) {
-      notifyLiaAction({ text: `✅ ${bankName} bank connection is back online and syncing again.` })
+      await notifyLiaAction({ text: `✅ ${bankName} bank connection is back online and syncing again.` })
     }
 
     return { item_id: item.id, institution_name: item.institution_name, added, modified, removed }
@@ -166,7 +166,7 @@ export async function syncOneItem(service: ServiceClient, item: PlaidItemRow): P
     await service.from("plaid_items").update({ status: "error", error: message }).eq("id", item.id)
 
     if (wasHealthy) {
-      notifyLiaAction({
+      await notifyLiaAction({
         text: needsReconnect(message)
           ? `⚠️ ${bankName} needs to be reconnected (${message}). Open the Bank page in the CRM and reconnect — until then no new transactions will come in.`
           : `⚠️ ${bankName} sync failed (${message}). I'll keep retrying automatically — you'll hear from me when it's back.`,
