@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { verifyAssistantSecret } from "@/lib/assistant-auth"
 import { createServiceClient } from "@/lib/supabase/service"
+import { attributeMetaLead } from "@/lib/meta-attribution"
 
 // POST /api/meta-leads/ingest
 // Called by the lia-bridge Telegram webhook when the "desertleads" bot posts
@@ -65,5 +66,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error?.message ?? "Insert failed" }, { status: 500 })
   }
 
-  return NextResponse.json({ ok: true, lead: data }, { status: 201 })
+  // Tie the lead to its campaign / ad set / ad / form (Ad Advisor). Never blocks the lead.
+  const attribution = await attributeMetaLead(service, data.id, { leadgenId: ref }).catch(() => null)
+
+  return NextResponse.json({ ok: true, lead: data, attribution: attribution?.attribution ?? null }, { status: 201 })
 }

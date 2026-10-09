@@ -208,7 +208,12 @@ export function can(role: TeamRole, action: string): boolean {
     case 'meta_leads:manage':
       return role === 'meta_lead' || roleAtLeast(role, 'admin')
 
-    // ── Bank accounts (Plaid) ─────────────────────────────────────────────────
+    // ── Ad Advisor (Meta ads analysis) ───────────────────────────────────────
+    case 'marketing:view':
+    case 'marketing:manage':
+      return roleAtLeast(role, 'admin')
+
+    // ── Bank accounts (Plaid)─────────────────────────────────────────────────
     case 'bank:view':
     case 'bank:manage':
       return roleAtLeast(role, 'admin')

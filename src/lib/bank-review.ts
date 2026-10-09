@@ -329,17 +329,24 @@ interface RawResult {
   category: string; method: string; description: string; confidence: "high" | "medium" | "low"; question: string | null
 }
 
+// Shared with the Ad Advisor (src/lib/meta-ads-review.ts) so every AI review
+// in the CRM runs on the same, known-good model + client setup.
+export const AI_MODEL = "claude-opus-5"
+export function createAiClient(): Anthropic {
+  return new Anthropic()
+}
+
 export async function classifyTransactions(
   candidates: Candidate[],
   ctx: { jobs: JobOption[]; jobLines: string; history: string },
 ): Promise<BankReviewItem[]> {
-  const client = new Anthropic()
+  const client = createAiClient()
   const txLines = candidates.map((c, i) =>
     `${i}. ${c.date} | ${c.amount > 0 ? "OUT" : "IN"} $${Math.abs(c.amount).toFixed(2)} | ${c.account} | bank says: "${c.name}" | plaid category: ${c.category ?? "-"}`
   ).join("\n")
 
   const response = await client.messages.stream({
-    model:      "claude-opus-5",
+    model:      AI_MODEL,
     max_tokens: 16000,
     thinking:   { type: "adaptive" },
     output_config: { format: { type: "json_schema", schema: OUTPUT_SCHEMA } },

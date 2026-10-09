@@ -1,5 +1,5 @@
 import { schedule } from "node-cron"
-import { sendMessage, rolloverMetaLeads, syncBank, reviewBank } from "./crm-client"
+import { sendMessage, rolloverMetaLeads, syncBank, reviewBank, syncMetaAds, reviewMetaAds } from "./crm-client"
 import { formatDailySummary } from "./format-response"
 import { sendTelegramMessage } from "./telegram-client"
 
@@ -9,6 +9,7 @@ export function startScheduler(allowedIds: Set<number>): void {
   // the daily bank review pushes its digest to Telegram via /notify-action.
   startMetaLeadsRollover()
   startBankSync()
+  startMetaAds()
 
   if (allowedIds.size === 0) {
     console.log("[scheduler] No TELEGRAM_ALLOWED_USER_IDS configured — daily summary disabled")
@@ -135,6 +136,38 @@ function startBankSync(): void {
   )
 
   console.log("[scheduler] Bank sync scheduled — 07:00/14:00/21:00, daily review digest 18:30 America/Los_Angeles")
+}
+
+// Ad Advisor: pull Meta numbers + Quo calls, run the rules and send/hold
+// alerts every 3h (7am run also releases alerts held overnight); daily
+// review 8:30, weekly Monday 8:45, monthly on the 1st at 9:00 — all LA time.
+function startMetaAds(): void {
+  schedule(
+    "0 7,10,13,16,19,21 * * *",
+    async () => {
+      try {
+        const r = await syncMetaAds()
+        console.log(`[scheduler] Meta ads sync — ${r.entities} entities, ${r.insight_rows} rows, ${r.hits} rule hits, alerts sent ${r.alerts?.sent ?? 0}/held ${r.alerts?.held ?? 0}, flushed ${r.flushed}${r.quo && !r.quo.available ? `, Quo calls unavailable: ${r.quo.error}` : ""}${r.errors.length ? ` — errors: ${r.errors.join("; ")}` : ""}`)
+      } catch (err: unknown) {
+        console.error("[scheduler] Meta ads sync failed:", err instanceof Error ? err.message : String(err))
+      }
+    },
+    { timezone: "America/Los_Angeles", noOverlap: true },
+  )
+
+  const review = (period: "daily" | "weekly" | "monthly") => async () => {
+    try {
+      const r = await reviewMetaAds(period)
+      console.log(`[scheduler] Meta ads ${period} review — ${r.skipped_reason ?? `${r.entities_reviewed} reviewed, ${r.actions} actions`}`)
+    } catch (err: unknown) {
+      console.error(`[scheduler] Meta ads ${period} review failed:`, err instanceof Error ? err.message : String(err))
+    }
+  }
+  schedule("30 8 * * *", review("daily"),   { timezone: "America/Los_Angeles", noOverlap: true })
+  schedule("45 8 * * 1", review("weekly"),  { timezone: "America/Los_Angeles", noOverlap: true })
+  schedule("0 9 1 * *",  review("monthly"), { timezone: "America/Los_Angeles", noOverlap: true })
+
+  console.log("[scheduler] Meta ads scheduled — sync 7/10/13/16/19/21, daily 8:30, weekly Mon 8:45, monthly 1st 9:00 America/Los_Angeles")
 }
 
 function laNow(): string {

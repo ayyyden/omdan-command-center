@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Users, FileText, Briefcase, Calendar,
   Receipt, DollarSign, BarChart3, HardHat, LogOut, Settings,
-  ScrollText, X, Search, Bell, UsersRound, Calculator, PhoneCall, Bot, Megaphone, Landmark,
+  ScrollText, X, Search, Bell, UsersRound, Calculator, PhoneCall, Bot, Megaphone, Landmark, TrendingUp,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
@@ -28,6 +28,7 @@ export const navItems = [
   { href: "/payments",   label: "Payments",    icon: DollarSign,      roles: ["owner", "admin"] as TeamRole[] },
   { href: "/reports",    label: "Reports",     icon: BarChart3,       roles: ["owner", "admin"] as TeamRole[] },
   { href: "/bank",       label: "Bank",        icon: Landmark,        roles: ["owner", "admin"] as TeamRole[] },
+  { href: "/marketing",  label: "Ad Advisor",  icon: TrendingUp,      roles: ["owner", "admin"] as TeamRole[] },
   { href: "/contracts",   label: "Documents",   icon: ScrollText,   roles: ["owner", "admin", "office"] as TeamRole[] },
   { href: "/calculator",       label: "Calculator",   icon: Calculator,  roles: ["owner", "admin", "project_manager"] as TeamRole[] },
   { href: "/propstream-leads", label: "Lead Center",  icon: PhoneCall,   roles: ["owner", "admin", "lead_operator"] as TeamRole[] },

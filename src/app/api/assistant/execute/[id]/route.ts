@@ -17,6 +17,7 @@ import { syncJobCalendarEvent } from "@/lib/job-calendar-sync"
 import { syncLeadAppointmentCalendarEvent } from "@/lib/lead-appointment-calendar-sync"
 import { getTodayLA } from "@/lib/utils"
 import type { BankReviewPayload } from "@/lib/bank-review"
+import { recordCallAttempt } from "@/lib/call-attempts"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -1842,31 +1843,20 @@ export async function POST(_req: Request, { params }: RouteCtx) {
     const MISSED_CALL_ARCHIVE_THRESHOLD = 10
 
     if (outcome === "no_answer") {
-      const { data: current, error: fetchErr } = await supabase
-        .from("meta_leads")
-        .select("missed_call_count")
-        .eq("id", meta_lead_id)
+      // Same atomic increment the CRM button uses (migration 061) — the old
+      // read-then-write here could lose a count on a double press.
+      const { data: updated, error: updErr } = await supabase
+        .rpc("increment_meta_lead_missed_call", { p_lead_id: meta_lead_id, p_archive_threshold: MISSED_CALL_ARCHIVE_THRESHOLD })
         .single()
 
-      if (fetchErr || !current) {
+      if (updErr || !updated) {
+        const message = updErr?.message ?? "Lead not found"
         await supabase.from("assistant_approvals")
-          .update({ status: "failed", error: fetchErr?.message ?? "Lead not found", updated_at: now }).eq("id", id)
-        return NextResponse.json({ error: fetchErr?.message ?? "Lead not found" }, { status: 404 })
+          .update({ status: "failed", error: message, updated_at: now }).eq("id", id)
+        return NextResponse.json({ error: message }, { status: updErr ? 500 : 404 })
       }
-
-      const newCount  = (current.missed_call_count ?? 0) + 1
-      const nextList  = newCount >= MISSED_CALL_ARCHIVE_THRESHOLD ? "archive" : "second_call_list"
-
-      const { error: updErr } = await supabase
-        .from("meta_leads")
-        .update({ list: nextList, last_outcome: "no_answer", missed_call_count: newCount })
-        .eq("id", meta_lead_id)
-
-      if (updErr) {
-        await supabase.from("assistant_approvals")
-          .update({ status: "failed", error: updErr.message, updated_at: now }).eq("id", id)
-        return NextResponse.json({ error: updErr.message }, { status: 500 })
-      }
+      const { list: nextList, missed_call_count: newCount } = updated as { list: string; missed_call_count: number }
+      await recordCallAttempt(supabase, meta_lead_id, "no_answer", "lia")
 
       await supabase.from("assistant_approvals")
         .update({ status: "executed", executed_at: now, result: { meta_lead_id, list: nextList, missed_call_count: newCount }, updated_at: now })
@@ -1934,6 +1924,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
         .update({ status: "failed", error: updErr.message, updated_at: now }).eq("id", id)
       return NextResponse.json({ error: updErr.message }, { status: 500 })
     }
+    await recordCallAttempt(supabase, meta_lead_id, outcome, "lia")
 
     await supabase.from("assistant_approvals")
       .update({ status: "executed", executed_at: now, result: { meta_lead_id, list: targetList, event_id: eventId }, updated_at: now })

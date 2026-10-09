@@ -10,6 +10,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { formatPhone } from "@/lib/utils"
+import { copyAttributionToCustomer } from "@/lib/meta-attribution"
 
 export interface AppointmentEvent {
   id:          string
@@ -104,7 +105,7 @@ export async function ensureLeadFromAppointment(
 
   // 3. Details: a linked Meta lead is the best source, then the event itself
   const parsed = parseAppointment(ev)
-  const { data: meta } = await supabase.from("meta_leads").select("full_name, phone, email, address, city, notes").eq("calendar_event_id", ev.id).maybeSingle()
+  const { data: meta } = await supabase.from("meta_leads").select("id, full_name, phone, email, address, city, notes").eq("calendar_event_id", ev.id).maybeSingle()
   const lead = {
     name:         meta?.full_name || parsed.name,
     phone:        meta?.phone || parsed.phone,
@@ -125,6 +126,7 @@ export async function ensureLeadFromAppointment(
   const same = (withPhones ?? []).find((c) => digits(c.phone) === target)
   if (same) {
     if (!same.calendar_event_id) await supabase.from("customers").update({ calendar_event_id: ev.id }).eq("id", same.id)
+    if (meta) await copyAttributionToCustomer(supabase, meta.id, same.id).catch(() => {})
     return { status: "existing", customerId: same.id, name: same.name }
   }
 
@@ -154,5 +156,7 @@ export async function ensureLeadFromAppointment(
     .single()
 
   if (error || !created) return { status: "skipped", reason: `Couldn't add the lead: ${error?.message ?? "unknown error"}` }
+  // Carry the ad attribution over so the Ad Advisor can follow this lead to a sale
+  if (meta) await copyAttributionToCustomer(supabase, meta.id, created.id).catch(() => {})
   return { status: "created", customerId: created.id, name }
 }
