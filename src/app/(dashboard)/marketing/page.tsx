@@ -28,7 +28,6 @@ export default async function AdAdvisorPage({ searchParams }: PageProps) {
 
   // Ad tables are read with the service client after the permission check above
   const service = createServiceClient()
-  const configured = metaConfigured()
 
   const [data, { data: health }, { data: actions }, { data: reports }] = await Promise.all([
     loadAdData(service, { days: 60 }),
@@ -37,6 +36,8 @@ export default async function AdAdvisorPage({ searchParams }: PageProps) {
     service.from("meta_ad_reports").select("*").order("period_start", { ascending: false }).limit(60),
   ])
 
+  // Connected = token set here, or the latest health check reached the account
+  const configured = metaConfigured() || !!(health?.account)
   const period = { start: addDays(data.today, -(days - 1)), end: data.today }
 
   // Latest verdict per entity from the most recent report that covered it
