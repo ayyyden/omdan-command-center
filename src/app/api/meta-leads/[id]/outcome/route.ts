@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { requirePermission } from "@/lib/auth-helpers"
 import { createCalendarEvent } from "@/lib/google-calendar"
+import { recordCallAttempt } from "@/lib/call-attempts"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest, { params }: RouteCtx) {
     if (error) return Response.json({ error: error.message }, { status: 500 })
     if (!data) return Response.json({ error: "Lead not found" }, { status: 404 })
 
+    await recordCallAttempt(supabase, id, "no_answer", "crm")
     return Response.json({ lead: data })
   }
 
@@ -106,5 +108,6 @@ export async function POST(req: NextRequest, { params }: RouteCtx) {
 
   if (error) return Response.json({ error: error.message }, { status: 500 })
 
+  await recordCallAttempt(supabase, id, outcome as Outcome, "crm")
   return Response.json({ lead: data })
 }

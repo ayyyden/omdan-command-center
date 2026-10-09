@@ -23,7 +23,7 @@ import { DesignSwitchButton } from "@/components/providers/design-switch"
 
 const GROUPS: { label: string; hrefs: string[] }[] = [
   { label: "Work",  hrefs: ["/dashboard", "/customers", "/estimates", "/jobs", "/scheduler"] },
-  { label: "Money", hrefs: ["/payments", "/expenses", "/bank", "/reports"] },
+  { label: "Money", hrefs: ["/payments", "/expenses", "/bank", "/reports", "/marketing"] },
   { label: "Tools", hrefs: ["/contracts", "/propstream-leads", "/meta-leads", "/calculator", "/lia"] },
 ]
 

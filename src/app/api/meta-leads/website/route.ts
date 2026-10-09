@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/service"
+import { attributeMetaLead, cleanUtm } from "@/lib/meta-attribution"
 
 // POST /api/meta-leads/website
 // Called by the desertgreenbuilders.com booking backend (Google Apps Script)
@@ -31,6 +32,13 @@ export async function POST(req: NextRequest) {
     interests?:         string | null
     language?:          string | null
     phone_verified?:    boolean
+    // Ad attribution captured on the landing page (assets/js/attribution.js)
+    utm_source?:        string | null
+    utm_medium?:        string | null
+    utm_campaign?:      string | null
+    utm_content?:       string | null
+    utm_term?:          string | null
+    fbclid?:            string | null
   }
 
   const full_name = body.full_name?.trim()
@@ -87,5 +95,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error?.message ?? "Insert failed" }, { status: 500 })
   }
 
-  return NextResponse.json({ ok: true, lead: data }, { status: 201 })
+  const attribution = await attributeMetaLead(service, data.id, { utm: cleanUtm(body) }).catch(() => null)
+
+  return NextResponse.json({ ok: true, lead: data, attribution: attribution?.attribution ?? null }, { status: 201 })
 }

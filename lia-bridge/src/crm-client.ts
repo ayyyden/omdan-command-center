@@ -129,6 +129,32 @@ export async function reviewBank(): Promise<BankReviewResult> {
   return res.json() as Promise<BankReviewResult>
 }
 
+// ── Ad Advisor (Meta ads) ──────────────────────────────────────────────────
+
+export interface MetaAdsSyncResult {
+  configured: boolean
+  entities: number
+  insight_rows: number
+  hits: number
+  alerts: { sent: number; held: number; duplicates: number } | null
+  flushed: number
+  snapshots: number
+  quo: { available: boolean; calls_added: number; error?: string } | null
+  errors: string[]
+}
+
+export async function syncMetaAds(): Promise<MetaAdsSyncResult> {
+  const res = await crmFetch("/api/meta-ads/sync", { method: "POST" })
+  if (!res.ok) throw new Error(`CRM meta-ads sync failed (${res.status}): ${await res.text()}`)
+  return res.json() as Promise<MetaAdsSyncResult>
+}
+
+export async function reviewMetaAds(period: "daily" | "weekly" | "monthly"): Promise<{ entities_reviewed: number; actions: number; skipped_reason?: string }> {
+  const res = await crmFetch(`/api/meta-ads/review?period=${period}`, { method: "POST" })
+  if (!res.ok) throw new Error(`CRM meta-ads ${period} review failed (${res.status}): ${await res.text()}`)
+  return res.json() as Promise<{ entities_reviewed: number; actions: number; skipped_reason?: string }>
+}
+
 export async function createApproval(body: {
   channel:          string
   action_type:      string
