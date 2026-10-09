@@ -31,7 +31,7 @@ interface Snapshot { spend?: number; leads?: number; cpl?: number | null; ctr?: 
 
 const TYPE_LABELS: Record<string, string> = {
   creative_refresh: "New creative", new_test: "Run a test", form_fix: "Fix the form", audience: "Audience",
-  budget_up: "Raise budget", budget_down: "Lower budget", pause: "Pause", follow_up: "Team follow-up", tracking: "Tracking",
+  budget_up: "Raise budget", budget_down: "Lower budget", pause: "Pause", follow_up: "Follow up", tracking: "Tracking",
 }
 
 function delta(label: string, before: number | null | undefined, after: number | null | undefined, fmt: (n: number) => string, lowerIsBetter = false) {

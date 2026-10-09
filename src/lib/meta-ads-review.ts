@@ -81,6 +81,8 @@ Rules you must follow:
 - Contact-rate signals marked informational are not reliable yet; mention them only as something to watch.
 - Learn from "recent_action_outcomes": what Edan already did and how metrics moved 7 days later. Don't repeat advice that didn't work; build on what did.
 - Be specific. Instead of "test new creative", say which angle (before/after of a real turf or paver job, a 15-second walk-through video, a price-anchor offer, a local-proof hook naming the city), and for forms which change (add a "When do you want the project done?" or "Do you own the home?" qualifier, switch to Higher Intent, or send to the website booking page).
+- account_actions are only for things that span the whole account (tracking, team follow-up, moving budget between campaigns). Never repeat an action already given for a campaign or ad.
+- Write for Edan, not for engineers: never mention "rules", "the engine", "flags" or field names; say what the numbers show.
 - One clear sentence per action. Plain words, no jargon without explanation. Don't invent numbers.`
 
 export interface ReviewResult {
