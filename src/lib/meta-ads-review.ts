@@ -75,7 +75,8 @@ Rules you must follow:
 - A metric with status "too_early" has NOT matured (leads are too new to have booked or bought). Never use it as evidence, never pause because of it. Say it is too early.
 - "can_judge": false means too little spend or fewer than 3 days running. Then the verdict must be keep or watch, never pause or scale.
 - Small samples (e.g. under ~10 leads, under 3 appointments, under 2 sales) mean low confidence and no strong verdict. State the sample in the reason.
-- Budget changes: at most 20% per day, to avoid resetting Meta's learning phase.
+- Budget changes: at most 20% per day, to avoid resetting Meta's learning phase. Use budget_up / budget_down only when you recommend actually changing the budget; "keep the budget as is" is not a budget action (put it in the reason, or use follow_up for a dated re-check).
+- "unattributed" explains why some leads aren't tied to a campaign. Don't treat a known, already-fixed cause as an urgent tracking problem; only raise tracking if new leads keep arriving unattributed.
 - Leads not yet called are a follow-up/team problem, not an ad problem. Use action type follow_up for that, never blame the ad.
 - Contact-rate signals marked informational are not reliable yet; mention them only as something to watch.
 - Learn from "recent_action_outcomes": what Edan already did and how metrics moved 7 days later. Don't repeat advice that didn't work; build on what did.
@@ -185,7 +186,10 @@ export async function runAdReview(service: SupabaseClient, period: Period, opts:
       sale_maturity_days: data.settings.sale_maturity_days, min_call_attempts: data.settings.min_call_attempts,
     },
     contact_tracking: data.contactTrackingMature ? "reliable" : "informational only (call tracking is under 14 days old)",
-    unattributed_leads: data.unattributed,
+    unattributed: {
+      count: data.unattributed,
+      known_causes: "Website bookings made before 2026-10-09 can't be tied to an ad: the ad URL parameters and the website's tag capture were added that day. Instant-form leads are matched through Meta's lead id (only possible for leads under 90 days old).",
+    },
     entities: chosen.map(({ e, m7, hits, judge }) => {
       const mp = metricsFor(data, e, range)
       return {
