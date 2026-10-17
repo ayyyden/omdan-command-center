@@ -35,7 +35,8 @@ const FILTERS: Filter[] = ["all", "sent", "signed"]
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—"
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+  // Pinned to Pacific time so the server (UTC) and the browser render the same day (hydration)
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Los_Angeles" })
 }
 
 export function SentContractsTable({ sent, appUrl }: Props) {
