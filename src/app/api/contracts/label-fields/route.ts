@@ -24,13 +24,27 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["n", "keep", "label", "field_type", "fill_role"],
+        required: ["n", "keep", "label", "field_type", "fill_role", "split"],
         properties: {
           n: { type: "integer" },
           keep: { type: "boolean", description: "false if this is not a blank someone writes in (a decorative underline, a table border, a line with printed text already on it)" },
           label: { type: "string", description: "Short name from the printed caption next to / under / above the blank, e.g. \"Owner's Name\", \"Contractor Price\", \"Owner's Signature\", \"Date\"" },
           field_type: { type: "string", enum: ["text", "multiline", "date", "signature", "initials", "checkbox"] },
           fill_role: { type: "string", enum: ["customer", "staff"] },
+          split: {
+            type: "array",
+            description: "Empty normally. When ONE box covers several separate blanks (several captions under one long line, e.g. Home# / Work# / Cell#, or City / State / Zip), one entry per blank, left to right",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["label", "x_start", "x_end"],
+              properties: {
+                label: { type: "string" },
+                x_start: { type: "number", description: "page fraction where this blank starts" },
+                x_end: { type: "number", description: "page fraction where this blank ends" },
+              },
+            },
+          },
         },
       },
     },
@@ -49,8 +63,11 @@ For every number, read the printed words around that blank (left of it, under it
   - checkbox: a small square meant to be ticked
   - text: everything else
 - fill_role: who fills it.
-  - staff (Omdan fills it before sending): contractor / company / sales person / representative fields and signatures, license and state registration numbers, contract price, down payment, payment schedule amounts and descriptions, description of work and materials, start/completion dates, change order number, "not included" items, the contract date at the top.
-  - customer: owner / buyer / customer / homeowner fields — their name, address, city/state/zip, phones, email, date of birth, their signatures, initials and dates next to their signatures.
+  - staff (Omdan fills it before sending): contractor / company / sales person / representative fields, names and signatures, license and state registration numbers, contract / job numbers, contract price, down payment, payment schedule amounts and descriptions, description of work and materials, start/completion dates, change order number, "not included" items, the agreement date at the top, finance company / amount financed / monthly payment / rate / term, warranty project and years, and on a payment receipt everything the company records (date, customer name, amount received, cash/check details, file, project manager).
+  - customer: owner / buyer / customer / homeowner / witness fields — their name, address, city/state/zip, phones, email, date of birth, their signatures, initials and the dates next to them; credit-card authorization details (name on card, card number, expiry, CVV, billing address, amount to charge).
+- A line with a printed caption like "(Representative's Name)" or "Print Name" is text, not signature — only "Signature" / "Sign Here" / "X ____" captions are signatures.
+- split: when one box clearly spans several blanks with different captions (e.g. a single line with "Home#", "Work#", "Cell#" printed under it), list each blank with its own label and x range inside the box; otherwise leave it empty.
+- Leave blanks in a "Production / Office Use Only" area out (keep: false).
 - keep: false when the line is not a blank to write in (an underline under a heading, a page or table border, a line already carrying printed text). When unsure, keep it.
 
 Return one entry per number shown.`
@@ -88,7 +105,7 @@ export async function POST(req: Request) {
     if (response.stop_reason === "refusal") return Response.json({ error: "Couldn't read this page" }, { status: 422 })
     const text = response.content.find((b) => b.type === "text")
     if (!text || text.type !== "text") return Response.json({ error: "No answer" }, { status: 502 })
-    const parsed = JSON.parse(text.text) as { fields: { n: number; keep: boolean; label: string; field_type: string; fill_role: string }[] }
+    const parsed = JSON.parse(text.text) as { fields: { n: number; keep: boolean; label: string; field_type: string; fill_role: string; split: { label: string; x_start: number; x_end: number }[] }[] }
     return Response.json({ fields: parsed.fields })
   } catch (err) {
     console.error("[contracts/label-fields] failed:", err)
