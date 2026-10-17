@@ -55,6 +55,9 @@ export function sampleValue(f: FieldLike, page: { widthPt: number; heightPt: num
     case "initials": return sampleSignature(f.field_type === "initials" ? "MG" : "Maria Gonzalez")
     case "multiline":
     case "rich_text": {
+      // "Long" = a real multi-section scope of work, the kind that gets typed
+      // into description boxes (headings + bullets), to see how it lays out
+      if (length === "long" && f.field_type === "multiline") return SCOPE_SAMPLE
       const per = charsPerRow(f, page.widthPt)
       const rows = f.options?.lineSpacing ? ruledRows(f.height * page.heightPt, f.options.lineSpacing) : Math.max(2, Math.floor((f.height * page.heightPt) / 13))
       const target = length === "short" ? per * 0.8 : length === "long" ? per * rows * 1.6 : per * rows * 0.95
@@ -73,6 +76,19 @@ export function sampleValue(f: FieldLike, page: { widthPt: number; heightPt: num
     }
   }
 }
+
+const SCOPE_SAMPLE = [
+  "1. Concrete Installation – Approximately 500 Sq. Ft.", "",
+  "* Prepare and grade the designated area.", "* Install compacted base material as needed.", "* Form and pour new concrete slab.",
+  "* Finish concrete surface (broom finish or as specified).", "* Install expansion joints and control joints where required.",
+  "* Clean up and haul away job-related debris.", "",
+  "2. Paver Installation – Approximately 300 Sq. Ft.", "",
+  "* Excavate and prepare the installation area.", "* Install and compact road base.", "* Install bedding sand.",
+  "* Lay pavers in the selected pattern.", "* Cut pavers as needed for proper fit.", "* Install edge restraints and polymeric sand.", "",
+  "3. Fireplace Block Installation", "",
+  "* Build fireplace structure using block construction.", "* Install fireplace according to the agreed design and dimensions.",
+  "* Ensure proper structural stability and alignment.", "* Prepare fireplace for finishing materials if included in the project scope.",
+].join("\n")
 
 const GENERIC = "Artificial turf with pavers and a concrete border around the side yard"
 

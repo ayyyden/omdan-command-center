@@ -378,13 +378,31 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
         const data = await res.json()
         if (!res.ok) throw new Error(data.error ?? "Naming failed")
         const ph = pg.pdfHeight
-        const answers = new Map((data.fields as { n: number; keep: boolean; label: string; field_type: FieldType; fill_role: FillRole }[]).map((a) => [a.n, a]))
+        type Answer = { n: number; keep: boolean; label: string; field_type: FieldType; fill_role: FillRole; split?: { label: string; x_start: number; x_end: number }[] }
+        const answers = new Map((data.fields as Answer[]).map((a) => [a.n, a]))
         const drop = new Set<string>()
         const patches = new Map<string, Partial<ContractField>>()
+        const extra: ContractField[] = []
+        const splitIds = new Set<string>()
         list.forEach((f, i) => {
           const a = answers.get(i + 1)
           if (!a) return
           if (!a.keep) { drop.add(f.id); return }
+          // One box over several blanks (Home# / Work# / Cell# under one line):
+          // replace it with one field per blank, each inside the original box
+          const parts = (a.split ?? [])
+            .map((p) => ({ label: p.label, x0: Math.max(f.x, p.x_start), x1: Math.min(f.x + f.width, p.x_end) }))
+            .filter((p) => p.x1 - p.x0 > 0.02)
+            .sort((p, q) => p.x0 - q.x0)
+          if (parts.length > 1) {
+            drop.add(f.id); splitIds.add(f.id)
+            parts.forEach((p, k) => {
+              const x1 = k < parts.length - 1 ? Math.min(p.x1, parts[k + 1].x0 - 0.005) : p.x1
+              extra.push({ ...f, id: crypto.randomUUID(), label: p.label, x: p.x0, width: x1 - p.x0, field_type: "text", fill_role: a.fill_role, options: defaultOptions("text") })
+            })
+            named += parts.length
+            return
+          }
           const type = a.field_type
           const bottom = f.y + f.height
           const geo: Partial<ContractField> =
@@ -398,8 +416,8 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
           patches.set(f.id, { ...geo, label: a.label || f.label, field_type: type, fill_role: a.fill_role, options })
           named++
         })
-        dropped += drop.size
-        setFields((prev) => prev.filter((f) => !drop.has(f.id)).map((f) => (patches.has(f.id) ? { ...f, ...patches.get(f.id) } : f)))
+        dropped += drop.size - splitIds.size
+        setFields((prev) => [...prev.filter((f) => !drop.has(f.id)).map((f) => (patches.has(f.id) ? { ...f, ...patches.get(f.id) } : f)), ...extra])
       } catch (err) {
         failed++
         console.error("[field-editor] naming failed:", err)
@@ -970,7 +988,7 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                     <p className="text-[11px] text-warning">Fits only by shrinking the text to {report[selectedField.id]!.shrunkTo} pt.</p>
                   )}
                   {report[selectedField.id]?.rows && (
-                    <p className="text-[11px] text-muted-foreground">Uses {report[selectedField.id]!.rowsUsed} of {report[selectedField.id]!.rows} lines.</p>
+                    <p className="text-[11px] text-muted-foreground">Uses {report[selectedField.id]!.rowsUsed} of {report[selectedField.id]!.rows} lines{report[selectedField.id]!.layout ? ` · ${report[selectedField.id]!.layout}` : ""}.</p>
                   )}
                 </div>
               )}

@@ -6,6 +6,7 @@
 // one place means the two can never drift out of sync with each other.
 
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib"
+import { layoutText, sanitizeForFont } from "./text-layout"
 
 export type FieldType = "text" | "multiline" | "date" | "signature" | "initials" | "checkbox" | "yes_no" | "rich_text"
 export type VAlign = "top" | "center" | "bottom"
@@ -27,7 +28,7 @@ export interface FieldOptions {
 
 /** What happened to each value when stamped — the field editor's Live test uses this to flag fields too small for real answers. */
 export interface StampReport {
-  [fieldId: string]: { shrunkTo?: number; cutOff?: boolean; rows?: number; rowsUsed?: number }
+  [fieldId: string]: { shrunkTo?: number; cutOff?: boolean; rows?: number; rowsUsed?: number; layout?: string }
 }
 
 export const DEFAULT_BASELINE_GAP = 2.5
@@ -234,50 +235,53 @@ export async function stampFieldsOntoPdf(
         const align  = (opts.textAlign ?? d.textAlign) as "left" | "center" | "right"
         const ftFont = (opts.fontWeight ?? d.fontWeight) === "bold" ? boldFont : font
         const usableW = fw - pad * 2
+        const allBold = ftFont === boldFont
+        const text = sanitizeForFont(value, boldFont)
 
-        // Ruled-line mode: one row of text on each printed line
-        if (opts.lineSpacing && opts.lineSpacing > 0) {
-          const spacing = opts.lineSpacing
-          const gap = opts.baselineGap ?? DEFAULT_BASELINE_GAP
-          const rows = ruledRows(fh, spacing)
-          const maxSize = Math.min(size0, spacing - gap - 1)
-          let size = maxSize
-          let lines = wrapRichText(value, usableW, ftFont, size)
-          while (lines.length > rows && size > 6) {
-            size -= 0.5
-            lines = wrapRichText(value, usableW, ftFont, size)
-          }
-          report[def.id] = { rows, rowsUsed: Math.min(lines.length, rows), shrunkTo: size < maxSize ? size : undefined, cutOff: lines.length > rows }
-          const top = py + fh
-          lines.slice(0, rows).forEach((line, k) => {
-            if (line === "") return
-            const baseline = top - (k + 1) * spacing + gap
-            drawTextWithHalo(page, line, alignedX(line, align, px + pad, usableW, ftFont, size), baseline, size, ftFont)
-          })
-          break
+        // Headings, bullets and paragraphs laid out to fit — one column, or
+        // two balanced columns when the scope is long (text-layout.ts)
+        const ruled = !!opts.lineSpacing && opts.lineSpacing > 0
+        const gap = opts.baselineGap ?? DEFAULT_BASELINE_GAP
+        const L = layoutText(text, {
+          width: usableW,
+          height: ruled ? fh : fh - pad * 2,
+          lineSpacing: ruled ? opts.lineSpacing : undefined,
+          baselineGap: gap,
+          lineHeight: lh,
+          maxSize: size0,
+          align, allBold,
+        }, { regular: font, bold: boldFont })
+
+        const printedRows = ruled ? ruledRows(fh, opts.lineSpacing!) : undefined
+        const tooSmall = L.size < 8
+        report[def.id] = {
+          rows: printedRows,
+          rowsUsed: printedRows ? Math.min(printedRows, L.half ? Math.ceil((L.rowsUsed + 1) / 2) : L.rowsUsed) : undefined,
+          shrunkTo: tooSmall ? L.size : undefined,
+          cutOff: !L.fits,
+          layout: `${L.cols === 2 ? "2 columns" : "1 column"}${L.half ? ", 2 rows per line" : ""}, ${L.size} pt`,
         }
 
-        let size = size0
-        let lines: string[] = []
-        while (size >= 5) {
-          lines = wrapText(value, usableW, ftFont, size)
-          if (lines.length * size * lh <= fh - pad * 2) break
-          size -= 0.5
-        }
-        if (size < size0) report[def.id] = { shrunkTo: Math.max(size, 5), cutOff: lines.length * size * lh > fh - pad * 2 }
-        const totalH = lines.length * size * lh
-        let lineY: number
-        if (vAlign === "bottom") {
-          lineY = py + pad + totalH - size * 0.8 + PDF_FLATTEN_Y_OFFSET
-        } else if (vAlign === "top") {
-          lineY = py + fh - pad - size * 0.8 + PDF_FLATTEN_Y_OFFSET
+        // Baseline of row 0, and how far each following row sits below it
+        let firstBaseline: number
+        if (ruled) {
+          firstBaseline = py + fh - opts.lineSpacing! + gap   // row 0 sits on the first printed line
         } else {
-          lineY = py + (fh - totalH) / 2 + totalH - size * 0.8 + PDF_FLATTEN_Y_OFFSET
+          const totalH = L.rowsUsed * L.pitch
+          const blockTop = vAlign === "bottom" ? py + pad + totalH
+            : vAlign === "top" ? py + fh - pad
+            : py + (fh - totalH) / 2 + totalH
+          firstBaseline = blockTop - L.size * 0.8 + PDF_FLATTEN_Y_OFFSET
         }
-        for (const line of lines) {
-          if (lineY < py + pad) break
-          drawTextWithHalo(page, line, alignedX(line, align, px + pad, usableW, ftFont, size), lineY, size, ftFont)
-          lineY -= size * lh
+        for (const line of L.lines) {
+          if (line.row >= L.rows) continue
+          const colX = px + pad + line.col * (L.colWidth + L.gutter)
+          const shift = line.align === "left" ? 0 : line.align === "center" ? (L.colWidth - line.width) / 2 : L.colWidth - line.width
+          const baseline = firstBaseline - line.row * L.pitch
+          for (const run of line.runs) {
+            if (!run.text) continue
+            drawTextWithHalo(page, run.text, colX + shift + run.dx, baseline, L.size, run.bold ? boldFont : font)
+          }
         }
         break
       }

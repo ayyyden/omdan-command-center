@@ -59,7 +59,7 @@ export function FieldRow({
           <textarea
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            rows={4}
+            rows={Math.min(14, Math.max(4, value.split("\n").length + 1))}
             className={`${inputClass} resize-y`}
           />
         </div>
