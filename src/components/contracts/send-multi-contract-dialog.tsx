@@ -1,13 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
-import { FileText, Loader2, Send } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { createClient } from "@/lib/supabase/client"
+import { FileText, Loader2, ChevronRight } from "lucide-react"
+import { DocumentActionSheet, type DocumentSummary } from "./document-action-sheet"
 
 interface ContractTemplate {
   id: string
@@ -25,179 +24,95 @@ interface Props {
   onOpenChange: (open: boolean) => void
 }
 
+// Job page "Send Contracts": pick the documents in signing order, then the
+// same flow as the Documents page — fill your part of each, then Send by
+// Email (one link, the customer agrees once and signs them in order, each
+// shown already filled with your part) or Sign Now in person. Customer and
+// job are already known here, so no recipient picking.
 export function SendMultiContractDialog({
-  contracts,
-  customerId,
-  jobId,
-  customerEmail,
-  customerName,
-  companyName,
-  open,
-  onOpenChange,
+  contracts, customerId, jobId, customerEmail, customerName, companyName, open, onOpenChange,
 }: Props) {
-  const { toast } = useToast()
   const router = useRouter()
-
-  // Ordered array — index = selection order
   const [selected, setSelected] = useState<string[]>([])
-  const [recipientEmail, setRecipientEmail] = useState(customerEmail ?? "")
-  const [subject, setSubject] = useState(
-    `Contracts from ${companyName ?? "Us"} — Please Sign`
-  )
-  const [body, setBody] = useState(
-    `Hi ${customerName},\n\nPlease review and sign the attached contract(s) at your earliest convenience.\n\nThank you!`
-  )
-  const [sending, setSending] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [sheetDocs, setSheetDocs] = useState<DocumentSummary[] | null>(null)
+  const [userId, setUserId] = useState("")
 
-  function toggleContract(id: string) {
-    setSelected((prev) => {
-      if (prev.includes(id)) return prev.filter((x) => x !== id)
-      return [...prev, id]
-    })
+  function toggle(id: string) {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
 
-  function reset() {
-    setSelected([])
-    setRecipientEmail(customerEmail ?? "")
-    setSubject(`Contracts from ${companyName ?? "Us"} — Please Sign`)
-    setBody(
-      `Hi ${customerName},\n\nPlease review and sign the attached contract(s) at your earliest convenience.\n\nThank you!`
-    )
-  }
-
-  async function handleSend() {
-    if (!selected.length) { toast({ title: "Select at least one contract", variant: "destructive" }); return }
-    if (!recipientEmail) { toast({ title: "Recipient email required", variant: "destructive" }); return }
-
-    setSending(true)
-    try {
-      const res = await fetch("/api/contracts/send-bundle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contractIds:    selected,
-          customerId,
-          jobId,
-          recipientEmail,
-          subject,
-          body,
-        }),
-      })
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}))
-        toast({ title: "Send failed", description: (d as any).error ?? "Unknown error", variant: "destructive" })
-        return
+  async function handleContinue() {
+    setLoading(true)
+    const supabase = createClient()
+    const [{ data: { user } }, { data: templates }, { data: pairs }] = await Promise.all([
+      supabase.auth.getUser(),
+      supabase.from("contract_templates").select("id, name, requires_signature").in("id", selected),
+      supabase.from("contract_templates").select("id, attached_to_template_id").in("attached_to_template_id", selected),
+    ])
+    setLoading(false)
+    setUserId(user?.id ?? "")
+    setSheetDocs(selected.map((id) => {
+      const t = (templates ?? []).find((x) => x.id === id)
+      const p = (pairs ?? []).find((x) => x.attached_to_template_id === id)
+      return {
+        id, name: t?.name ?? contracts.find((c) => c.id === id)?.name ?? "Contract",
+        requiresSignature: t?.requires_signature ?? true,
+        hasPairedDoc: !!p, pairedTemplateId: p?.id ?? null,
       }
-      const { count } = await res.json()
-      toast({
-        title: "Contracts sent",
-        description: `${count} contract${count !== 1 ? "s" : ""} sent to ${recipientEmail}`,
-      })
-      onOpenChange(false)
-      reset()
-      router.refresh()
-    } catch {
-      toast({ title: "Send failed", description: "Network error", variant: "destructive" })
-    } finally {
-      setSending(false)
-    }
+    }))
+    onOpenChange(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!sending) { onOpenChange(o); if (!o) reset() } }}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Send Contracts</DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o && !sheetDocs) setSelected([]) }}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Send Contracts</DialogTitle>
+          </DialogHeader>
 
-        <div className="space-y-4 pt-1">
-          {/* Contract selection */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Select Contracts — tap to set signing order
-            </label>
+          <div className="space-y-1.5 pt-1">
+            <p className="text-xs font-medium text-muted-foreground">Tap documents in the order the customer should sign them</p>
             <div className="rounded-lg border divide-y">
               {contracts.map((c) => {
                 const pos = selected.indexOf(c.id)
-                const isSelected = pos !== -1
                 return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/40 transition-colors"
-                    onClick={() => toggleContract(c.id)}
-                  >
-                    <div
-                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 text-[10px] font-bold transition-colors ${
-                        isSelected
-                          ? "bg-primary border-primary text-primary-foreground"
-                          : "border-muted-foreground/40"
-                      }`}
-                    >
-                      {isSelected ? pos + 1 : null}
+                  <button key={c.id} type="button" onClick={() => toggle(c.id)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/40 transition-colors">
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 text-[10px] font-bold transition-colors ${
+                      pos !== -1 ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/40"}`}>
+                      {pos !== -1 ? pos + 1 : null}
                     </div>
                     <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
                     <span className="text-sm">{c.name}</span>
                   </button>
                 )
               })}
-              {contracts.length === 0 && (
-                <p className="px-3 py-3 text-sm text-muted-foreground">No contract templates available.</p>
-              )}
+              {contracts.length === 0 && <p className="px-3 py-3 text-sm text-muted-foreground">No contract templates available.</p>}
             </div>
-            {selected.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                {selected.length} contract{selected.length !== 1 ? "s" : ""} selected — client signs them in the order shown.
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground pt-1">
+              Next you&apos;ll fill in your part of each, then send one link to {customerName}.
+            </p>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">To</label>
-            <Input
-              type="email"
-              value={recipientEmail}
-              onChange={(e) => setRecipientEmail(e.target.value)}
-              placeholder="customer@example.com"
-            />
-            {!customerEmail && (
-              <p className="text-xs text-warning">No email on file — enter one above.</p>
-            )}
-          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { onOpenChange(false); setSelected([]) }}>Cancel</Button>
+            <Button onClick={handleContinue} disabled={!selected.length || loading}>
+              {loading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : null}
+              Continue{selected.length > 1 ? ` with ${selected.length}` : ""} <ChevronRight className="w-4 h-4 ml-1" />
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Subject</label>
-            <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Message</label>
-            <Textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              className="min-h-[100px] text-sm"
-            />
-          </div>
-
-          <p className="text-xs text-muted-foreground">
-            The customer receives one secure link. Contracts are presented and signed one at a time in the order above.
-          </p>
-        </div>
-
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => { onOpenChange(false); reset() }} disabled={sending}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSend}
-            disabled={sending || !selected.length || !recipientEmail || !subject || !body}
-          >
-            {sending
-              ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Sending…</>
-              : <><Send className="w-4 h-4 mr-1.5" />Send{selected.length > 1 ? ` ${selected.length} Contracts` : " Contract"}</>}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <DocumentActionSheet
+        documents={sheetDocs}
+        userId={userId}
+        companyName={companyName}
+        preset={{ customerId, jobId, recipientEmail: customerEmail ?? "", label: customerName }}
+        onClose={() => { setSheetDocs(null); setSelected([]); router.refresh() }}
+      />
+    </>
   )
 }

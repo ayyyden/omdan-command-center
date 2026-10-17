@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation"
+import { notFound, redirect } from "next/navigation"
 import { headers } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/service"
 import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
@@ -32,6 +32,9 @@ export default async function SignContractPage({
     .single()
 
   if (!sent) notFound()
+
+  // Links from a set sent together run the whole set in one session
+  if (bundleToken && !sent.signed_at) redirect(`/sign-bundle/${bundleToken}`)
 
   const hdrs = await headers()
   void logAudit({
@@ -83,13 +86,6 @@ export default async function SignContractPage({
     .eq("fill_role", "customer")
     .order("page_number")
 
-  // Generate a 2-hour signed URL for PDF viewing
-  const { data: urlData } = await supabase.storage
-    .from(template.bucket)
-    .createSignedUrl(template.storage_path, 7200)
-
-  const pdfUrl = urlData?.signedUrl ?? null
-
   const { data: company } = await supabase
     .from("company_settings")
     .select("company_name, phone, email")
@@ -99,11 +95,7 @@ export default async function SignContractPage({
 
   return (
     <SignClient
-      token={token}
-      contractName={template.name}
-      pdfUrl={pdfUrl}
-      fields={(fields ?? []) as any}
-      bundleToken={bundleToken}
+      docs={[{ token, name: template.name, fields: (fields ?? []) as any }]}
       companyName={company?.company_name ?? "Omdan Development"}
       companyPhone={company?.phone ?? null}
       companyEmail={company?.email ?? null}

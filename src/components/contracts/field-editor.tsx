@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Loader2, Save, Trash2, AlignLeft, AlignCenter, AlignRight, ScanLine, FlaskConical, Undo2, AlignJustify } from "lucide-react"
+import { Loader2, Save, Trash2, AlignLeft, AlignCenter, AlignRight, ScanLine, FlaskConical, Undo2, AlignJustify, Sparkles } from "lucide-react"
 import { detectLines, suggestFields, coverage } from "@/lib/contracts/detect-lines"
 import { sampleValue, stampTestPdf, type SampleLength } from "@/lib/contracts/live-test"
 import { ruledRows, DEFAULT_BASELINE_GAP, type StampReport } from "@/lib/contracts/stamp-pdf"
@@ -324,11 +324,96 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
       setFields((prev) => [...prev, ...added])
       setLastAdded(added.map((f) => f.id))
       setFinding(false)
-      toast({
-        title: added.length ? `Added ${added.length} field${added.length === 1 ? "" : "s"} on blank lines` : "No new blank lines found",
-        description: added.length ? "Check them, rename or change types (signature, date…), then Save Fields." : "Every line already has a field.",
-      })
+      if (!added.length) {
+        toast({ title: "No new blank lines found", description: "Every line already has a field." })
+        return
+      }
+      toast({ title: `Found ${added.length} blank line${added.length === 1 ? "" : "s"}`, description: "Reading the page to name them…" })
+      void nameFields(added)
     }, 30)
+  }
+
+  // ── Name fields with AI ───────────────────────────────────────────────────
+  // Line finding sees WHERE blanks are, not what the printed words say.
+  // Claude reads a picture of the page with each box numbered and returns
+  // name, type (signature / initials / date…) and who fills it.
+  const [naming, setNaming] = useState(false)
+  const GENERIC_LABEL = /^(text|multiline|date|signature|initials|checkbox|yes \/ no|rich text|lines \(\d+\))$/i
+
+  async function nameFields(targets: ContractField[]) {
+    if (!targets.length) return
+    setNaming(true)
+    let named = 0, dropped = 0, failed = 0
+    const byPage = new Map<number, ContractField[]>()
+    for (const f of targets) byPage.set(f.page_number, [...(byPage.get(f.page_number) ?? []), f])
+
+    for (const [pageNo, list] of byPage) {
+      const pg = pages[pageNo - 1]
+      if (!pg) continue
+      // Page picture with numbered boxes, ~1600px wide
+      const scale = Math.min(1, 1600 / pg.canvas.width)
+      const c = document.createElement("canvas")
+      c.width = Math.round(pg.canvas.width * scale); c.height = Math.round(pg.canvas.height * scale)
+      const ctx = c.getContext("2d")!
+      ctx.drawImage(pg.canvas, 0, 0, c.width, c.height)
+      list.forEach((f, i) => {
+        const x = f.x * c.width, y = f.y * c.height, w = f.width * c.width, h = f.height * c.height
+        ctx.strokeStyle = "#e11d48"; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h)
+        const tag = String(i + 1)
+        ctx.font = "bold 20px Arial"
+        const tw = ctx.measureText(tag).width + 8
+        ctx.fillStyle = "#e11d48"; ctx.fillRect(x, Math.max(0, y - 22), tw, 22)
+        ctx.fillStyle = "#fff"; ctx.fillText(tag, x + 4, Math.max(17, y - 5))
+      })
+      try {
+        const res = await fetch("/api/contracts/label-fields", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            documentName: contractName,
+            image: c.toDataURL("image/jpeg", 0.82),
+            boxes: list.map((f, i) => ({ n: i + 1, x: f.x, y: f.y, width: f.width, height: f.height, kind: f.field_type })),
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? "Naming failed")
+        const ph = pg.pdfHeight
+        const answers = new Map((data.fields as { n: number; keep: boolean; label: string; field_type: FieldType; fill_role: FillRole }[]).map((a) => [a.n, a]))
+        const drop = new Set<string>()
+        const patches = new Map<string, Partial<ContractField>>()
+        list.forEach((f, i) => {
+          const a = answers.get(i + 1)
+          if (!a) return
+          if (!a.keep) { drop.add(f.id); return }
+          const type = a.field_type
+          const bottom = f.y + f.height
+          const geo: Partial<ContractField> =
+            type === "signature" ? { y: Math.max(0, bottom - 30 / ph), height: 30 / ph }
+            : type === "initials" ? { y: Math.max(0, bottom - 24 / ph), height: 24 / ph }
+            : type === "checkbox" ? { y: bottom - 14 / ph, height: 14 / ph, width: Math.min(f.width, 16 / pg.pdfWidth) }
+            : {}
+          const options: FieldOptions = type === f.field_type
+            ? (f.options ?? defaultOptions(type))
+            : { ...defaultOptions(type), ...(type === "multiline" && f.options?.lineSpacing ? { lineSpacing: f.options.lineSpacing } : {}) }
+          patches.set(f.id, { ...geo, label: a.label || f.label, field_type: type, fill_role: a.fill_role, options })
+          named++
+        })
+        dropped += drop.size
+        setFields((prev) => prev.filter((f) => !drop.has(f.id)).map((f) => (patches.has(f.id) ? { ...f, ...patches.get(f.id) } : f)))
+      } catch (err) {
+        failed++
+        console.error("[field-editor] naming failed:", err)
+      }
+    }
+    setNaming(false)
+    toast({
+      title: failed && !named ? "Couldn't name the fields" : `Named ${named} field${named === 1 ? "" : "s"}`,
+      description: [
+        dropped ? `Removed ${dropped} line${dropped === 1 ? "" : "s"} that weren't blanks.` : "",
+        failed ? `${failed} page${failed === 1 ? "" : "s"} failed. Try "Name fields with AI" again.` : "Check names, types and who fills each, then Save Fields.",
+      ].filter(Boolean).join(" "),
+      variant: failed && !named ? "destructive" : undefined,
+    })
   }
 
   function undoFind() {
@@ -571,6 +656,18 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
           <Button size="sm" variant="outline" className="justify-start gap-2" onClick={findBlankLines} disabled={finding || !pages.length || testMode}>
             {finding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ScanLine className="w-3.5 h-3.5" />}
             Find blank lines
+          </Button>
+          <Button
+            size="sm" variant="outline" className="justify-start gap-2"
+            disabled={naming || !fields.length || testMode}
+            onClick={() => {
+              const generic = fields.filter((f) => GENERIC_LABEL.test(f.label.trim()))
+              void nameFields(generic.length ? generic : fields)
+            }}
+            title="Read the page and name each field, set its type and who fills it"
+          >
+            {naming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {naming ? "Naming fields…" : "Name fields with AI"}
           </Button>
           {lastAdded.length > 0 && (
             <button type="button" onClick={undoFind} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-1">

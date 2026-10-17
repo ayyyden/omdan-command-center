@@ -17,6 +17,10 @@ interface Props {
   submitting: boolean
   error: string
   onSubmit: () => void
+  /** e.g. "Document 2 of 3 · Fill & sign" */
+  stepLabel?: string
+  submitLabel?: string
+  onBack?: () => void
 }
 
 // Replaces the old tap-directly-on-the-PDF-image experience with a normal,
@@ -27,7 +31,7 @@ interface Props {
 // screen ever loads, see staff-prepare-form.tsx.
 export function FillForm({
   token, contractName, pdfUrl, fields, values, setValue, signerName, setSignerName,
-  onOpenSignature, submitting, error, onSubmit,
+  onOpenSignature, submitting, error, onSubmit, stepLabel, submitLabel, onBack,
 }: Props) {
   const hasName = signerName.trim().length > 0
   const pages = Array.from(new Set(fields.map((f) => f.page_number))).sort((a, b) => a - b)
@@ -39,7 +43,10 @@ export function FillForm({
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="mb-6 flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm text-slate-500 font-medium mb-1">Step 2 of 2 · Fill &amp; sign</p>
+            {onBack && (
+              <button type="button" onClick={onBack} className="text-sm text-blue-600 hover:text-blue-700 font-medium mb-2">← Back to the document</button>
+            )}
+            <p className="text-sm text-slate-500 font-medium mb-1">{stepLabel ?? "Fill & sign"}</p>
             <h1 className="text-2xl font-semibold text-slate-900">{contractName}</h1>
           </div>
           {pdfUrl && (
@@ -99,7 +106,7 @@ export function FillForm({
             disabled={submitting}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-3.5 transition-colors text-base mt-2"
           >
-            {submitting ? "Submitting…" : "Sign & Submit"}
+            {submitting ? "Submitting…" : submitLabel ?? "Sign & Submit"}
           </button>
         </div>
       </div>
