@@ -7,7 +7,11 @@ import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Save, Trash2, AlignLeft, AlignCenter, AlignRight } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Loader2, Save, Trash2, AlignLeft, AlignCenter, AlignRight, ScanLine, FlaskConical, Undo2, AlignJustify } from "lucide-react"
+import { detectLines, suggestFields, coverage } from "@/lib/contracts/detect-lines"
+import { sampleValue, stampTestPdf, type SampleLength } from "@/lib/contracts/live-test"
+import { ruledRows, DEFAULT_BASELINE_GAP, type StampReport } from "@/lib/contracts/stamp-pdf"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -28,6 +32,10 @@ export interface FieldOptions {
   fontWeight?: "normal" | "bold"
   textAlign?: "left" | "center" | "right"
   padding?: number            // PDF points, default 4
+  // Ruled-line mode (multiline): printed lines every lineSpacing pt — one row
+  // of text sits on each (see stamp-pdf.ts)
+  lineSpacing?: number
+  baselineGap?: number
 }
 
 export type FillRole = "customer" | "staff"
@@ -170,6 +178,33 @@ function FieldPreviewContent({ field, pdfScale }: { field: ContractField; pdfSca
   const vAlign     = opts.vAlign ?? defaultVAlign(ft)
   const multiline  = ft === "multiline" || ft === "rich_text"
 
+  // Ruled-line mode: show one sample row resting on each printed line
+  if (ft === "multiline" && opts.lineSpacing) {
+    const spacing = opts.lineSpacing * pdfScale
+    const gap = (opts.baselineGap ?? DEFAULT_BASELINE_GAP) * pdfScale
+    const size = Math.min(fontSize, spacing - gap - pdfScale)
+    // Rows past the box's last printed line fall outside it and are clipped
+    return (
+      <div className="relative w-full h-full select-none pointer-events-none overflow-hidden">
+        {Array.from({ length: 64 }).map((_, k) => {
+          const bottom = (k + 1) * spacing - gap
+          return (
+            <span
+              key={k}
+              className="absolute whitespace-nowrap overflow-hidden"
+              style={{
+                left: padding, right: padding, top: bottom - size * 0.8, fontSize: `${size}px`, lineHeight: 1,
+                fontWeight, textAlign, fontFamily: "Helvetica, Arial, sans-serif", color: "rgba(15,23,42,0.6)",
+              }}
+            >
+              Sample row {k + 1} sits on its printed line
+            </span>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <div
       className="w-full h-full flex select-none pointer-events-none"
@@ -219,6 +254,122 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
 
   const [addingType, setAddingType] = useState<FieldType | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // ── Find blank lines / Live test state ────────────────────────────────────
+  const [finding, setFinding] = useState(false)
+  const [lastAdded, setLastAdded] = useState<string[]>([])
+  const [testMode, setTestMode] = useState(false)
+  const [testValues, setTestValues] = useState<Record<string, string>>({})
+  const [testUrl, setTestUrl] = useState<string | null>(null)
+  const [report, setReport] = useState<StampReport>({})
+  const [stamping, setStamping] = useState(false)
+  const originalBytes = useRef<ArrayBuffer | null>(null)
+  const test = usePdfPages(testMode ? testUrl : null, containerWidth, { keepPrevious: true })
+
+  const pageDims = useCallback((n: number) => {
+    const pg = pages[n - 1] ?? pages[0]
+    return { widthPt: pg?.pdfWidth ?? 612, heightPt: pg?.pdfHeight ?? 792 }
+  }, [pages])
+
+  const testValueFor = useCallback((f: ContractField) => testValues[f.id] ?? sampleValue(f, pageDims(f.page_number)), [testValues, pageDims])
+
+  // Re-stamp the real PDF with the test values whenever a field or value changes
+  useEffect(() => {
+    if (!testMode || !pdfUrl || !pages.length) return
+    let cancelled = false
+    const t = setTimeout(async () => {
+      setStamping(true)
+      try {
+        if (!originalBytes.current) originalBytes.current = await fetch(pdfUrl).then((r) => r.arrayBuffer())
+        const values = Object.fromEntries(fields.map((f) => [f.id, testValueFor(f)]))
+        const res = await stampTestPdf(originalBytes.current!, fields, values)
+        if (cancelled) { URL.revokeObjectURL(res.url); return }
+        setTestUrl((old) => { if (old) setTimeout(() => URL.revokeObjectURL(old), 5000); return res.url })
+        setReport(res.report)
+      } catch (err) {
+        toast({ title: "Live test failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" })
+      } finally {
+        if (!cancelled) setStamping(false)
+      }
+    }, 350)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [testMode, pdfUrl, pages.length, fields, testValueFor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function findBlankLines() {
+    if (!pages.length) return
+    setFinding(true)
+    // Let the spinner paint before the (fast, synchronous) pixel scan
+    setTimeout(() => {
+      const added: ContractField[] = []
+      for (const pg of pages) {
+        const dims = { pdfWidth: pg.pdfWidth, pdfHeight: pg.pdfHeight }
+        const suggestions = suggestFields(pg.canvas, detectLines(pg.canvas, dims), dims)
+        const existing = [...fields, ...added].filter((f) => f.page_number === pg.pageNumber)
+        for (const s of suggestions) {
+          if (existing.some((f) => coverage(s, f) > 0.3 || coverage(f, s) > 0.3)) continue
+          const type: FieldType = s.kind === "multiline" ? "multiline" : "text"
+          added.push({
+            id: crypto.randomUUID(),
+            contract_template_id: contractTemplateId,
+            page_number: pg.pageNumber,
+            field_type: type,
+            label: s.kind === "multiline" ? `Lines (${s.rows})` : "Text",
+            x: s.x, y: s.y, width: s.width, height: s.height,
+            required: false,
+            options: s.kind === "multiline" ? { ...defaultOptions("multiline"), lineSpacing: s.lineSpacing } : defaultOptions("text"),
+            fill_role: "customer",
+          })
+        }
+      }
+      setFields((prev) => [...prev, ...added])
+      setLastAdded(added.map((f) => f.id))
+      setFinding(false)
+      toast({
+        title: added.length ? `Added ${added.length} field${added.length === 1 ? "" : "s"} on blank lines` : "No new blank lines found",
+        description: added.length ? "Check them, rename or change types (signature, date…), then Save Fields." : "Every line already has a field.",
+      })
+    }, 30)
+  }
+
+  function undoFind() {
+    const ids = new Set(lastAdded)
+    setFields((prev) => prev.filter((f) => !ids.has(f.id)))
+    setLastAdded([])
+    if (selectedId && ids.has(selectedId)) setSelectedId(null)
+  }
+
+  /** Snap the selected field onto the printed line(s) under it. */
+  function fitToLines(f: ContractField) {
+    const pg = pages[f.page_number - 1]
+    if (!pg) return
+    const dims = { pdfWidth: pg.pdfWidth, pdfHeight: pg.pdfHeight }
+    const ph = pg.pdfHeight
+    const lines = detectLines(pg.canvas, dims).filter((l) => {
+      const ov = Math.max(0, Math.min(l.x1, f.x + f.width) - Math.max(l.x0, f.x))
+      return ov >= 0.5 * f.width && l.y >= f.y - 4 / ph && l.y <= f.y + f.height + 8 / ph
+    })
+    if (!lines.length) {
+      toast({ title: "No printed line under this field", description: "Move the box over the line(s) first, then try again." })
+      return
+    }
+    const multi = f.field_type === "multiline" && lines.length >= 2
+    if (multi) {
+      const spacingPt = ((lines[lines.length - 1].y - lines[0].y) * ph) / (lines.length - 1)
+      const top = lines[0].y - spacingPt / ph
+      updateField(f.id, { y: Math.max(0, top), height: (lines.length * spacingPt + 1.5) / ph })
+      updateOpts(f.id, { lineSpacing: Math.round(spacingPt * 10) / 10 })
+      toast({ title: `Fitted to ${lines.length} printed lines`, description: `${spacingPt.toFixed(1)} pt apart. One row of text will sit on each.` })
+    } else {
+      const line = lines[lines.length - 1]
+      updateField(f.id, { y: Math.max(0, line.y - 13 / ph), height: 18 / ph })
+      if (f.field_type === "text" || f.field_type === "date") updateOpts(f.id, { vAlign: "bottom" })
+      toast({ title: "Snapped onto the line" })
+    }
+  }
+
+  function setTestLength(f: ContractField, length: SampleLength) {
+    setTestValues((v) => ({ ...v, [f.id]: sampleValue(f, pageDims(f.page_number), length) }))
+  }
 
   const dragRef = useRef<{
     id: string
@@ -415,6 +566,40 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
 
       {/* ── Left sidebar ──────────────────────────────────────────────────── */}
       <div className="w-56 shrink-0 flex flex-col gap-3 overflow-y-auto">
+        {/* ── Tools ───────────────────────────────────────────────────── */}
+        <div className="flex flex-col gap-1.5">
+          <Button size="sm" variant="outline" className="justify-start gap-2" onClick={findBlankLines} disabled={finding || !pages.length || testMode}>
+            {finding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ScanLine className="w-3.5 h-3.5" />}
+            Find blank lines
+          </Button>
+          {lastAdded.length > 0 && (
+            <button type="button" onClick={undoFind} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-1">
+              <Undo2 className="w-3 h-3" /> Undo: remove the {lastAdded.length} added
+            </button>
+          )}
+          <Button
+            size="sm"
+            variant={testMode ? "default" : "outline"}
+            className="justify-start gap-2"
+            onClick={() => { setTestMode((v) => !v); setAddingType(null) }}
+            disabled={!pages.length}
+          >
+            {stamping && testMode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}
+            {testMode ? "Live test: on" : "Live test"}
+          </Button>
+          {testMode && (() => {
+            const problems = Object.entries(report).filter(([, r]) => r.cutOff || r.shrunkTo)
+            return (
+              <p className="text-[11px] text-muted-foreground px-1 leading-snug">
+                Filled with sample text and stamped exactly like a signed contract.
+                {problems.length > 0
+                  ? <span className="block mt-1 text-destructive">{problems.length} field{problems.length === 1 ? "" : "s"} too small for the text (outlined red).</span>
+                  : <span className="block mt-1 text-success">Everything fits.</span>}
+              </p>
+            )
+          })()}
+        </div>
+
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Add Field</p>
         <div className="flex flex-col gap-1">
           {(Object.keys(FIELD_TYPE_LABELS) as FieldType[]).map((ft) => (
@@ -624,6 +809,75 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                 )
               })()}
 
+              {/* ── Printed lines (multiline) / snap to line (text, date) ── */}
+              {selectedField.field_type === "multiline" && (() => {
+                const pdfH = pageDims(selectedField.page_number).heightPt
+                const rows = opts.lineSpacing ? ruledRows(selectedField.height * pdfH, opts.lineSpacing) : null
+                return (
+                  <div className="space-y-1.5 pt-1 border-t">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Printed lines</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div className="space-y-0.5">
+                        <Label className="text-[10px]">Spacing (pt)</Label>
+                        <Input
+                          type="number" step="0.1" min="8" max="60" placeholder="off"
+                          value={opts.lineSpacing ?? ""}
+                          onChange={(e) => updateOpts(selectedField.id, { lineSpacing: e.target.value ? parseFloat(e.target.value) : undefined })}
+                          className="h-6 text-xs px-1.5"
+                        />
+                      </div>
+                      <div className="space-y-0.5">
+                        <Label className="text-[10px]">Above line (pt)</Label>
+                        <Input
+                          type="number" step="0.5" min="0" max="10"
+                          value={opts.baselineGap ?? DEFAULT_BASELINE_GAP}
+                          onChange={(e) => updateOpts(selectedField.id, { baselineGap: parseFloat(e.target.value) || 0 })}
+                          className="h-6 text-xs px-1.5"
+                          disabled={!opts.lineSpacing}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      {rows ? `${rows} row${rows === 1 ? "" : "s"}, one on each printed line.` : "Off: text wraps freely inside the box."}
+                    </p>
+                    <Button size="sm" variant="outline" className="w-full h-7 text-xs gap-1.5" onClick={() => fitToLines(selectedField)}>
+                      <AlignJustify className="w-3 h-3" /> Fit to the lines under it
+                    </Button>
+                  </div>
+                )
+              })()}
+              {(selectedField.field_type === "text" || selectedField.field_type === "date") && (
+                <Button size="sm" variant="outline" className="w-full h-7 text-xs gap-1.5" onClick={() => fitToLines(selectedField)}>
+                  <AlignJustify className="w-3 h-3" /> Snap onto the line
+                </Button>
+              )}
+
+              {/* ── Live test text for this field ───────────────────────── */}
+              {testMode && !["signature", "initials", "checkbox"].includes(selectedField.field_type) && (
+                <div className="space-y-1.5 pt-1 border-t">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Test text</p>
+                  <Textarea
+                    rows={3}
+                    value={testValueFor(selectedField)}
+                    onChange={(e) => setTestValues((v) => ({ ...v, [selectedField.id]: e.target.value }))}
+                    className="text-xs"
+                  />
+                  <div className="flex gap-1">
+                    {(["short", "typical", "long"] as const).map((len) => (
+                      <button key={len} type="button" onClick={() => setTestLength(selectedField, len)}
+                        className="flex-1 h-6 text-[11px] rounded border bg-background hover:bg-muted capitalize">{len}</button>
+                    ))}
+                  </div>
+                  {report[selectedField.id]?.cutOff && <p className="text-[11px] text-destructive">Too much text: the end gets cut off. Make the box bigger or the font smaller.</p>}
+                  {!report[selectedField.id]?.cutOff && report[selectedField.id]?.shrunkTo && (
+                    <p className="text-[11px] text-warning">Fits only by shrinking the text to {report[selectedField.id]!.shrunkTo} pt.</p>
+                  )}
+                  {report[selectedField.id]?.rows && (
+                    <p className="text-[11px] text-muted-foreground">Uses {report[selectedField.id]!.rowsUsed} of {report[selectedField.id]!.rows} lines.</p>
+                  )}
+                </div>
+              )}
+
               {/* ── Standard controls (non-rich_text) ───────────────────── */}
               {!isRichText && (
                 <div className="space-y-1">
@@ -699,7 +953,7 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
           </div>
         ) : (
           <div className="space-y-4 p-4">
-            {pages.map((pg) => {
+            {(testMode && test.pages.length ? test.pages : pages).map((pg) => {
               const pageFields = fields.filter((f) => f.page_number === pg.pageNumber)
               const pdfScale = pg.width / pg.pdfWidth
               return (
@@ -722,6 +976,34 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                       const fw = f.width  * pg.width
                       const fh = f.height * pg.height
                       const isSelected = f.id === selectedId
+                      const problem = testMode ? report[f.id] : undefined
+                      const overflow = !!problem && (problem.cutOff || !!problem.shrunkTo)
+
+                      if (testMode) {
+                        // Live test: the page underneath is the real stamped PDF —
+                        // just a thin outline to select/move, red where text doesn't fit
+                        return (
+                          <div key={f.id} className="absolute" style={{ left: fx, top: fy, width: fw, height: fh }}>
+                            {overflow && (
+                              <div className="absolute -top-4 left-0 text-[9px] font-medium px-1 rounded-sm bg-destructive text-destructive-foreground whitespace-nowrap pointer-events-none">
+                                {problem!.cutOff ? "Text cut off" : `Shrinks to ${problem!.shrunkTo} pt`}
+                              </div>
+                            )}
+                            <div
+                              className={`w-full h-full rounded-sm cursor-move border ${overflow ? "border-2 border-destructive" : isSelected ? "border-primary border-dashed" : "border-transparent hover:border-primary/40 hover:border-dashed"}`}
+                              onMouseDown={(e) => startDrag(e, f.id, "move", pg.width, pg.height)}
+                              onClick={(e) => { e.stopPropagation(); setSelectedId(f.id) }}
+                            >
+                              {isSelected && (
+                                <div
+                                  className="absolute bottom-0 right-0 w-3 h-3 bg-primary/80 cursor-se-resize"
+                                  onMouseDown={(e) => { e.stopPropagation(); startDrag(e, f.id, "resize", pg.width, pg.height) }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        )
+                      }
 
                       return (
                         <div key={f.id} className="absolute" style={{ left: fx, top: fy, width: fw, height: fh }}>
