@@ -18,6 +18,23 @@ export interface FieldOptions {
   fontWeight?: "normal" | "bold"
   textAlign?: "left" | "center" | "right"
   padding?: number
+  // Ruled-line mode (multiline): the form has printed lines every
+  // `lineSpacing` pt, the first one `lineSpacing` below the box top. Each
+  // row of text sits `baselineGap` pt above its printed line, like handwriting.
+  lineSpacing?: number
+  baselineGap?: number
+}
+
+/** What happened to each value when stamped — the field editor's Live test uses this to flag fields too small for real answers. */
+export interface StampReport {
+  [fieldId: string]: { shrunkTo?: number; cutOff?: boolean; rows?: number; rowsUsed?: number }
+}
+
+export const DEFAULT_BASELINE_GAP = 2.5
+
+/** Rows a ruled-line field holds (its height is rows × spacing plus a small margin under the last line). */
+export function ruledRows(heightPt: number, spacing: number): number {
+  return Math.max(1, Math.floor((heightPt + 0.5) / spacing))
 }
 
 export interface FieldDef {
@@ -155,7 +172,8 @@ export async function stampFieldsOntoPdf(
   pdfDoc: PDFDocument,
   fieldDefs: FieldDef[],
   fieldValues: Record<string, string>,
-): Promise<void> {
+): Promise<StampReport> {
+  const report: StampReport = {}
   const pages = pdfDoc.getPages()
 
   const font       = await pdfDoc.embedFont(StandardFonts.Helvetica)
@@ -199,7 +217,9 @@ export async function stampFieldsOntoPdf(
         const pad  = opts.padding   ?? d.padding
         const align = (opts.textAlign ?? d.textAlign) as "left" | "center" | "right"
         const ftFont = (opts.fontWeight ?? d.fontWeight) === "bold" ? boldFont : font
-        const size = fitFontSize(value, fw - pad * 2, ftFont, Math.min(opts.fontSize ?? d.fontSize, fh * 0.8), 5)
+        const start = Math.min(opts.fontSize ?? d.fontSize, fh * 0.8)
+        const size = fitFontSize(value, fw - pad * 2, ftFont, start, 5)
+        if (size < start) report[def.id] = { shrunkTo: size, cutOff: size <= 5 && ftFont.widthOfTextAtSize(value, 5) > fw - pad * 2 }
         const baseline = textBaseline(vAlign, py, fh, size, pad)
         drawTextWithHalo(page, value, alignedX(value, align, px + pad, fw - pad * 2, ftFont, size), baseline, size, ftFont)
         break
@@ -214,6 +234,29 @@ export async function stampFieldsOntoPdf(
         const align  = (opts.textAlign ?? d.textAlign) as "left" | "center" | "right"
         const ftFont = (opts.fontWeight ?? d.fontWeight) === "bold" ? boldFont : font
         const usableW = fw - pad * 2
+
+        // Ruled-line mode: one row of text on each printed line
+        if (opts.lineSpacing && opts.lineSpacing > 0) {
+          const spacing = opts.lineSpacing
+          const gap = opts.baselineGap ?? DEFAULT_BASELINE_GAP
+          const rows = ruledRows(fh, spacing)
+          const maxSize = Math.min(size0, spacing - gap - 1)
+          let size = maxSize
+          let lines = wrapRichText(value, usableW, ftFont, size)
+          while (lines.length > rows && size > 6) {
+            size -= 0.5
+            lines = wrapRichText(value, usableW, ftFont, size)
+          }
+          report[def.id] = { rows, rowsUsed: Math.min(lines.length, rows), shrunkTo: size < maxSize ? size : undefined, cutOff: lines.length > rows }
+          const top = py + fh
+          lines.slice(0, rows).forEach((line, k) => {
+            if (line === "") return
+            const baseline = top - (k + 1) * spacing + gap
+            drawTextWithHalo(page, line, alignedX(line, align, px + pad, usableW, ftFont, size), baseline, size, ftFont)
+          })
+          break
+        }
+
         let size = size0
         let lines: string[] = []
         while (size >= 5) {
@@ -221,6 +264,7 @@ export async function stampFieldsOntoPdf(
           if (lines.length * size * lh <= fh - pad * 2) break
           size -= 0.5
         }
+        if (size < size0) report[def.id] = { shrunkTo: Math.max(size, 5), cutOff: lines.length * size * lh > fh - pad * 2 }
         const totalH = lines.length * size * lh
         let lineY: number
         if (vAlign === "bottom") {
@@ -254,9 +298,10 @@ export async function stampFieldsOntoPdf(
       case "signature":
       case "initials": {
         if (!value) break
-        const base64 = value.replace(/^data:image\/\w+;base64,/, "")
         try {
-          const img = await pdfDoc.embedPng(Buffer.from(base64, "base64"))
+          // pdf-lib takes the data URL directly — no Node Buffer, so this file
+          // also runs in the browser (the field editor's Live test)
+          const img = await pdfDoc.embedPng(value.startsWith("data:") ? value : `data:image/png;base64,${value}`)
           // Modal canvas is fixed-size; scale to fit the field preserving aspect ratio,
           // then center within the field so the mark isn't distorted.
           const dims = img.scaleToFit(fw, fh)
@@ -309,4 +354,6 @@ export async function stampFieldsOntoPdf(
       }
     }
   }
+
+  return report
 }

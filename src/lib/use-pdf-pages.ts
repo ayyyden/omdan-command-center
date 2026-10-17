@@ -13,7 +13,9 @@ export interface RenderedPage {
 
 // Renders all pages of a PDF (via signed URL) to canvas elements.
 // containerWidth determines the render scale; pages wider than container are scaled down.
-export function usePdfPages(url: string | null, containerWidth: number) {
+// keepPrevious: leave the old pages on screen until the new ones are ready
+// (the field editor's Live test re-renders on every change — no flashing).
+export function usePdfPages(url: string | null, containerWidth: number, opts: { keepPrevious?: boolean } = {}) {
   const [pages, setPages] = useState<RenderedPage[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -28,7 +30,7 @@ export function usePdfPages(url: string | null, containerWidth: number) {
     let cancelled = false
     setLoading(true)
     setError(null)
-    setPages([])
+    if (!opts.keepPrevious) setPages([])
 
     async function render() {
       try {
@@ -83,7 +85,7 @@ export function usePdfPages(url: string | null, containerWidth: number) {
 
     render()
     return () => { cancelled = true; ac.abort() }
-  }, [url, containerWidth])
+  }, [url, containerWidth]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return { pages, loading, error }
 }
