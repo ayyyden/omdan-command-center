@@ -2,10 +2,11 @@
 
 import { useState } from "react"
 
+export interface ConsentDoc { name: string; previewUrl: string }
+
 interface Props {
-  token: string
-  contractName: string
-  pdfUrl: string | null
+  /** Every document in this signing session — consent is given once for all of them */
+  docs: ConsentDoc[]
   companyName: string
   companyPhone: string | null
   companyEmail: string | null
@@ -21,24 +22,21 @@ interface Props {
 // withdraw consent, what's needed to view/keep the record, and requires the
 // signer to actually look at the document before consenting.
 export function ConsentScreen({
-  token, contractName, pdfUrl, companyName, companyPhone, companyEmail, submitting, error, onContinue,
+  docs, companyName, companyPhone, companyEmail, submitting, error, onContinue,
 }: Props) {
   const [viewedChecked, setViewedChecked] = useState(false)
   const [consentChecked, setConsentChecked] = useState(false)
 
   const contactLine = [companyPhone, companyEmail].filter(Boolean).join(" or ")
-  // Shows whatever staff already filled in (Sales Person Signature, price,
-  // license number, etc.) stamped onto the document, not the raw blank
-  // original — the customer should see exactly what they're being asked
-  // to sign, not a template with someone else's part missing.
-  const previewUrl = `/api/contracts/preview-pdf/${token}`
+  const many = docs.length > 1
+  const word = many ? "documents" : "document"
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="mb-6">
-          <p className="text-sm text-slate-500 font-medium mb-1">Step 1 of 2 · Electronic signature consent</p>
-          <h1 className="text-2xl font-semibold text-slate-900">{contractName}</h1>
+          <p className="text-sm text-slate-500 font-medium mb-1">Electronic signature consent{many ? ` · ${docs.length} documents` : ""}</p>
+          <h1 className="text-2xl font-semibold text-slate-900">{many ? "Your documents to sign" : docs[0]?.name}</h1>
         </div>
 
         <div className="bg-white rounded-xl border shadow-sm p-6 space-y-5">
@@ -47,7 +45,7 @@ export function ConsentScreen({
               Electronic Record and Signature Disclosure
             </h2>
             <p className="text-sm text-slate-600 leading-relaxed">
-              {companyName} would like you to sign this document electronically. Before you do,
+              {companyName} would like you to sign {many ? `these ${docs.length} documents` : "this document"} electronically. You agree once here, then sign {many ? "each one in order" : "it"}. Before you do,
               please review the following — this has the same legal effect as reviewing a paper
               disclosure form before signing by hand.
             </p>
@@ -94,20 +92,17 @@ export function ConsentScreen({
 
           <div className="pt-2 border-t border-slate-200">
             <p className="text-sm font-medium text-slate-800 mb-2">
-              Please open and review the document before continuing:
+              {many ? "The documents (you'll also see each one before you sign it):" : "You'll see the document, already filled in with our part, before you sign it."}
             </p>
-            {pdfUrl ? (
-              <a
-                href={previewUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2"
-              >
-                Open "{contractName}" in a new tab
-              </a>
-            ) : (
-              <p className="text-sm text-red-600">Could not load the document — contact the sender for a new link.</p>
-            )}
+            <ol className="space-y-1.5">
+              {docs.map((d, i) => (
+                <li key={d.previewUrl} className="flex items-center gap-2 text-sm">
+                  {many && <span className="w-5 text-slate-400 tabular-nums">{i + 1}.</span>}
+                  <span className="flex-1 text-slate-800">{d.name}</span>
+                  <a href={d.previewUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2">Open</a>
+                </li>
+              ))}
+            </ol>
           </div>
 
           {error && (
@@ -125,7 +120,7 @@ export function ConsentScreen({
                 className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
               />
               <span className="text-sm text-slate-700">
-                I was able to open and read the document above.
+                I can open and read the {word} above.
               </span>
             </label>
             <label className="flex items-start gap-3 cursor-pointer">
@@ -136,7 +131,7 @@ export function ConsentScreen({
                 className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
               />
               <span className="text-sm text-slate-700">
-                I consent to sign this document electronically and understand my electronic
+                I consent to sign {many ? "these documents" : "this document"} electronically and understand my electronic
                 signature is the legal equivalent of my handwritten signature.
               </span>
             </label>
@@ -144,10 +139,10 @@ export function ConsentScreen({
             <button
               type="button"
               onClick={onContinue}
-              disabled={submitting || !viewedChecked || !consentChecked || !pdfUrl}
+              disabled={submitting || !viewedChecked || !consentChecked || !docs.length}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-3 transition-colors text-sm mt-2"
             >
-              {submitting ? "Please wait…" : "Continue to Document"}
+              {submitting ? "Please wait…" : many ? "Continue to the first document" : "Continue to the document"}
             </button>
           </div>
         </div>

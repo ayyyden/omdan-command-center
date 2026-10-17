@@ -8,6 +8,8 @@ import { SignatureModal } from "@/components/contracts/signature-modal"
 interface Props {
   documentName: string
   fields: FormField[]
+  /** Values typed earlier (when coming back to edit) */
+  initialValues?: Record<string, string>
   onContinue: (result: { fieldValues: Record<string, string> }) => void
 }
 
@@ -17,8 +19,8 @@ interface Props {
 // consent or fill screens. No ESIGN consent screen here: this is an
 // employee acting for the company inside their own logged-in session, not
 // an external party being asked for e-signature consent.
-export function StaffPrepareForm({ documentName, fields, onContinue }: Props) {
-  const [values, setValues]         = useState<Record<string, string>>({})
+export function StaffPrepareForm({ documentName, fields, initialValues, onContinue }: Props) {
+  const [values, setValues]         = useState<Record<string, string>>(initialValues ?? {})
   const [signerName, setSignerName] = useState("")
   const [modalField, setModalField] = useState<FormField | null>(null)
   const [error, setError]           = useState("")

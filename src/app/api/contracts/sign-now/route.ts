@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import { requirePermission } from "@/lib/auth-helpers"
-import { prepareContractsForRecipient } from "@/lib/contracts/prepare-signing"
+import { prepareDocumentsForRecipient, type DocumentToSend } from "@/lib/contracts/prepare-signing"
 
 // "Sign now" — staff hands the device to the customer right there instead of
 // emailing a link. Creates the same sent_contracts/bundle records the email
@@ -8,15 +8,17 @@ import { prepareContractsForRecipient } from "@/lib/contracts/prepare-signing"
 // signing token so the caller can navigate into /sign-contract or
 // /sign-bundle immediately.
 export async function POST(req: NextRequest) {
-  const { contractId, customerId, jobId, recipientEmail, staffFieldValues } = await req.json() as {
-    contractId:       string
+  const { contractId, documents: docsIn, customerId, jobId, recipientEmail, staffFieldValues } = await req.json() as {
+    contractId?:      string
+    documents?:       DocumentToSend[]
     customerId:       string
     jobId:            string | null
     recipientEmail:   string
     staffFieldValues?: Record<string, string> | null
   }
 
-  if (!contractId || !customerId || !recipientEmail) {
+  const documents: DocumentToSend[] = docsIn?.length ? docsIn : contractId ? [{ templateId: contractId, staffFieldValues }] : []
+  if (!documents.length || !customerId || !recipientEmail) {
     return Response.json({ error: "Missing required fields" }, { status: 400 })
   }
 
@@ -32,12 +34,11 @@ export async function POST(req: NextRequest) {
   if (custErr || !customer) return Response.json({ error: "Customer not found" }, { status: 404 })
 
   try {
-    const result = await prepareContractsForRecipient({
-      supabase, userId, templateId: contractId, customerId, jobId: jobId ?? null,
+    const result = await prepareDocumentsForRecipient({
+      supabase, userId, documents, customerId, jobId: jobId ?? null,
       recipientEmail,
       subject: "Signed in person",
       body: "",
-      staffFieldValues,
     })
 
     return Response.json({

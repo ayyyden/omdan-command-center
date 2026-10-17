@@ -16,11 +16,14 @@ export function SignatureModal({
   signerName,
   onDone,
   onCancel,
+  previous,
 }: {
   type: "signature" | "initials"
   signerName: string
   onDone: (dataUrl: string) => void
   onCancel: () => void
+  /** The signature/initials already drawn earlier in this signing session — offered as one tap */
+  previous?: string | null
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawing = useRef(false)
@@ -121,6 +124,20 @@ export function SignatureModal({
           )}
         </div>
 
+        {previous && (
+          <div className="px-6 pt-4">
+            <button
+              type="button"
+              onClick={() => onDone(previous)}
+              className="w-full flex items-center gap-3 rounded-lg border-2 border-blue-200 bg-blue-50/60 hover:bg-blue-50 px-3 py-2 text-left transition-colors"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={previous} alt="" className="h-10 w-24 object-contain shrink-0" />
+              <span className="text-sm font-semibold text-blue-700">Use the same {type === "initials" ? "initials" : "signature"}</span>
+            </button>
+            <p className="text-xs text-slate-400 mt-2">or draw a new one below</p>
+          </div>
+        )}
         <div className="px-6 py-4">
           <div
             className="relative rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 overflow-hidden"

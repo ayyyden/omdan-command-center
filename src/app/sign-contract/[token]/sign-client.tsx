@@ -2,72 +2,85 @@
 
 import { useState } from "react"
 import { SignatureModal } from "@/components/contracts/signature-modal"
+import { PdfViewer } from "@/components/contracts/pdf-viewer"
 import { ConsentScreen } from "./consent-screen"
 import { FillForm, type SigningField } from "./fill-form"
 
-interface Props {
+export interface SignDoc {
   token: string
-  contractName: string
-  pdfUrl: string | null
+  name: string
   fields: SigningField[]
-  bundleToken?: string
+}
+
+interface Props {
+  /** The documents still to sign, in order (one for a single contract) */
+  docs: SignDoc[]
+  /** How many in the whole set were already signed before this visit */
+  alreadySigned?: number
   companyName: string
   companyPhone: string | null
   companyEmail: string | null
 }
 
-type Step = "consent" | "fill" | "done"
+type Step = "consent" | "review" | "fill" | "done"
 
-export function SignClient({
-  token, contractName, pdfUrl, fields, bundleToken, companyName, companyPhone, companyEmail,
-}: Props) {
+// The customer's signing session, for one document or a set sent together:
+//   1. agree to sign electronically — once, for all of them
+//   2. for each document: see it already filled in with the company's part
+//      (Sales Person Signature, price, license…) → "Sign this document"
+//   3. fill in their own part and sign → next document
+// A signature drawn once can be reused with one tap on the next documents.
+export function SignClient({ docs, alreadySigned = 0, companyName, companyPhone, companyEmail }: Props) {
   const [step, setStep]             = useState<Step>("consent")
-  const [values, setValues]         = useState<Record<string, string>>({})
+  const [index, setIndex]           = useState(0)
+  const [values, setValues]         = useState<Record<string, Record<string, string>>>({})
   const [signerName, setSignerName] = useState("")
   const [modalField, setModalField] = useState<SigningField | null>(null)
+  const [lastMark, setLastMark]     = useState<{ signature?: string; initials?: string }>({})
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState("")
 
+  const total = docs.length + alreadySigned
+  const doc = docs[index]
+  const position = alreadySigned + index + 1
+  const many = total > 1
+  const previewUrl = (d: SignDoc) => `/api/contracts/preview-pdf/${d.token}`
+  const docValues = values[doc?.token] ?? {}
+
   function setValue(id: string, v: string) {
-    setValues((prev) => ({ ...prev, [id]: v }))
+    setValues((prev) => ({ ...prev, [doc.token]: { ...(prev[doc.token] ?? {}), [id]: v } }))
   }
 
   async function handleConsent() {
     setSubmitting(true)
     setError("")
-    try {
-      await fetch(`/api/contracts/consent/${token}`, { method: "POST" })
-    } catch { /* non-fatal — consent is logged best-effort, signing itself still requires review */ }
+    // Consent is logged on every document in the set (best effort — signing
+    // itself still requires reviewing each document)
+    await Promise.all(docs.map((d) => fetch(`/api/contracts/consent/${d.token}`, { method: "POST" }).catch(() => null)))
     setSubmitting(false)
-    setStep("fill")
+    setStep("review")
+    window.scrollTo(0, 0)
   }
 
   async function handleSubmit() {
     setError("")
-
-    for (const f of fields) {
-      if (f.required) {
-        const v = values[f.id] ?? ""
-        if (!v.trim()) {
-          setError(`"${f.label}" is required.`)
-          return
-        }
+    for (const f of doc.fields) {
+      if (f.required && !(docValues[f.id] ?? "").trim()) {
+        setError(`"${f.label}" is required.`)
+        return
       }
     }
-
     if (!signerName.trim()) {
       setError("Please enter your full name to complete signing.")
       return
     }
 
     setSubmitting(true)
-
-    const res = await fetch(`/api/contracts/sign/${token}`, {
+    const res = await fetch(`/api/contracts/sign/${doc.token}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signerName: signerName.trim(), fieldValues: values }),
+      body: JSON.stringify({ signerName: signerName.trim(), fieldValues: docValues }),
     })
-
     setSubmitting(false)
 
     if (!res.ok) {
@@ -76,11 +89,13 @@ export function SignClient({
       return
     }
 
-    if (bundleToken) {
-      window.location.href = `/sign-bundle/${bundleToken}`
+    if (index + 1 < docs.length) {
+      setIndex(index + 1)
+      setStep("review")
     } else {
       setStep("done")
     }
+    window.scrollTo(0, 0)
   }
 
   if (step === "done") {
@@ -92,21 +107,31 @@ export function SignClient({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h1 className="text-xl font-semibold text-gray-900 mb-2">Contract Signed</h1>
+          <h1 className="text-xl font-semibold text-gray-900 mb-2">{many ? `All ${total} documents signed` : "Contract Signed"}</h1>
           <p className="text-gray-500 mb-1">
             Thank you, <span className="font-medium text-gray-700">{signerName}</span>.
           </p>
-          <p className="text-sm text-gray-400 mb-6">A signed copy is on its way to your email. You may close this window.</p>
-          <a
-            href="/contracts"
-            className="inline-flex items-center justify-center w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-4 py-3 transition-colors text-sm"
-          >
-            Back to Documents
-          </a>
+          <p className="text-sm text-gray-400">Signed copies are on their way to your email. You may close this window.</p>
         </div>
       </div>
     )
   }
+
+  if (step === "consent") {
+    return (
+      <ConsentScreen
+        docs={docs.map((d) => ({ name: d.name, previewUrl: previewUrl(d) }))}
+        companyName={companyName}
+        companyPhone={companyPhone}
+        companyEmail={companyEmail}
+        submitting={submitting}
+        error={error}
+        onContinue={handleConsent}
+      />
+    )
+  }
+
+  const label = many ? `Document ${position} of ${total}` : ""
 
   return (
     <>
@@ -114,33 +139,49 @@ export function SignClient({
         <SignatureModal
           type={modalField.field_type as "signature" | "initials"}
           signerName={signerName}
+          previous={modalField.field_type === "initials" ? lastMark.initials : lastMark.signature}
           onDone={(dataUrl) => {
             setValue(modalField.id, dataUrl)
+            setLastMark((m) => ({ ...m, [modalField.field_type === "initials" ? "initials" : "signature"]: dataUrl }))
             setModalField(null)
           }}
           onCancel={() => setModalField(null)}
         />
       )}
 
-      {step === "consent" ? (
-        <ConsentScreen
-          token={token}
-          contractName={contractName}
-          pdfUrl={pdfUrl}
-          companyName={companyName}
-          companyPhone={companyPhone}
-          companyEmail={companyEmail}
-          submitting={submitting}
-          error={error}
-          onContinue={handleConsent}
-        />
+      {step === "review" ? (
+        <div className="min-h-screen bg-gray-50">
+          <div className="max-w-3xl mx-auto px-4 py-6">
+            <div className="mb-4">
+              {many && <p className="text-sm text-slate-500 font-medium mb-1">{label} · Review</p>}
+              <h1 className="text-2xl font-semibold text-slate-900">{doc.name}</h1>
+              <p className="text-sm text-slate-500 mt-1">
+                This is the document with {companyName}&apos;s part already filled in. Read it, then tap Sign to fill in your part.
+              </p>
+            </div>
+            {many && <Progress total={total} done={position - 1} />}
+            <PdfViewer url={previewUrl(doc)} className="mb-24" />
+          </div>
+          <div className="fixed inset-x-0 bottom-0 bg-white/95 backdrop-blur border-t" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+            <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
+              <p className="hidden sm:block text-sm text-slate-500 flex-1 truncate">{many ? `${label}: ${doc.name}` : doc.name}</p>
+              <button
+                type="button"
+                onClick={() => { setStep("fill"); window.scrollTo(0, 0) }}
+                className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-6 py-3.5 text-base transition-colors"
+              >
+                Sign this document
+              </button>
+            </div>
+          </div>
+        </div>
       ) : (
         <FillForm
-          token={token}
-          contractName={contractName}
-          pdfUrl={pdfUrl}
-          fields={fields}
-          values={values}
+          token={doc.token}
+          contractName={doc.name}
+          pdfUrl={previewUrl(doc)}
+          fields={doc.fields}
+          values={docValues}
           setValue={setValue}
           signerName={signerName}
           setSignerName={setSignerName}
@@ -148,8 +189,21 @@ export function SignClient({
           submitting={submitting}
           error={error}
           onSubmit={handleSubmit}
+          stepLabel={many ? `${label} · Fill & sign` : "Fill & sign"}
+          submitLabel={index + 1 < docs.length ? "Sign & continue to the next document" : "Sign & Submit"}
+          onBack={() => { setStep("review"); setError(""); window.scrollTo(0, 0) }}
         />
       )}
     </>
+  )
+}
+
+function Progress({ total, done }: { total: number; done: number }) {
+  return (
+    <div className="flex gap-1.5 mb-4" aria-label={`${done} of ${total} signed`}>
+      {Array.from({ length: total }).map((_, i) => (
+        <div key={i} className={`h-1.5 flex-1 rounded-full ${i < done ? "bg-green-500" : i === done ? "bg-blue-600" : "bg-slate-200"}`} />
+      ))}
+    </div>
   )
 }

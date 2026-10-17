@@ -1,12 +1,15 @@
 import { NextRequest } from "next/server"
 import { requirePermission } from "@/lib/auth-helpers"
 import { createTransporter, buildHtmlEmail, smtpConfigured } from "@/lib/email"
-import { prepareContractsForRecipient } from "@/lib/contracts/prepare-signing"
+import { prepareDocumentsForRecipient, type DocumentToSend } from "@/lib/contracts/prepare-signing"
 
 export async function POST(req: NextRequest) {
-  const { contractId, customerId, jobId, recipientEmail, subject, body, staffFieldValues } =
+  // One document (contractId + staffFieldValues) or several sent together
+  // (documents: [{ templateId, staffFieldValues }]) — one link either way.
+  const { contractId, documents: docsIn, customerId, jobId, recipientEmail, subject, body, staffFieldValues } =
     await req.json() as {
-      contractId:       string
+      contractId?:      string
+      documents?:       DocumentToSend[]
       customerId:       string
       jobId:            string | null
       recipientEmail:   string
@@ -15,7 +18,8 @@ export async function POST(req: NextRequest) {
       staffFieldValues?: Record<string, string> | null
     }
 
-  if (!contractId || !customerId || !recipientEmail || !subject || !body) {
+  const documents: DocumentToSend[] = docsIn?.length ? docsIn : contractId ? [{ templateId: contractId, staffFieldValues }] : []
+  if (!documents.length || !customerId || !recipientEmail || !subject || !body) {
     return Response.json({ error: "Missing required fields" }, { status: 400 })
   }
 
@@ -43,10 +47,9 @@ export async function POST(req: NextRequest) {
 
   let result
   try {
-    result = await prepareContractsForRecipient({
-      supabase, userId, templateId: contractId, customerId, jobId: jobId ?? null,
+    result = await prepareDocumentsForRecipient({
+      supabase, userId, documents, customerId, jobId: jobId ?? null,
       recipientEmail, subject, body,
-      staffFieldValues,
     })
   } catch (err: any) {
     return Response.json({ error: err?.message ?? "Could not prepare document" }, { status: 500 })
@@ -71,11 +74,13 @@ export async function POST(req: NextRequest) {
 
   if (result.requiresSignature) {
     const htmlBody = buildHtmlEmail({
-      title: `Contract: ${result.contractName}`,
+      title: documents.length > 1 ? "Documents ready for signing" : `Contract: ${result.contractName}`,
       preheader: "Please review and sign your contract.",
       companyName,
-      bodyLines: [body, "", "Click the button below to review and sign electronically. The document is also attached for your reference."],
-      ctaLabel: "Review & Sign",
+      bodyLines: documents.length > 1
+        ? [body, "", `You have <strong>${result.contracts.length} documents</strong> to review and sign, one after another:`, ...result.contracts.map((c, i) => `${i + 1}. ${c.name}`), "", "Click the button below to start. They are also attached for your reference."]
+        : [body, "", "Click the button below to review and sign electronically. The document is also attached for your reference."],
+      ctaLabel: documents.length > 1 ? "Review & Sign All" : "Review & Sign",
       ctaUrl: signingLink,
     })
     const plainText = `${body}\n\n---\nTo review and sign this document digitally, please visit:\n${signingLink}\n\nThe document is also attached to this email for your reference.`
