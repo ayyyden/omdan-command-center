@@ -83,7 +83,16 @@ Rules you must follow:
 - Be specific. Instead of "test new creative", say which angle (before/after of a real turf or paver job, a 15-second walk-through video, a price-anchor offer, a local-proof hook naming the city), and for forms which change (add a "When do you want the project done?" or "Do you own the home?" qualifier, switch to Higher Intent, or send to the website booking page).
 - account_actions are only for things that span the whole account (tracking, team follow-up, moving budget between campaigns). Never repeat an action already given for a campaign or ad.
 - Write for Edan, not for engineers: never mention "rules", "the engine", "flags" or field names; say what the numbers show.
+- Actions are only things Edan should DO in Ads Manager or with his team. Never write an action that says to wait, re-check later, keep or leave something as it is, or keep something off: that is not an action. Put it in the reason instead and give no action.
+- At most 5 actions in the whole report (entity + account actions combined), most important first; at most 2 per entity. A healthy or too-early entity gets no actions.
 - One clear sentence per action. Plain words, no jargon without explanation. Don't invent numbers.`
+
+export const MAX_ACTIONS_PER_REVIEW = 5
+
+// "Re-check on Oct 13", "Leave it running", "Keep it off" — not things to do
+const IDLE_ACTION = /^\s*(re-?check|check (it |this )?again|leave|keep|let it|wait|hold off|don'?t (change|touch)|continue|monitor|watch|no action)\b/i
+
+const URGENCY_RANK = { urgent: 0, normal: 1, low: 2 } as const
 
 export interface ReviewResult {
   period: Period
@@ -144,6 +153,11 @@ export async function runAdReview(service: SupabaseClient, period: Period, opts:
   const data = await loadAdData(service, { days: period === "monthly" ? 75 : 60 })
   const range = periodFor(period, data.today)
   const base: ReviewResult = { period, period_start: range.start, period_end: range.end, report_id: null, entities_reviewed: 0, actions: 0 }
+
+  // Frozen numbers read as "spent nothing" and produce made-up advice
+  // (Oct 9–17, 2026: Meta access was blocked and every daily review ran on
+  // the same old data). No fresh data → no review.
+  if (data.stale) return { ...base, skipped_reason: `Paused: ${data.staleReason}` }
 
   // Entities + their rule hits
   const candidates = activeEntities(data, ["campaign", "ad"], period === "daily" ? 8 : period === "weekly" ? 14 : 40)
@@ -260,16 +274,27 @@ export async function runAdReview(service: SupabaseClient, period: Period, opts:
   if (error || !rep) throw new Error(`Couldn't save the report: ${error?.message}`)
   base.report_id = rep.id
 
+  // Keep only real to-dos, most urgent first, capped — a short list gets done
   const actionRows = [
-    ...entities.flatMap((r) => r.actions.map((a) => ({
+    ...entities.flatMap((r) => r.actions.slice(0, 2).map((a) => ({
       report_id: rep.id, entity_id: r.entity_id, entity_level: r.level, entity_name: r.name,
       type: a.type, text: a.text, reason: r.reason, confidence: r.confidence, urgency: a.urgency,
     }))),
     ...out.account_actions.map((a) => ({
-      report_id: rep.id, entity_id: null, entity_level: "account", entity_name: "Ad account",
-      type: a.type, text: a.text, reason: null, confidence: null, urgency: a.urgency,
+      report_id: rep.id, entity_id: null as string | null, entity_level: "account", entity_name: "Ad account",
+      type: a.type, text: a.text, reason: null as string | null, confidence: null as string | null, urgency: a.urgency,
     })),
   ]
+    .filter((a) => !IDLE_ACTION.test(a.text))
+    .sort((a, b) => URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency])
+    .slice(0, MAX_ACTIONS_PER_REVIEW)
+
+  // The new review replaces the old open suggestions for the same campaigns/ads
+  // (and the account-wide ones) instead of piling on top of them
+  const covered = entities.map((r) => r.entity_id)
+  await service.from("meta_ad_actions").update({ status: "dismissed" }).eq("status", "open").in("entity_id", covered.length ? covered : ["-"])
+  await service.from("meta_ad_actions").update({ status: "dismissed" }).eq("status", "open").eq("entity_level", "account")
+
   if (actionRows.length) await service.from("meta_ad_actions").insert(actionRows)
   base.actions = actionRows.length
   return base

@@ -53,7 +53,9 @@ async function graphGet<T>(path: string, params: Record<string, string> = {}): P
     const json = await res.json().catch(() => ({})) as { error?: { message?: string; code?: number; error_subcode?: number } }
     if (!res.ok || json.error) {
       const e = json.error ?? {}
-      throw new MetaApiError(e.message ?? `Meta API ${res.status}`, res.status, e.code, e.error_subcode)
+      // Keep Meta's code/subcode in the message — "API access blocked" alone doesn't say why
+      const ids = e.code != null ? ` (code ${e.code}${e.error_subcode ? `/${e.error_subcode}` : ""})` : ""
+      throw new MetaApiError(`${e.message ?? `Meta API ${res.status}`}${ids}`, res.status, e.code, e.error_subcode)
     }
     return json as T
   })
@@ -290,7 +292,7 @@ export async function checkHealth(): Promise<MetaHealth> {
     }
   } catch (err) {
     const e = err as MetaApiError
-    problems.push({ code: e.code === 190 ? "token_invalid" : "token_check_failed", message: `Couldn't verify the Meta token: ${e.message}`, critical: e.code === 190 })
+    problems.push({ code: e.code === 190 ? "token_invalid" : "token_check_failed", message: `Couldn't verify the Meta token: ${e.message}`, critical: e.code === 190 || /access blocked/i.test(e.message) })
   }
 
   let account: MetaAccount | null = null
@@ -309,7 +311,8 @@ export async function checkHealth(): Promise<MetaHealth> {
       }
     } catch (err) {
       const e = err as MetaApiError
-      problems.push({ code: "account_unreachable", message: `Couldn't read the ad account: ${e.message}`, critical: e.code === 190 })
+      // No account = no fresh numbers. Always critical: reviews on stale data are worse than none.
+      problems.push({ code: "account_unreachable", message: `Meta stopped sending data: ${e.message}. Until this is fixed the Advisor pauses its reviews.`, critical: true })
     }
   }
 

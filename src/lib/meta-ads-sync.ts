@@ -89,6 +89,13 @@ export async function runMetaSync(service: SupabaseClient, opts: { skipQuo?: boo
   if (result.configured) {
     try {
       const data = await loadAdData(service)
+      // Suggestions nobody acted on for a week are out of date — clear them
+      await service.from("meta_ad_actions").update({ status: "dismissed" })
+        .eq("status", "open").lt("created_at", new Date(Date.now() - 7 * 86400000).toISOString())
+      // Frozen numbers read as "spent nothing" — never judge or snapshot them
+      if (data.stale) {
+        errors.push(`paused: ${data.staleReason}`)
+      } else {
       result.snapshots = await fillDueSnapshots(service, data)
       for (const e of activeEntities(data, ["campaign", "ad"])) {
         allHits.push(...evaluateEntity({
@@ -99,6 +106,7 @@ export async function runMetaSync(service: SupabaseClient, opts: { skipQuo?: boo
           today: data.today,
           contactTrackingMature: data.contactTrackingMature,
         }))
+      }
       }
     } catch (err) {
       errors.push(`rules: ${err instanceof Error ? err.message : String(err)}`)

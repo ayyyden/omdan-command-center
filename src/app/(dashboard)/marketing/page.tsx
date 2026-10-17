@@ -93,9 +93,23 @@ export default async function AdAdvisorPage({ searchParams }: PageProps) {
             Follow the setup steps at the bottom of this page. Until then, leads are still tracked and attributed from their ad links.
           </Banner>
         )}
-        {problems.filter((p) => p.code !== "not_configured").map((p) => (
-          <Banner key={p.code} tone={p.critical ? "danger" : "warn"} title={p.critical ? "Needs attention now" : "Heads up"}>{p.message}</Banner>
-        ))}
+        {configured && data.stale && (
+          <Banner tone="danger" title="Meta stopped sending numbers: advice is paused">
+            {data.staleReason} The numbers below are from {data.lastDataAt ? new Date(data.lastDataAt).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric" }) : "before the connection broke"} and
+            no new suggestions are made until fresh data arrives.{" "}
+            {problems.some((p) => /access blocked/i.test(p.message)) && (
+              <> To fix &quot;API access blocked&quot;: open developers.facebook.com → My Apps → the app the &quot;Omdan CRM&quot; system user token was made with,
+              and check the alerts there (app restricted, needs Business Verification, or the Marketing API product is missing). Then in Business Settings → System users,
+              generate a new token and update <code>META_ACCESS_TOKEN</code> in Vercel.</>
+            )}
+          </Banner>
+        )}
+        {problems
+          .filter((p) => p.code !== "not_configured")
+          .filter((p) => !(data.stale && ["token_check_failed", "account_unreachable"].includes(p.code)))
+          .map((p) => (
+            <Banner key={p.code} tone={p.critical ? "danger" : "warn"} title={p.critical ? "Needs attention now" : "Heads up"}>{p.message}</Banner>
+          ))}
         {tz && tz !== "America/Los_Angeles" && (
           <Banner tone="warn" title="Ad account timezone">
             Your ad account runs on {tz}, so &quot;daily&quot; numbers here follow that timezone, not Pacific time.
@@ -106,8 +120,8 @@ export default async function AdAdvisorPage({ searchParams }: PageProps) {
             Usually leads older than Meta&apos;s 90-day limit, or website bookings from ads without the URL parameters below.
           </Banner>
         )}
-        {configured && health?.ok && !problems.length && (
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><CheckCircle2 className="w-3.5 h-3.5 text-success" /> Meta connected · last checked {new Date(health.checked_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>
+        {configured && !data.stale && data.lastDataAt && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><CheckCircle2 className="w-3.5 h-3.5 text-success" /> Meta connected · numbers updated {new Date(data.lastDataAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>
         )}
 
         {/* ── What to do ──────────────────────────────────────────── */}
