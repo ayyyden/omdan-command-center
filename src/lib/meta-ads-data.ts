@@ -37,7 +37,15 @@ export interface AdData {
   trackingSince: string | null
   contactTrackingMature: boolean
   unattributed: number
+  /** When Meta last sent numbers (newest insights row), and whether that is too old to judge on */
+  lastDataAt: string | null
+  stale: boolean
+  staleReason: string | null
 }
+
+// Numbers older than this (or a broken connection) pause rules and reviews:
+// judging frozen data reads missing days as "spent nothing".
+const STALE_AFTER_HOURS = 8
 
 export async function accountTimezone(service: SupabaseClient): Promise<string> {
   const { data } = await service.from("meta_ad_health").select("account").order("checked_at", { ascending: false }).limit(1).maybeSingle()
@@ -51,11 +59,23 @@ export async function loadAdData(service: SupabaseClient, opts: { days?: number 
   const today = dateInTz(new Date(), tz)
   const since = addDays(today, -(opts.days ?? 60))
 
-  const [{ data: entities }, { data: rows }, facts] = await Promise.all([
+  const [{ data: entities }, { data: rows }, facts, { data: newest }, { data: health }] = await Promise.all([
     service.from("meta_ad_entities").select("id, level, campaign_id, adset_id, name, status, effective_status, daily_budget, lifetime_budget, learning_stage, thumbnail_url, frequency_7d, created_time"),
     service.from("meta_ad_insights_daily").select("entity_id, date, spend, impressions, clicks, link_clicks, leads, video_3s_views").gte("date", since).limit(50000),
     loadLeadFacts(service, { sinceDays: (opts.days ?? 60) + 2, tz, settings }),
+    service.from("meta_ad_insights_daily").select("updated_at").order("updated_at", { ascending: false }).limit(1),
+    service.from("meta_ad_health").select("checked_at, problems").order("checked_at", { ascending: false }).limit(1).maybeSingle(),
   ])
+
+  const lastDataAt = newest?.[0]?.updated_at ?? null
+  const healthProblem = ((health?.problems ?? []) as { code: string; critical: boolean; message: string }[])
+    .find((p) => p.critical && p.code !== "not_configured")
+  const ageHours = lastDataAt ? (Date.now() - new Date(lastDataAt).getTime()) / 3600000 : Infinity
+  const staleReason = healthProblem
+    ? healthProblem.message
+    : !lastDataAt ? "Meta hasn't sent any numbers yet."
+    : ageHours > STALE_AFTER_HOURS ? `Meta's numbers haven't updated since ${new Date(lastDataAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.`
+    : null
 
   const rowsBy = new Map<string, DayRow[]>()
   const firstSpend = new Map<string, string>()
@@ -83,6 +103,9 @@ export async function loadAdData(service: SupabaseClient, opts: { days?: number 
     trackingSince: facts.trackingSince,
     contactTrackingMature: trackingDays >= 14,
     unattributed: facts.unattributed,
+    lastDataAt,
+    stale: !!staleReason,
+    staleReason,
   }
 }
 

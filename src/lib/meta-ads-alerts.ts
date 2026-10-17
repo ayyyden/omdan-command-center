@@ -7,7 +7,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { notifyLiaAction } from "@/lib/lia-notifications"
 import type { AdSettings } from "@/lib/meta-ads-settings"
-import { CRITICAL_RULES, isQuietHour, laHour, nextQuietEnd, type RuleHit } from "@/lib/meta-ads-rules"
+import { CRITICAL_RULES, PERSISTENT_RULES, isQuietHour, laHour, nextQuietEnd, type RuleHit } from "@/lib/meta-ads-rules"
 
 const laDate = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(d)
 
@@ -28,6 +28,16 @@ export async function processAlerts(
     const critical = CRITICAL_RULES.has(h.rule)
     const key = `${h.rule}:${h.entity_id}:${day}`
     const holdUntil = quiet && !critical ? nextQuietEnd(now, settings.quiet_end_hour) : null
+
+    // An ongoing condition already alerted this week → stay quiet
+    if (PERSISTENT_RULES.has(h.rule)) {
+      const { data: recent } = await service
+        .from("meta_ad_alerts").select("id")
+        .like("key", `${h.rule}:${h.entity_id}:%`)
+        .gte("created_at", new Date(now.getTime() - 7 * 86400000).toISOString())
+        .limit(1)
+      if (recent?.length) { duplicates++; continue }
+    }
 
     const { data: inserted, error } = await service
       .from("meta_ad_alerts")

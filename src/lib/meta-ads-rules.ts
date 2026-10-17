@@ -22,7 +22,11 @@ export interface RuleHit {
 }
 
 /** Critical = sent even during quiet hours. */
-export const CRITICAL_RULES = new Set(["money_burning", "account_disabled", "payment_failed", "token_broken"])
+export const CRITICAL_RULES = new Set(["money_burning", "account_disabled", "payment_failed", "token_broken", "meta_disconnected"])
+
+/** Conditions that persist day after day (a flagged ad, a tired audience…):
+ *  alert once a week while they last, not every morning. */
+export const PERSISTENT_RULES = new Set(["rejected", "frequency", "cpl_over_target", "meta_disconnected", "token_broken", "account_disabled", "payment_failed"])
 
 export function canJudge(m: Pick<EntityMetrics, "days_running">, lifetimeSpend: number, s: AdSettings): boolean {
   return lifetimeSpend >= 1.5 * s.target_cpl && m.days_running >= 3
@@ -141,7 +145,7 @@ export function evaluateEntity(args: {
 
 /** Hits from the account health check (token, account status, payment). */
 export function healthHits(problems: { code: string; message: string; critical: boolean }[]): RuleHit[] {
-  const map: Record<string, string> = { token_invalid: "token_broken", account_disabled: "account_disabled", payment_failed: "payment_failed" }
+  const map: Record<string, string> = { token_invalid: "token_broken", account_disabled: "account_disabled", payment_failed: "payment_failed", account_unreachable: "meta_disconnected" }
   return problems
     .filter((p) => p.code !== "not_configured")
     .map((p) => ({
