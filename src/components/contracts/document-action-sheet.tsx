@@ -12,6 +12,7 @@ import type { FormField } from "./field-row"
 import { createClient } from "@/lib/supabase/client"
 import { FileSignature, Send, Loader2, ChevronLeft } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { sortForFilling } from "@/lib/contracts/fill-order"
 
 export interface DocumentSummary {
   id: string
@@ -74,14 +75,14 @@ export function DocumentActionSheet({ documents, userId, companyName, onClose, p
     }
     supabase
       .from("contract_fields")
-      .select("id, page_number, field_type, label, required, contract_template_id")
+      .select("id, page_number, field_type, label, required, contract_template_id, x, y, options")
       .in("contract_template_id", [...templateToDoc.keys()])
       .eq("fill_role", "staff")
       .order("page_number")
       .then(({ data }) => {
         if (cancelled) return
         const byDoc: Record<string, FormField[]> = {}
-        for (const f of (data ?? []) as (FormField & { contract_template_id: string })[]) {
+        for (const f of sortForFilling((data ?? []) as (FormField & { contract_template_id: string; x: number; y: number; options: { order?: number } | null })[])) {
           const docId = templateToDoc.get(f.contract_template_id)!
           ;(byDoc[docId] ??= []).push(f)
         }

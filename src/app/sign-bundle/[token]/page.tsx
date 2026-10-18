@@ -3,6 +3,7 @@ import { headers } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/service"
 import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
 import { SignClient, type SignDoc } from "@/app/sign-contract/[token]/sign-client"
+import { sortForFilling } from "@/lib/contracts/fill-order"
 
 // One link for a set of documents sent together: the customer agrees to
 // e-signing once, then sees each document already filled with the
@@ -60,7 +61,7 @@ export default async function SignBundlePage({ params }: { params: Promise<{ tok
   const templateIds = pending.map((c) => (c.contract_template as unknown as { id: string }).id)
   const { data: fields } = await supabase
     .from("contract_fields")
-    .select("id, page_number, field_type, label, required, contract_template_id")
+    .select("id, page_number, field_type, label, required, contract_template_id, x, y, options")
     .in("contract_template_id", templateIds)
     .eq("fill_role", "customer")
     .order("page_number")
@@ -70,7 +71,7 @@ export default async function SignBundlePage({ params }: { params: Promise<{ tok
     return {
       token: c.signing_token,
       name: t.name,
-      fields: (fields ?? []).filter((f) => f.contract_template_id === t.id) as SignDoc["fields"],
+      fields: sortForFilling((fields ?? []).filter((f) => f.contract_template_id === t.id)) as SignDoc["fields"],
     }
   })
 
