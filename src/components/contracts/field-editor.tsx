@@ -36,6 +36,9 @@ export interface FieldOptions {
   // of text sits on each (see stamp-pdf.ts)
   lineSpacing?: number
   baselineGap?: number
+  // Fill order: the customer / staff form asks for fields with a number
+  // first, lowest first; the rest follow top to bottom (fill-order.ts)
+  order?: number
 }
 
 export type FillRole = "customer" | "staff"
@@ -844,6 +847,40 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                 )}
               </div>
 
+              {/* Fill order */}
+              {(() => {
+                const sameRole = fields.filter((f) => f.fill_role === selectedField.fill_role && f.id !== selectedField.id)
+                const next = Math.max(0, ...sameRole.map((f) => getOpts(f).order ?? 0)) + 1
+                const order = opts.order
+                return (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Fill order</Label>
+                    <div className="flex gap-1">
+                      <Input
+                        type="number"
+                        min={1}
+                        placeholder="Auto"
+                        value={order ?? ""}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10)
+                          updateOpts(selectedField.id, { order: Number.isFinite(v) && v > 0 ? v : undefined })
+                        }}
+                        className="h-7 text-xs w-20"
+                      />
+                      <button type="button" onClick={() => updateOpts(selectedField.id, { order: next })}
+                        className="flex-1 h-7 text-xs rounded border bg-background hover:bg-muted">Next: #{next}</button>
+                      {order != null && (
+                        <button type="button" onClick={() => updateOpts(selectedField.id, { order: undefined })}
+                          className="h-7 px-2 text-xs rounded border bg-background hover:bg-muted">Clear</button>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      The {selectedField.fill_role === "staff" ? "staff" : "customer"} form asks numbered fields first (1, 2, 3…), then the rest top to bottom.
+                    </p>
+                  </div>
+                )
+              })()}
+
               {/* Position */}
               <div>
                 <p className="text-[10px] font-medium text-muted-foreground mb-1">Position (%)</p>
@@ -1172,7 +1209,7 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                               live text preview inside it — the box itself now shows
                               exactly what will be stamped, not just an empty rectangle. */}
                           <div className="absolute -top-4 left-0 text-[9px] font-medium px-1 rounded-sm bg-background/95 border border-border/60 text-foreground/70 whitespace-nowrap pointer-events-none select-none">
-                            {f.required ? "* " : ""}{f.label}
+                            {getOpts(f).order ? <span className="font-bold text-primary mr-1">#{getOpts(f).order}</span> : null}{f.required ? "* " : ""}{f.label}
                           </div>
                           <div
                             className={`w-full h-full border-2 rounded-sm cursor-move overflow-hidden ${FIELD_COLORS[f.field_type]} ${isSelected ? "ring-2 ring-primary ring-offset-0" : ""}`}

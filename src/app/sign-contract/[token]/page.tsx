@@ -3,6 +3,7 @@ import { headers } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/service"
 import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
 import { SignClient } from "./sign-client"
+import { sortForFilling } from "@/lib/contracts/fill-order"
 
 export default async function SignContractPage({
   params,
@@ -81,7 +82,7 @@ export default async function SignContractPage({
   // merged back in server-side at final stamping (see sign/[token]/route.ts).
   const { data: fields } = await supabase
     .from("contract_fields")
-    .select("id, page_number, field_type, label, required")
+    .select("id, page_number, field_type, label, required, x, y, options")
     .eq("contract_template_id", template.id)
     .eq("fill_role", "customer")
     .order("page_number")
@@ -95,7 +96,7 @@ export default async function SignContractPage({
 
   return (
     <SignClient
-      docs={[{ token, name: template.name, fields: (fields ?? []) as any }]}
+      docs={[{ token, name: template.name, fields: sortForFilling(fields ?? []) as any }]}
       companyName={company?.company_name ?? "Omdan Development"}
       companyPhone={company?.phone ?? null}
       companyEmail={company?.email ?? null}

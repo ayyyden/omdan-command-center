@@ -34,8 +34,15 @@ export function FillForm({
   onOpenSignature, submitting, error, onSubmit, stepLabel, submitLabel, onBack,
 }: Props) {
   const hasName = signerName.trim().length > 0
-  const pages = Array.from(new Set(fields.map((f) => f.page_number))).sort((a, b) => a - b)
-  const multiPage = pages.length > 1
+  // Fields arrive already in fill order (fill-order.ts) — keep that order,
+  // with a "Page N" heading whenever the next field is on another page
+  const multiPage = new Set(fields.map((f) => f.page_number)).size > 1
+  const groups: { page: number; fields: SigningField[] }[] = []
+  for (const f of fields) {
+    const last = groups[groups.length - 1]
+    if (last && last.page === f.page_number) last.fields.push(f)
+    else groups.push({ page: f.page_number, fields: [f] })
+  }
   const previewUrl = `/api/contracts/preview-pdf/${token}`
 
   return (
@@ -76,12 +83,12 @@ export function FillForm({
             <p className="text-xs text-slate-400 mt-1">Used to label your signature on the document.</p>
           </div>
 
-          {pages.map((pageNum) => (
-            <div key={pageNum} className="space-y-4 pt-4 border-t border-slate-200 first:border-t-0 first:pt-0">
+          {groups.map((g, gi) => (
+            <div key={gi} className="space-y-4 pt-4 border-t border-slate-200 first:border-t-0 first:pt-0">
               {multiPage && (
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Page {pageNum}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Page {g.page}</p>
               )}
-              {fields.filter((f) => f.page_number === pageNum).map((f) => (
+              {g.fields.map((f) => (
                 <FieldRow
                   key={f.id}
                   field={f}
