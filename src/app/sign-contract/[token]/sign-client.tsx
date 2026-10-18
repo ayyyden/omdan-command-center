@@ -5,6 +5,7 @@ import { SignatureModal } from "@/components/contracts/signature-modal"
 import { PdfViewer } from "@/components/contracts/pdf-viewer"
 import { ConsentScreen } from "./consent-screen"
 import { FillForm, type SigningField } from "./fill-form"
+import { firstMissingRequired } from "@/lib/contracts/choice-groups"
 
 export interface SignDoc {
   token: string
@@ -48,7 +49,10 @@ export function SignClient({ docs, alreadySigned = 0, companyName, companyPhone,
   const docValues = values[doc?.token] ?? {}
 
   function setValue(id: string, v: string) {
-    setValues((prev) => ({ ...prev, [doc.token]: { ...(prev[doc.token] ?? {}), [id]: v } }))
+    patchValues({ [id]: v })
+  }
+  function patchValues(patch: Record<string, string>) {
+    setValues((prev) => ({ ...prev, [doc.token]: { ...(prev[doc.token] ?? {}), ...patch } }))
   }
 
   async function handleConsent() {
@@ -64,11 +68,10 @@ export function SignClient({ docs, alreadySigned = 0, companyName, companyPhone,
 
   async function handleSubmit() {
     setError("")
-    for (const f of doc.fields) {
-      if (f.required && !(docValues[f.id] ?? "").trim()) {
-        setError(`"${f.label}" is required.`)
-        return
-      }
+    const missing = firstMissingRequired(doc.fields, docValues)
+    if (missing) {
+      setError(`"${missing}" is required.`)
+      return
     }
     if (!signerName.trim()) {
       setError("Please enter your full name to complete signing.")
@@ -182,7 +185,7 @@ export function SignClient({ docs, alreadySigned = 0, companyName, companyPhone,
           pdfUrl={previewUrl(doc)}
           fields={doc.fields}
           values={docValues}
-          setValue={setValue}
+          setValues={patchValues}
           signerName={signerName}
           setSignerName={setSignerName}
           onOpenSignature={setModalField}

@@ -1,6 +1,7 @@
 "use client"
 
 import type { FieldType } from "@/components/contracts/field-editor"
+import { buildFormItems, choiceLabelOf, pickChoice } from "@/lib/contracts/choice-groups"
 
 export interface FormField {
   id: string
@@ -8,6 +9,7 @@ export interface FormField {
   field_type: FieldType
   label: string
   required: boolean
+  options?: { group?: string | null; choice?: string | null; order?: number | null } | null
 }
 
 // Shared labeled-input renderer for both the customer FillForm
@@ -135,4 +137,73 @@ export function FieldRow({
     default:
       return null
   }
+}
+
+/** A "pick one" question (choice-groups.ts): one button per printed answer. */
+export function ChoiceRow({
+  question, required, members, values, onChange,
+}: {
+  question: string
+  required: boolean
+  members: FormField[]
+  values: Record<string, string>
+  onChange: (patch: Record<string, string>) => void
+}) {
+  const picked = members.find((m) => values[m.id] === "true")?.id
+  const many = members.length > 3
+  return (
+    <div>
+      <p className="block text-sm font-semibold text-slate-800 mb-1.5">
+        {question}
+        {required && <span className="text-red-500"> *</span>}
+      </p>
+      <div className={many ? "grid grid-cols-1 sm:grid-cols-2 gap-2" : "flex gap-2"}>
+        {members.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => onChange(pickChoice(members, picked === m.id && !required ? "" : m.id))}
+            className={`flex-1 py-2.5 px-3 rounded-lg text-sm font-semibold border-2 text-left transition-colors ${
+              picked === m.id
+                ? "bg-blue-600 border-blue-600 text-white"
+                : "bg-white border-slate-300 text-slate-700 hover:border-slate-400"
+            } ${many ? "" : "text-center"}`}
+          >
+            {choiceLabelOf(m)}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** All of a form's fields in order, with each choice group shown as one question. */
+export function FieldList({
+  fields, values, setValues, onOpenSignature, signatureDisabled,
+}: {
+  fields: FormField[]
+  values: Record<string, string>
+  setValues: (patch: Record<string, string>) => void
+  onOpenSignature: (f: FormField) => void
+  signatureDisabled: boolean
+}) {
+  return (
+    <>
+      {buildFormItems(fields).map((item) =>
+        item.kind === "choice" ? (
+          <ChoiceRow key={"g:" + item.key} question={item.question} required={item.required}
+            members={item.members} values={values} onChange={setValues} />
+        ) : (
+          <FieldRow
+            key={item.field.id}
+            field={item.field}
+            value={values[item.field.id] ?? ""}
+            onChange={(v) => setValues({ [item.field.id]: v })}
+            onOpenSignature={() => onOpenSignature(item.field)}
+            disabled={signatureDisabled && (item.field.field_type === "signature" || item.field.field_type === "initials")}
+          />
+        ),
+      )}
+    </>
+  )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { FieldRow, type FormField } from "@/components/contracts/field-row"
+import { FieldList, type FormField } from "@/components/contracts/field-row"
 
 export type SigningField = FormField
 
@@ -10,7 +10,7 @@ interface Props {
   pdfUrl: string | null
   fields: SigningField[]
   values: Record<string, string>
-  setValue: (id: string, v: string) => void
+  setValues: (patch: Record<string, string>) => void
   signerName: string
   setSignerName: (v: string) => void
   onOpenSignature: (field: SigningField) => void
@@ -30,7 +30,7 @@ interface Props {
 // number, etc.) are collected separately in a Prepare step before this
 // screen ever loads, see staff-prepare-form.tsx.
 export function FillForm({
-  token, contractName, pdfUrl, fields, values, setValue, signerName, setSignerName,
+  token, contractName, pdfUrl, fields, values, setValues, signerName, setSignerName,
   onOpenSignature, submitting, error, onSubmit, stepLabel, submitLabel, onBack,
 }: Props) {
   const hasName = signerName.trim().length > 0
@@ -88,16 +88,13 @@ export function FillForm({
               {multiPage && (
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Page {g.page}</p>
               )}
-              {g.fields.map((f) => (
-                <FieldRow
-                  key={f.id}
-                  field={f}
-                  value={values[f.id] ?? ""}
-                  onChange={(v) => setValue(f.id, v)}
-                  onOpenSignature={() => onOpenSignature(f)}
-                  disabled={!hasName && (f.field_type === "signature" || f.field_type === "initials")}
-                />
-              ))}
+              <FieldList
+                fields={g.fields}
+                values={values}
+                setValues={setValues}
+                onOpenSignature={onOpenSignature}
+                signatureDisabled={!hasName}
+              />
             </div>
           ))}
 
