@@ -12,6 +12,7 @@ import { Loader2, Save, Trash2, AlignLeft, AlignCenter, AlignRight, ScanLine, Fl
 import { detectLines, suggestFields, coverage } from "@/lib/contracts/detect-lines"
 import { sampleValue, stampTestPdf, type SampleLength } from "@/lib/contracts/live-test"
 import { ruledRows, DEFAULT_BASELINE_GAP, type StampReport } from "@/lib/contracts/stamp-pdf"
+import { choiceGroupOf } from "@/lib/contracts/choice-groups"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,10 @@ export interface FieldOptions {
   // Fill order: the customer / staff form asks for fields with a number
   // first, lowest first; the rest follow top to bottom (fill-order.ts)
   order?: number
+  // Checkbox only — "pick one" questions (choice-groups.ts) and mark style
+  group?: string
+  choice?: string
+  mark?: "x" | "check" | "circle"
 }
 
 export type FillRole = "customer" | "staff"
@@ -274,7 +279,13 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
     return { widthPt: pg?.pdfWidth ?? 612, heightPt: pg?.pdfHeight ?? 792 }
   }, [pages])
 
-  const testValueFor = useCallback((f: ContractField) => testValues[f.id] ?? sampleValue(f, pageDims(f.page_number)), [testValues, pageDims])
+  const testValueFor = useCallback((f: ContractField) => {
+    if (testValues[f.id] != null) return testValues[f.id]
+    // A "pick one" group: only its first answer is picked in the test
+    const g = choiceGroupOf(f)
+    if (g) return fields.find((x) => choiceGroupOf(x) === g)?.id === f.id ? "true" : ""
+    return sampleValue(f, pageDims(f.page_number))
+  }, [testValues, pageDims, fields])
 
   // Re-stamp the real PDF with the test values whenever a field or value changes
   useEffect(() => {
@@ -806,6 +817,74 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                   ))}
                 </select>
               </div>
+
+              {/* Checkbox: mark style + "pick one" question (choice-groups.ts) */}
+              {selectedField.field_type === "checkbox" && (() => {
+                const groups = Array.from(new Set(fields.map((f) => getOpts(f).group?.trim()).filter(Boolean))) as string[]
+                const group = opts.group ?? ""
+                const members = group.trim() ? fields.filter((f) => f.field_type === "checkbox" && getOpts(f).group?.trim() === group.trim()) : []
+                function addNextAnswer() {
+                  const f = selectedField!
+                  const gap = 0.01
+                  const roomRight = f.x + f.width * 2 + gap <= 1
+                  const copy: ContractField = {
+                    ...f,
+                    id: crypto.randomUUID(),
+                    label: `${group || "Answer"} – option ${members.length + 1}`,
+                    x: roomRight ? f.x + f.width + gap : f.x,
+                    y: roomRight ? f.y : Math.min(1 - f.height, f.y + f.height + gap),
+                    options: { ...getOpts(f), choice: "", order: undefined },
+                  }
+                  setFields((prev) => [...prev, copy])
+                  setSelectedId(copy.id)
+                }
+                return (
+                  <div className="space-y-2 rounded-md border border-dashed p-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">When ticked, mark it with</Label>
+                      <div className="flex gap-1">
+                        {([["x", "✕ X"], ["check", "✓ Check"], ["circle", "◯ Circle"]] as const).map(([v, l]) => (
+                          <button key={v} type="button" onClick={() => updateOpts(selectedField.id, { mark: v })}
+                            className={`flex-1 h-7 text-xs rounded border transition-colors ${(opts.mark ?? "x") === v ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"}`}>
+                            {l}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">Circle: place the box over the printed answer (e.g. “5. Excellent”) — it gets circled.</p>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Pick-one question (optional)</Label>
+                      <Input
+                        list="choice-groups"
+                        value={group}
+                        placeholder="e.g. How would you rate us?"
+                        onChange={(e) => updateOpts(selectedField.id, { group: e.target.value || undefined })}
+                        className="h-7 text-xs"
+                      />
+                      <datalist id="choice-groups">{groups.map((g) => <option key={g} value={g} />)}</datalist>
+                    </div>
+                    {group.trim() && (
+                      <>
+                        <div className="space-y-1">
+                          <Label className="text-xs">This answer</Label>
+                          <Input
+                            value={opts.choice ?? ""}
+                            placeholder="e.g. Excellent"
+                            onChange={(e) => updateOpts(selectedField.id, { choice: e.target.value || undefined })}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          {members.length} answer{members.length === 1 ? "" : "s"} in this question: {members.map((m) => getOpts(m).choice || "?").join(" · ")}.
+                          The customer picks one from buttons.
+                        </p>
+                        <button type="button" onClick={addNextAnswer}
+                          className="w-full h-7 text-xs rounded border bg-background hover:bg-muted">+ Add next answer</button>
+                      </>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* Required */}
               <div className="flex items-center gap-2">

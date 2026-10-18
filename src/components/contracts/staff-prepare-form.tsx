@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { FieldRow, type FormField } from "@/components/contracts/field-row"
+import { FieldList, type FormField } from "@/components/contracts/field-row"
+import { firstMissingRequired } from "@/lib/contracts/choice-groups"
 import { SignatureModal } from "@/components/contracts/signature-modal"
 
 interface Props {
@@ -32,11 +33,10 @@ export function StaffPrepareForm({ documentName, fields, initialValues, onContin
   }
 
   function handleContinue() {
-    for (const f of fields) {
-      if (f.required && !(values[f.id] ?? "").trim()) {
-        setError(`"${f.label}" is required.`)
-        return
-      }
+    const missing = firstMissingRequired(fields, values)
+    if (missing) {
+      setError(`"${missing}" is required.`)
+      return
     }
     if (hasSignatureField && !signerName.trim()) {
       setError("Enter your name before signing.")
@@ -76,16 +76,13 @@ export function StaffPrepareForm({ documentName, fields, initialValues, onContin
       )}
 
       <div className="space-y-4 max-h-[45vh] overflow-y-auto pr-1">
-        {fields.map((f) => (
-          <FieldRow
-            key={f.id}
-            field={f}
-            value={values[f.id] ?? ""}
-            onChange={(v) => setValue(f.id, v)}
-            onOpenSignature={() => setModalField(f)}
-            disabled={(f.field_type === "signature" || f.field_type === "initials") && !signerName.trim()}
-          />
-        ))}
+        <FieldList
+          fields={fields}
+          values={values}
+          setValues={(patch) => setValues((prev) => ({ ...prev, ...patch }))}
+          onOpenSignature={(f) => setModalField(f)}
+          signatureDisabled={!signerName.trim()}
+        />
       </div>
 
       {error && (

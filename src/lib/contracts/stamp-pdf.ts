@@ -24,6 +24,9 @@ export interface FieldOptions {
   // row of text sits `baselineGap` pt above its printed line, like handwriting.
   lineSpacing?: number
   baselineGap?: number
+  // Checkbox: how a ticked box is marked — "x" (default), "check" (✓), or
+  // "circle" (an ink ring around the box, for "Please Circle One" answers)
+  mark?: "x" | "check" | "circle"
 }
 
 /** What happened to each value when stamped — the field editor's Live test uses this to flag fields too small for real answers. */
@@ -317,12 +320,28 @@ export async function stampFieldsOntoPdf(
       }
 
       case "checkbox": {
-        if (value === "true") {
-          const xPad = Math.min(fw, fh) * 0.18
-          const checkColor = rgb(0.05, 0.45, 0.05)
-          page.drawLine({ start: { x: px + xPad,      y: py + xPad      }, end: { x: px + fw - xPad, y: py + fh - xPad }, thickness: 1.8, color: checkColor })
-          page.drawLine({ start: { x: px + fw - xPad, y: py + xPad      }, end: { x: px + xPad,      y: py + fh - xPad }, thickness: 1.8, color: checkColor })
+        if (value !== "true") break
+        const mark = opts.mark ?? "x"
+        if (mark === "circle") {
+          // An ellipse hugging the box — like circling the printed answer by hand
+          page.drawEllipse({
+            x: px + fw / 2, y: py + fh / 2, xScale: fw * 0.56 + 2, yScale: fh * 0.62 + 2,
+            borderColor: TEXT_COLOR, borderWidth: 1.4, opacity: 0,
+          })
+          break
         }
+        const s = Math.min(fw, fh)
+        const cx = px + fw / 2, cy = py + fh / 2
+        const checkColor = rgb(0.05, 0.45, 0.05)
+        if (mark === "check") {
+          // ✓ drawn as two strokes, centered in the box
+          page.drawLine({ start: { x: cx - s * 0.32, y: cy + s * 0.02 }, end: { x: cx - s * 0.08, y: cy - s * 0.28 }, thickness: 1.9, color: checkColor })
+          page.drawLine({ start: { x: cx - s * 0.08, y: cy - s * 0.28 }, end: { x: cx + s * 0.36, y: cy + s * 0.34 }, thickness: 1.9, color: checkColor })
+          break
+        }
+        const xPad = s * 0.18
+        page.drawLine({ start: { x: cx - s / 2 + xPad, y: cy - s / 2 + xPad }, end: { x: cx + s / 2 - xPad, y: cy + s / 2 - xPad }, thickness: 1.8, color: checkColor })
+        page.drawLine({ start: { x: cx + s / 2 - xPad, y: cy - s / 2 + xPad }, end: { x: cx - s / 2 + xPad, y: cy + s / 2 - xPad }, thickness: 1.8, color: checkColor })
         break
       }
 
