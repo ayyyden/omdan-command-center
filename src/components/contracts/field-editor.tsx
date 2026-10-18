@@ -789,6 +789,21 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                 />
               </div>
 
+              {/* Type — changes only the type; size, position, name, who
+                  fills it and formatting all stay exactly as they are */}
+              <div className="space-y-1">
+                <Label className="text-xs">Field type</Label>
+                <select
+                  value={selectedField.field_type}
+                  onChange={(e) => updateField(selectedField.id, { field_type: e.target.value as FieldType })}
+                  className="w-full text-xs border rounded-md h-7 px-2 bg-background"
+                >
+                  {(Object.keys(FIELD_TYPE_LABELS) as FieldType[]).map((ft) => (
+                    <option key={ft} value={ft}>{FIELD_TYPE_LABELS[ft]}</option>
+                  ))}
+                </select>
+              </div>
+
               {/* Required */}
               <div className="flex items-center gap-2">
                 <input
