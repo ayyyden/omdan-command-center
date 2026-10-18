@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { usePdfPages } from "@/lib/use-pdf-pages"
+import { usePdfPages, renderPagesForAnalysis } from "@/lib/use-pdf-pages"
 import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -312,12 +312,16 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
   function findBlankLines() {
     if (!pages.length) return
     setFinding(true)
-    // Let the spinner paint before the (fast, synchronous) pixel scan
-    setTimeout(() => {
+    // Let the spinner paint before the pixel scan
+    setTimeout(async () => {
+      // Scan a sharp 1600 px copy of each page, not the on-screen one —
+      // at screen size thin scanned lines blur and break into pieces
+      const sharp = pdfUrl ? await renderPagesForAnalysis(pdfUrl).catch(() => null) : null
       const added: ContractField[] = []
       for (const pg of pages) {
         const dims = { pdfWidth: pg.pdfWidth, pdfHeight: pg.pdfHeight }
-        const suggestions = suggestFields(pg.canvas, detectLines(pg.canvas, dims), dims)
+        const scan = sharp?.get(pg.pageNumber) ?? pg.canvas
+        const suggestions = suggestFields(scan, detectLines(scan, dims), dims)
         const existing = [...fields, ...added].filter((f) => f.page_number === pg.pageNumber)
         for (const s of suggestions) {
           if (existing.some((f) => coverage(s, f) > 0.3 || coverage(f, s) > 0.3)) continue
@@ -361,15 +365,18 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
     const byPage = new Map<number, ContractField[]>()
     for (const f of targets) byPage.set(f.page_number, [...(byPage.get(f.page_number) ?? []), f])
 
+    const sharp = pdfUrl ? await renderPagesForAnalysis(pdfUrl).catch(() => null) : null
     for (const [pageNo, list] of byPage) {
       const pg = pages[pageNo - 1]
       if (!pg) continue
-      // Page picture with numbered boxes, ~1600px wide
-      const scale = Math.min(1, 1600 / pg.canvas.width)
+      // Page picture with numbered boxes, ~1600px wide — from the sharp copy,
+      // so the small print Claude reads isn't blurred
+      const src = sharp?.get(pageNo) ?? pg.canvas
+      const scale = Math.min(1, 1600 / src.width)
       const c = document.createElement("canvas")
-      c.width = Math.round(pg.canvas.width * scale); c.height = Math.round(pg.canvas.height * scale)
+      c.width = Math.round(src.width * scale); c.height = Math.round(src.height * scale)
       const ctx = c.getContext("2d")!
-      ctx.drawImage(pg.canvas, 0, 0, c.width, c.height)
+      ctx.drawImage(src, 0, 0, c.width, c.height)
       list.forEach((f, i) => {
         const x = f.x * c.width, y = f.y * c.height, w = f.width * c.width, h = f.height * c.height
         ctx.strokeStyle = "#e11d48"; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h)
@@ -472,12 +479,13 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
   }
 
   /** Snap the selected field onto the printed line(s) under it. */
-  function fitToLines(f: ContractField) {
+  async function fitToLines(f: ContractField) {
     const pg = pages[f.page_number - 1]
     if (!pg) return
     const dims = { pdfWidth: pg.pdfWidth, pdfHeight: pg.pdfHeight }
     const ph = pg.pdfHeight
-    const lines = detectLines(pg.canvas, dims).filter((l) => {
+    const sharp = pdfUrl ? await renderPagesForAnalysis(pdfUrl).catch(() => null) : null
+    const lines = detectLines(sharp?.get(pg.pageNumber) ?? pg.canvas, dims).filter((l) => {
       const ov = Math.max(0, Math.min(l.x1, f.x + f.width) - Math.max(l.x0, f.x))
       return ov >= 0.5 * f.width && l.y >= f.y - 4 / ph && l.y <= f.y + f.height + 8 / ph
     })
@@ -843,7 +851,7 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
                     <div className="space-y-1">
                       <Label className="text-xs">When ticked, mark it with</Label>
                       <div className="flex gap-1">
-                        {([["x", "✕ X"], ["check", "✓ Check"], ["circle", "◯ Circle"]] as const).map(([v, l]) => (
+                        {([["x", "✕"], ["check", "✓ Check"], ["circle", "◯ Circle"]] as const).map(([v, l]) => (
                           <button key={v} type="button" onClick={() => updateOpts(selectedField.id, { mark: v })}
                             className={`flex-1 h-7 text-xs rounded border transition-colors ${(opts.mark ?? "x") === v ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted"}`}>
                             {l}
