@@ -89,3 +89,36 @@ export function usePdfPages(url: string | null, containerWidth: number, opts: { 
 
   return { pages, loading, error }
 }
+
+// The line finder (contracts/detect-lines.ts) reads pixels, and on screen a
+// page is often only ~800 px wide — thin scanned lines blur to light gray
+// there and break into pieces. Detection always runs on its own sharp copy
+// of each page instead, rendered once per PDF at ANALYSIS_WIDTH.
+const ANALYSIS_WIDTH = 1600
+const analysisCache = new Map<string, Promise<Map<number, HTMLCanvasElement>>>()
+
+export function renderPagesForAnalysis(url: string): Promise<Map<number, HTMLCanvasElement>> {
+  let job = analysisCache.get(url)
+  if (!job) {
+    job = (async () => {
+      const pdfjsLib = await import("pdfjs-dist")
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"
+      const pdfDoc = await pdfjsLib.getDocument(url).promise
+      const out = new Map<number, HTMLCanvasElement>()
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i)
+        const native = page.getViewport({ scale: 1 })
+        const viewport = page.getViewport({ scale: Math.max(1, ANALYSIS_WIDTH / native.width) })
+        const canvas = document.createElement("canvas")
+        canvas.width = Math.floor(viewport.width)
+        canvas.height = Math.floor(viewport.height)
+        await page.render({ canvas, viewport }).promise
+        out.set(i, canvas)
+      }
+      return out
+    })()
+    job.catch(() => analysisCache.delete(url))
+    analysisCache.set(url, job)
+  }
+  return job
+}
