@@ -441,6 +441,22 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
     if (selectedId && ids.has(selectedId)) setSelectedId(null)
   }
 
+  // Remove every field (to start the template over) — undoable until you
+  // leave, and nothing changes on the saved template until Save Fields
+  const [removedAll, setRemovedAll] = useState<ContractField[] | null>(null)
+  function removeAllFields() {
+    if (!fields.length) return
+    setRemovedAll(fields)
+    setFields([])
+    setLastAdded([])
+    setSelectedId(null)
+  }
+  function undoRemoveAll() {
+    if (!removedAll) return
+    setFields((prev) => [...removedAll, ...prev])
+    setRemovedAll(null)
+  }
+
   /** Snap the selected field onto the printed line(s) under it. */
   function fitToLines(f: ContractField) {
     const pg = pages[f.page_number - 1]
@@ -690,6 +706,21 @@ export function FieldEditor({ contractTemplateId, contractName, pdfUrl }: Props)
           {lastAdded.length > 0 && (
             <button type="button" onClick={undoFind} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-1">
               <Undo2 className="w-3 h-3" /> Undo: remove the {lastAdded.length} added
+            </button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="justify-start gap-2 text-destructive hover:text-destructive"
+            onClick={removeAllFields}
+            disabled={!fields.length}
+            title="Remove every field on this template to start over (nothing is saved until Save Fields)"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Remove all fields
+          </Button>
+          {removedAll && (
+            <button type="button" onClick={undoRemoveAll} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-1">
+              <Undo2 className="w-3 h-3" /> Undo: bring back the {removedAll.length} removed
             </button>
           )}
           <Button
