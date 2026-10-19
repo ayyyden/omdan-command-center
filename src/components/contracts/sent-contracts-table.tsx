@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { ExternalLink, RefreshCw, FileText, User, Briefcase, Trash2 } from "lucide-react"
+import { ExternalLink, RefreshCw, FileText, User, Briefcase, Trash2, Pencil } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { AuditDialog } from "@/components/contracts/audit-dialog"
+import { EditSentDialog } from "@/components/contracts/edit-sent-dialog"
 
 export interface SentContract {
   id: string
@@ -48,6 +49,7 @@ export function SentContractsTable({ sent, appUrl }: Props) {
   const [resending, setResending] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
 
   const selectAllRef = useRef<HTMLInputElement>(null)
 
@@ -276,6 +278,18 @@ export function SentContractsTable({ sent, appUrl }: Props) {
                       size="sm"
                       variant="outline"
                       className="h-9 gap-1.5 text-xs px-3"
+                      onClick={() => setEditing(s.id)}
+                      aria-label="Edit what you filled in"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Edit my part
+                    </Button>
+                  )}
+                  {s.status !== "signed" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-9 gap-1.5 text-xs px-3"
                       disabled={resending === s.id}
                       onClick={() => handleResend(s)}
                       aria-label="Resend contract email"
@@ -420,6 +434,18 @@ export function SentContractsTable({ sent, appUrl }: Props) {
                             size="icon"
                             variant="ghost"
                             className="h-7 w-7"
+                            title="Edit what you filled in (same link, no resend needed)"
+                            aria-label="Edit what you filled in"
+                            onClick={() => setEditing(s.id)}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {s.status !== "signed" && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
                             title="Resend email"
                             aria-label="Resend contract email"
                             disabled={resending === s.id}
@@ -510,6 +536,8 @@ export function SentContractsTable({ sent, appUrl }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <EditSentDialog sentContractId={editing} onClose={(saved) => { setEditing(null); if (saved) router.refresh() }} />
     </div>
   )
 }
