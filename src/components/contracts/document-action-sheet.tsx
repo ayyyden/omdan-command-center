@@ -10,7 +10,7 @@ import { RecipientPicker, type RecipientSelection } from "./recipient-picker"
 import { StaffPrepareForm } from "./staff-prepare-form"
 import type { FormField } from "./field-row"
 import { createClient } from "@/lib/supabase/client"
-import { FileSignature, Send, Loader2, ChevronLeft } from "lucide-react"
+import { FileSignature, Send, Loader2, ChevronLeft, Pencil } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { sortForFilling } from "@/lib/contracts/fill-order"
 
@@ -48,6 +48,7 @@ export function DocumentActionSheet({ documents, userId, companyName, onClose, p
   const [staffFieldsByDoc, setStaffFieldsByDoc] = useState<Record<string, FormField[]>>({})
   const [staffValues, setStaffValues] = useState<Record<string, Record<string, string>>>({})
   const [prepareIdx, setPrepareIdx] = useState(0)
+  const [reachedChoose, setReachedChoose] = useState(false)
   const [selection, setSelection] = useState<RecipientSelection | null>(preset ? { customerId: preset.customerId, jobId: preset.jobId, recipientEmail: preset.recipientEmail } : null)
   const [presetEmail, setPresetEmail] = useState(preset?.recipientEmail ?? "")
   useEffect(() => {
@@ -88,6 +89,7 @@ export function DocumentActionSheet({ documents, userId, companyName, onClose, p
         }
         setStaffFieldsByDoc(byDoc)
         setPrepareIdx(0)
+        setReachedChoose(false)
         setMode(docs.some((d) => (byDoc[d.id] ?? []).length) ? "prepare" : "choose")
       })
     return () => { cancelled = true }
@@ -98,6 +100,7 @@ export function DocumentActionSheet({ documents, userId, companyName, onClose, p
     setStaffFieldsByDoc({})
     setStaffValues({})
     setPrepareIdx(0)
+    setReachedChoose(false)
     setSelection(preset ? { customerId: preset.customerId, jobId: preset.jobId, recipientEmail: preset.recipientEmail } : null)
     setPresetEmail(preset?.recipientEmail ?? "")
     setSubject("")
@@ -166,6 +169,14 @@ export function DocumentActionSheet({ documents, userId, companyName, onClose, p
 
   const prepDoc = needsPrep[prepareIdx]
 
+  // Back from the fill-in step: keep what was typed, then go to the previous
+  // document — or, when editing after everything was filled, back to the choices
+  function prepareBack(fieldValues: Record<string, string>) {
+    if (prepDoc) setStaffValues((v) => ({ ...v, [prepDoc.id]: fieldValues }))
+    if (reachedChoose) setMode("choose")
+    else if (prepareIdx > 0) setPrepareIdx(prepareIdx - 1)
+  }
+
   return (
     <Dialog open={!!documents?.length} onOpenChange={(o) => { if (!o) handleClose() }}>
       <DialogContent className="sm:max-w-md">
@@ -200,9 +211,12 @@ export function DocumentActionSheet({ documents, userId, companyName, onClose, p
               initialValues={staffValues[prepDoc.id]}
               onContinue={({ fieldValues }) => {
                 setStaffValues((v) => ({ ...v, [prepDoc.id]: fieldValues }))
-                if (prepareIdx + 1 < needsPrep.length) setPrepareIdx(prepareIdx + 1)
-                else setMode("choose")
+                if (prepareIdx + 1 < needsPrep.length && !reachedChoose) setPrepareIdx(prepareIdx + 1)
+                else { setReachedChoose(true); setMode("choose") }
               }}
+              onBack={prepareIdx > 0 || reachedChoose ? ({ fieldValues }) => prepareBack(fieldValues) : undefined}
+              backLabel={reachedChoose ? "Back" : `Back to ${needsPrep[prepareIdx - 1]?.name ?? "previous"}`}
+              continueLabel={reachedChoose ? "Save changes" : prepareIdx + 1 < needsPrep.length ? "Next document" : "Continue"}
             />
           </div>
         )}
@@ -218,9 +232,9 @@ export function DocumentActionSheet({ documents, userId, companyName, onClose, p
                       <span className="w-5 text-xs text-muted-foreground tabular-nums">{i + 1}.</span>
                       <span className="flex-1 min-w-0 truncate">{d.name}</span>
                       {hasPrep ? (
-                        <button type="button" className="text-xs text-muted-foreground hover:text-foreground underline"
+                        <button type="button" className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                           onClick={() => { setPrepareIdx(needsPrep.findIndex((x) => x.id === d.id)); setMode("prepare") }}>
-                          Edit your part
+                          <Pencil className="w-3 h-3" /> Edit your part
                         </button>
                       ) : (
                         <span className="text-xs text-muted-foreground">nothing to fill</span>
@@ -231,10 +245,14 @@ export function DocumentActionSheet({ documents, userId, companyName, onClose, p
               </ol>
             )}
             {!multi && needsPrep.length > 0 && (
-              <p className="text-xs text-muted-foreground pb-1">
-                Your part is filled in.{" "}
-                <button type="button" className="underline hover:text-foreground" onClick={() => { setPrepareIdx(0); setMode("prepare") }}>Edit</button>
-              </p>
+              <button type="button" onClick={() => { setPrepareIdx(0); setMode("prepare") }}
+                className="w-full flex items-center gap-3 rounded-lg border border-dashed px-4 py-2.5 text-left hover:bg-muted/50 transition-colors mb-1">
+                <Pencil className="w-4 h-4 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="text-sm font-medium">Edit what you filled in</p>
+                  <p className="text-xs text-muted-foreground">Your part is filled in — change anything before sending</p>
+                </div>
+              </button>
             )}
             {anySignature && (
               <button type="button" onClick={() => setMode("sign")}

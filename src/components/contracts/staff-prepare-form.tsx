@@ -12,6 +12,10 @@ interface Props {
   /** Values typed earlier (when coming back to edit) */
   initialValues?: Record<string, string>
   onContinue: (result: { fieldValues: Record<string, string> }) => void
+  /** Shows a Back button; gets what's typed so far so nothing is lost */
+  onBack?: (result: { fieldValues: Record<string, string> }) => void
+  backLabel?: string
+  continueLabel?: string
 }
 
 // Collects the blanks that belong to staff, not the customer — Sales
@@ -20,13 +24,14 @@ interface Props {
 // consent or fill screens. No ESIGN consent screen here: this is an
 // employee acting for the company inside their own logged-in session, not
 // an external party being asked for e-signature consent.
-export function StaffPrepareForm({ documentName, fields, initialValues, onContinue }: Props) {
+export function StaffPrepareForm({ documentName, fields, initialValues, onContinue, onBack, backLabel, continueLabel }: Props) {
   const [values, setValues]         = useState<Record<string, string>>(initialValues ?? {})
   const [signerName, setSignerName] = useState("")
   const [modalField, setModalField] = useState<FormField | null>(null)
   const [error, setError]           = useState("")
 
   const hasSignatureField = fields.some((f) => f.field_type === "signature" || f.field_type === "initials")
+  const needsName = fields.some((f) => (f.field_type === "signature" || f.field_type === "initials") && !(values[f.id] ?? "").trim())
 
   function setValue(id: string, v: string) {
     setValues((prev) => ({ ...prev, [id]: v }))
@@ -38,7 +43,9 @@ export function StaffPrepareForm({ documentName, fields, initialValues, onContin
       setError(`"${missing}" is required.`)
       return
     }
-    if (hasSignatureField && !signerName.trim()) {
+    // Your name is only needed to draw a signature — not when coming back to
+    // edit with the signatures already done
+    if (needsName && !signerName.trim()) {
       setError("Enter your name before signing.")
       return
     }
@@ -64,12 +71,12 @@ export function StaffPrepareForm({ documentName, fields, initialValues, onContin
 
       {hasSignatureField && (
         <div className="space-y-1.5">
-          <label className="text-sm font-semibold text-foreground">Your Name <span className="text-red-500">*</span></label>
+          <label className="text-sm font-semibold text-foreground">Your Name {needsName && <span className="text-red-500">*</span>}</label>
           <input
             type="text"
             value={signerName}
             onChange={(e) => setSignerName(e.target.value)}
-            placeholder="Your full name"
+            placeholder={needsName ? "Your full name" : "Only needed to redo a signature"}
             className="w-full border-2 border-input rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
@@ -91,7 +98,14 @@ export function StaffPrepareForm({ documentName, fields, initialValues, onContin
         </div>
       )}
 
-      <Button onClick={handleContinue} className="w-full">Continue</Button>
+      <div className="flex gap-2">
+        {onBack && (
+          <Button variant="outline" onClick={() => onBack({ fieldValues: values })} className="shrink-0">
+            {backLabel ?? "Back"}
+          </Button>
+        )}
+        <Button onClick={handleContinue} className="flex-1">{continueLabel ?? "Continue"}</Button>
+      </div>
     </div>
   )
 }
