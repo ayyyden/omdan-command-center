@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { verifyRetellSecret, phoneDigits, speakDateTime } from "@/lib/retell"
 import { createServiceClient } from "@/lib/supabase/service"
-import { sendQuoSms } from "@/lib/quo-client"
 import {
   LEAD_COLUMNS, getConfirmation, markConfirmed, startConfirmationCall, notifyOwner, ptParts,
-  leadLanguage, leadBrand, BRANDS, type ScheduledLead,
+  leadLanguage, leadBrand, BRANDS, textCustomer, type ScheduledLead,
 } from "@/lib/appointments"
 
 const YES = /^\s*(1|y|yes|yeah|yep|yup|si|sí|confirm(ed|o|ado)?|ok(ay)?|👍)\b/i
@@ -48,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   if (yes) {
     await markConfirmed(service, lead, "text reply")
-    await sendQuoSms(lead.phone!, lang === "es"
+    await textCustomer(lead, lead.phone!, lang === "es"
       ? `${company}: ¡Gracias! Su estimado del ${speakDateTime(lead.scheduled_at!, "es")} está confirmado. ¡Nos vemos!`
       : `${company}: Thank you! Your estimate on ${speakDateTime(lead.scheduled_at!)} is confirmed. See you then!`)
     return NextResponse.json({ ok: true, action: "confirmed" })
@@ -56,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   const mins = Number(ptParts(now.toISOString()).time.slice(0, 2)) * 60 + Number(ptParts(now.toISOString()).time.slice(3))
   const canCall = mins >= 8 * 60 && mins <= 20 * 60
-  await sendQuoSms(lead.phone!, lang === "es"
+  await textCustomer(lead, lead.phone!, lang === "es"
     ? `${company}: ¡Sin problema! ${canCall ? "Le llamamos en un momento" : "Le llamamos en la mañana"} para buscar otra hora.`
     : `${company}: No problem! ${canCall ? "We'll call you in a moment" : "We'll call you in the morning"} to find a new time.`)
   if (canCall) {

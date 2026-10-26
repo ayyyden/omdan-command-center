@@ -13,9 +13,16 @@ import { setEventConfirmed, moveCalendarEvent, deleteCalendarEvent } from "@/lib
 export type Brand = "omdan" | "desert_green"
 export type Lang = "en" | "es"
 
-export const BRANDS: Record<Brand, { name: string; phone: string | null }> = {
-  omdan:        { name: "Omdan Development",     phone: "(951) 292-0703" },
-  desert_green: { name: "Desert Green Builders", phone: null },
+// quoFrom: the company's own Quo number, so customers get texts from the number they know
+// (undefined = QUO_FROM_NUMBER, Omdan's).
+export const BRANDS: Record<Brand, { name: string; phone: string; quoFrom: string | undefined }> = {
+  omdan:        { name: "Omdan Development",     phone: "(951) 292-0703", quoFrom: undefined },
+  desert_green: { name: "Desert Green Builders", phone: "(760) 548-2781", quoFrom: "+17605482781" },
+}
+
+/** Texts a customer from their company's Quo number. */
+export function textCustomer(lead: Pick<ScheduledLead, "notes">, to: string, content: string) {
+  return sendQuoSms(to, content, BRANDS[leadBrand(lead)].quoFrom)
 }
 
 export interface ScheduledLead {
@@ -190,7 +197,7 @@ export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLea
   const when = speakSlot(newDate, newTime, lang)
   const company = BRANDS[brand]
   if (lead.phone) {
-    await sendQuoSms(lead.phone, lang === "es"
+    await textCustomer(lead, lead.phone, lang === "es"
       ? `${company.name}: Listo, ${firstName(lead.full_name)}. Su estimado gratis quedó para el ${when}${lead.address ? ` en ${lead.address}` : ""}. ¡Gracias!`
       : `${company.name}: All set, ${firstName(lead.full_name)}! Your free estimate is now ${when}${lead.address ? ` at ${lead.address}` : ""}. Thank you!`)
   }
@@ -292,7 +299,7 @@ export async function processConfirmationCall(service: SupabaseClient, call: Ret
   if (!lead?.phone || lead.list !== "scheduled" || !lead.scheduled_at) return
 
   if (meta.stage === "first" && !row.text_sent_at) {
-    const sms = await sendQuoSms(lead.phone, confirmationText(lead))
+    const sms = await textCustomer(lead, lead.phone, confirmationText(lead))
     await service.from("appointment_confirmations")
       .update(sms.ok ? { text_sent_at: new Date().toISOString() } : { notes: `Confirmation text failed: ${sms.error}`.slice(0, 500) }).eq("id", row.id)
     if (!sms.ok) await notifyOwner(`Couldn't text ${lead.full_name} (${lead.phone}) the confirmation request: ${sms.error.slice(0, 160)}`)

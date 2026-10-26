@@ -19,7 +19,8 @@ export function toE164(phone: string): string | null {
   return null
 }
 
-export async function sendQuoSms(toPhone: string, content: string): Promise<{ ok: true } | { ok: false; error: string }> {
+// `from` defaults to QUO_FROM_NUMBER (Omdan); pass another workspace number to send from it.
+export async function sendQuoSms(toPhone: string, content: string, from?: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const check = assertQuoConfig()
   if (!check.ok) return check
 
@@ -35,7 +36,7 @@ export async function sendQuoSms(toPhone: string, content: string): Promise<{ ok
       },
       body: JSON.stringify({
         content,
-        from: process.env.QUO_FROM_NUMBER,
+        from: from || process.env.QUO_FROM_NUMBER,
         to:   [to],
       }),
     })
