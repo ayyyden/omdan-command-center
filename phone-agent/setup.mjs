@@ -154,6 +154,32 @@ const CONFIRM_POST_CALL = [
   { type: "string",  name: "outcome",          description: "One of: confirmed, rescheduled, cancelled, no_decision, voicemail, wrong_person" },
 ]
 
+// The inbound line listens in ONE language per agent (two-language listening misheard accented English
+// as Spanish and was slower). English Sofia hands Spanish speakers to Spanish Sofia with an agent swap.
+const LANG_EN = `# Language
+- This line is in **English**. Always speak English.
+- If the caller speaks Spanish, says they speak Spanish, or asks "¿habla español?", immediately call \`switch_to_spanish\` without saying anything first.
+- Accents and a bad line can turn English into odd or Spanish-looking words. That is NOT Spanish: stay in English and ask them to repeat ("Sorry, I didn't catch that, could you say it again?"). Only switch when they clearly speak or ask for Spanish.
+- Pass \`language: "en"\` to every tool.
+`
+const LANG_ES = `# Idioma
+- This call is in **Spanish**: you just took it over from the English line because the caller speaks Spanish. Always speak natural Mexican/US Spanish, using "usted".
+- Continue where the conversation left off. If they haven't said what they need yet, start with: "Claro, con gusto le atiendo en español. ¿En qué le puedo ayudar?"
+- If the caller asks for English, call \`switch_to_english\`.
+- Pass \`language: "es"\` to every tool.
+`
+function withLanguage(prompt, section) {
+  const start = prompt.indexOf("# Language")
+  const end = prompt.indexOf("\n# ", start + 5) + 1
+  if (start < 0 || end <= 0) throw new Error("prompt.md needs a '# Language' section")
+  return prompt.slice(0, start) + section + "\n" + prompt.slice(end)
+}
+
+function swapTool(name, agentId, description) {
+  return { type: "agent_swap", name, agent_id: agentId, description, keep_current_voice: true,
+    post_call_analysis_setting: "only_destination_agent", webhook_setting: "only_destination_agent", speak_during_execution: false }
+}
+
 const POST_CALL = [
   { type: "string",  name: "caller_name",        description: "Caller's full name if given, else empty" },
   { type: "string",  name: "project",            description: "Short description of the project (service + details), else empty" },
@@ -172,14 +198,16 @@ async function deploy() {
   const idsFile = path.join(here, "retell-ids.json")
   const ids = fs.existsSync(idsFile) ? JSON.parse(fs.readFileSync(idsFile, "utf8")) : {}
 
-  const prompt = fs.readFileSync(path.join(here, "prompt.md"), "utf8").replaceAll("{{agent_name}}", agentName)
+  const basePrompt = fs.readFileSync(path.join(here, "prompt.md"), "utf8").replaceAll("{{agent_name}}", agentName)
+  const prompt = withLanguage(basePrompt, LANG_EN)
   const model = env("RETELL_LLM_MODEL", "claude-5.5-haiku")   // fast replies matter more than a bigger model on the phone
   const tier = env("RETELL_LLM_TIER", "fast")
   const llmBody = {
     general_prompt: prompt,
     start_speaker:  "agent",
     begin_message:  `Omdan Development, this is ${agentName}, calls are recorded. How can I help?`,
-    general_tools:  tools(appUrl, secret, ownerCell),
+    general_tools:  [...tools(appUrl, secret, ownerCell),
+      ...(ids.es_agent_id ? [swapTool("switch_to_spanish", ids.es_agent_id, "Hand the call to the Spanish line when the caller speaks or asks for Spanish.")] : [])],
     model_config:   { type: "cascading", primary: { model, tier }, temperature: 0.5 },
   }
 
@@ -192,7 +220,7 @@ async function deploy() {
     response_engine:     { type: "retell-llm", llm_id: ids.llm_id },
     voice_id:            env("VOICE_ID"),
     voice_model:         env("RETELL_VOICE_MODEL", "eleven_flash_v2_5"),   // smooth, low-latency streaming (v3 spoke in choppy chunks)
-    language:            ["en-US", "es-ES"],
+    language:            "en-US",
     voice_temperature:   0.6,   // steadier pace (Ivanna is an "expressive" voice)
     voice_speed:         1.02,
     responsiveness:      1,
@@ -220,6 +248,30 @@ async function deploy() {
   fs.writeFileSync(idsFile, JSON.stringify(ids, null, 2) + "\n")
   console.log(`Agent ${ids.agent_id} ready.`)
 
+  // Spanish Sofia: same script and tools, Spanish-only listening, reached only by the swap.
+  const esLlm = await saveLlm(ids.es_llm_id, {
+    ...llmBody,
+    general_prompt: withLanguage(basePrompt, LANG_ES),
+    begin_message:  undefined,
+    general_tools:  [...tools(appUrl, secret, ownerCell),
+      swapTool("switch_to_english", ids.agent_id, "Hand the call back to the English line if the caller asks for English.")],
+  })
+  const firstEs = !ids.es_agent_id
+  ids.es_llm_id = esLlm.llm_id
+  const esBody = { ...agentBody, agent_name: "Omdan Development receptionist (Spanish)", language: "es-ES",
+    response_engine: { type: "retell-llm", llm_id: ids.es_llm_id } }
+  const esAgent = ids.es_agent_id
+    ? await retell("PATCH", `/update-agent/${ids.es_agent_id}`, esBody)
+    : await retell("POST", "/create-agent", esBody)
+  ids.es_agent_id = esAgent.agent_id
+  fs.writeFileSync(idsFile, JSON.stringify(ids, null, 2) + "\n")
+  console.log(`Spanish agent ${ids.es_agent_id} ready.`)
+  if (firstEs) {   // English Sofia was saved before the Spanish agent existed: add her swap tool now
+    await saveLlm(ids.llm_id, { ...llmBody, general_tools: [...llmBody.general_tools,
+      swapTool("switch_to_spanish", ids.es_agent_id, "Hand the call to the Spanish line when the caller speaks or asks for Spanish.")] })
+    console.log("English agent can now switch to Spanish.")
+  }
+
   // Confirmation calls (outbound): own prompt + tools, same voice and webhook.
   const confirmLlmBody = {
     general_prompt: fs.readFileSync(path.join(here, "confirm-prompt.md"), "utf8").replaceAll("{{agent_name}}", agentName),
@@ -233,6 +285,7 @@ async function deploy() {
   const confirmAgentBody = {
     ...agentBody,
     agent_name:      "Omdan confirmation calls",
+    language:        "en-US",   // Spanish leads: per-call override in startConfirmationCall
     response_engine: { type: "retell-llm", llm_id: ids.confirm_llm_id },
     post_call_analysis_data: CONFIRM_POST_CALL,
     end_call_after_silence_ms: 20000,

@@ -4,5 +4,7 @@
   "confirm_llm_id": "llm_7173c17e70320ad172fe3e091b0e",
   "confirm_agent_id": "agent_3ca127222f773fbf044dd7c19b",
   "s2s_llm_id": "llm_4f1baaa3e38a032379a53aae3bc0",
-  "s2s_agent_id": "agent_05752c891eb6b9b0a0ba4ef6a9"
+  "s2s_agent_id": "agent_05752c891eb6b9b0a0ba4ef6a9",
+  "es_llm_id": "llm_5998905b94449f61b19c2274ba37",
+  "es_agent_id": "agent_4c4c4c3ca815976991fdc2c66a"
 }
