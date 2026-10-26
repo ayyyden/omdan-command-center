@@ -225,8 +225,7 @@ async function deploy() {
     voice_speed:         1.02,
     responsiveness:      1,
     interruption_sensitivity: 1,
-    enable_backchannel:  true,
-    backchannel_words:   ["mm-hm", "yeah", "got it", "okay"],   // English line: English only
+    enable_backchannel:  false,   // no "mm-hm"/"got it" while the caller talks (owner's choice)
     ambient_sound:       "call-center",
     ambient_sound_volume: 0.35,
     denoising_mode:      "noise-and-background-speech-cancellation",
@@ -259,7 +258,6 @@ async function deploy() {
   const firstEs = !ids.es_agent_id
   ids.es_llm_id = esLlm.llm_id
   const esBody = { ...agentBody, agent_name: "Omdan Development receptionist (Spanish)", language: "es-ES",
-    backchannel_words: ["ajá", "sí", "claro", "okay"],
     response_engine: { type: "retell-llm", llm_id: ids.es_llm_id } }
   const esAgent = ids.es_agent_id
     ? await retell("PATCH", `/update-agent/${ids.es_agent_id}`, esBody)
