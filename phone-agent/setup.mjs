@@ -219,7 +219,8 @@ async function deploy() {
     agent_name:          "Omdan Development receptionist",
     response_engine:     { type: "retell-llm", llm_id: ids.llm_id },
     voice_id:            env("VOICE_ID"),
-    voice_model:         env("RETELL_VOICE_MODEL", "eleven_flash_v2_5"),   // smooth, low-latency streaming (v3 spoke in choppy chunks)
+    // Cartesia streams a whole reply smoothly; ElevenLabs flash voiced it in uneven chunks.
+    voice_model:         env("RETELL_VOICE_MODEL", env("VOICE_ID").startsWith("cartesia-") ? "sonic-3.6" : "eleven_flash_v2_5"),
     language:            "en-US",
     voice_temperature:   0.6,   // steadier pace (Ivanna is an "expressive" voice)
     voice_speed:         1.02,
