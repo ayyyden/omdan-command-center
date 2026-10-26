@@ -249,7 +249,7 @@ export async function startConfirmationCall(lead: ScheduledLead, row: Confirmati
       to_number:        lead.phone.replace(/[^\d+]/g, "").replace(/^(\d{10})$/, "+1$1").replace(/^1(\d{10})$/, "+1$1"),
       override_agent_id: agent,
       // The agent listens in English; customers who booked in Spanish get a Spanish-listening call.
-      ...(lang === "es" ? { agent_override: { agent: { language: "es-ES" } } } : {}),
+      ...(lang === "es" ? { agent_override: { agent: { language: "es-ES", backchannel_words: ["ajá", "sí", "claro", "okay"] } } } : {}),
       metadata:         { kind: "confirmation", stage: kind, confirmation_id: row.id, meta_lead_id: lead.id },
       idempotency_key:  `${row.id}-${kind}`,
       retell_llm_dynamic_variables: {
