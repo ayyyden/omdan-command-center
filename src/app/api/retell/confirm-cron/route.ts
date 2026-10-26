@@ -27,10 +27,28 @@ export async function POST(req: NextRequest) {
   if (!expected || !secret || secret !== expected) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-  const dry = new URL(req.url).searchParams.get("dry") === "1"
+  const params = new URL(req.url).searchParams
+  const dry = params.get("dry") === "1"
 
   const service = createServiceClient()
   const now = new Date()
+
+  // Testing: ?force=<meta lead id>&kind=first|final|reschedule_request places that call right now.
+  const force = params.get("force")
+  if (force) {
+    const { data: lead } = await service.from("meta_leads").select(LEAD_COLUMNS).eq("id", force).maybeSingle()
+    if (!lead?.scheduled_at) return NextResponse.json({ error: "lead not found or not scheduled" }, { status: 404 })
+    const row = await getConfirmation(service, lead as ScheduledLead)
+    if (!row) return NextResponse.json({ error: "no tracking row (is migration 064 applied?)" }, { status: 500 })
+    const kind = params.get("kind") === "final" ? "final" : params.get("kind") === "reschedule_request" ? "reschedule_request" : "first"
+    const call = await startConfirmationCall(lead as ScheduledLead, row, kind)
+    if (call.ok && kind !== "reschedule_request") {
+      await service.from("appointment_confirmations").update(kind === "final"
+        ? { final_call_at: now.toISOString(), final_call_id: call.call_id, final_call_result: null }
+        : { first_call_at: now.toISOString(), first_call_id: call.call_id, first_call_result: null }).eq("id", row.id)
+    }
+    return NextResponse.json({ ok: call.ok, call })
+  }
   const { data, error } = await service.from("meta_leads")
     .select(LEAD_COLUMNS)
     .eq("list", "scheduled")

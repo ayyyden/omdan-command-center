@@ -236,7 +236,7 @@ async function deploy() {
   console.log(`Confirmation agent ${ids.confirm_agent_id} ready.`)
 
   if (process.env.RETELL_FROM_NUMBER) {
-    await retell("PATCH", `/update-phone-number/${encodeURIComponent(process.env.RETELL_FROM_NUMBER)}`, { outbound_agent_id: ids.confirm_agent_id })
+    await retell("PATCH", `/update-phone-number/${encodeURIComponent(process.env.RETELL_FROM_NUMBER)}`, { outbound_agents: [{ agent_id: ids.confirm_agent_id, weight: 1 }] })
     console.log(`Outbound calls from ${process.env.RETELL_FROM_NUMBER} use the confirmation agent.`)
   }
 }
