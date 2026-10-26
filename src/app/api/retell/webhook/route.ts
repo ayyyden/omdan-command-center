@@ -3,6 +3,7 @@ import { verifyRetellSecret, phoneDigits, TZ, type RetellCall } from "@/lib/rete
 import { createServiceClient } from "@/lib/supabase/service"
 import { sendQuoSms } from "@/lib/quo-client"
 import { createTransporter, buildHtmlEmail } from "@/lib/email"
+import { processConfirmationCall } from "@/lib/appointments"
 
 // POST /api/retell/webhook?secret=… — Retell agent webhook.
 // On "call_analyzed" (after every call, once Retell has the summary):
@@ -17,6 +18,13 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({})) as { event?: string; call?: RetellCall }
   if (body.event !== "call_analyzed" || !body.call?.call_id) return NextResponse.json({ ok: true, skipped: true })
+
+  // Outbound confirmation calls: record the result, text the customer if they
+  // didn't confirm (David is texted by the tools on reschedule/cancel).
+  if ((body.call.metadata as { kind?: string } | undefined)?.kind === "confirmation") {
+    await processConfirmationCall(createServiceClient(), body.call)
+    return NextResponse.json({ ok: true, confirmation: true })
+  }
 
   const call = body.call
   const callId = call.call_id!

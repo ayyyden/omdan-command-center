@@ -30,12 +30,21 @@ export interface RetellCall {
   end_timestamp?:   number
   recording_url?:   string
   disconnection_reason?: string
+  call_status?: string
+  duration_ms?: number
+  metadata?: Record<string, unknown>
   call_analysis?: {
     call_summary?:         string
     user_sentiment?:       string
     call_successful?:      boolean
+    in_voicemail?:         boolean
     custom_analysis_data?: Record<string, unknown>
   }
+}
+
+/** The customer's number: who called in, or who we called (confirmation calls). */
+export function customerNumber(call: RetellCall): string | undefined {
+  return call.direction === "outbound" ? call.to_number : call.from_number
 }
 
 // Custom tool request: { name, call, args } (args_at_root is off).

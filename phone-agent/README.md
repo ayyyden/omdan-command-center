@@ -8,7 +8,12 @@ When nobody answers the Quo line, Quo forwards the call to a Retell number, and 
 | Create / update the agent | `node phone-agent/setup.mjs deploy` |
 | Agent tools (live during calls) | `src/app/api/retell/{lookup,availability,book,confirm,send-text}` |
 | After-call summary (lead note, text to David, transcript email) | `src/app/api/retell/webhook` |
-| Day-before reminder texts | `src/app/api/retell/remind`, called by the booking backend |
+| Confirmation calls (outbound) | `src/app/api/retell/confirm-cron`, run every 5 min by the booking backend (`runConfirmations`); prompt in `phone-agent/confirm-prompt.md` |
+| Reschedule / cancel | `src/app/api/retell/{reschedule,cancel}` (both agents) |
+| Text replies (YES / 2) | `src/app/api/quo/inbound?secret=…`, a Quo webhook for `message.received` |
+| Confirmation tracking | table `appointment_confirmations` (migration 064) |
+
+**Confirmation schedule:** estimates before 12 PM get a call the day before at 6 PM; estimates from 12 PM onward get a call at 10 AM that day. If nobody answers (or nothing is decided), the customer gets a text asking them to reply YES (or 2 to reschedule). If they still haven't confirmed, there's a last call 30 minutes before, and if that fails David gets a heads-up text. Calls only go out 7:30 AM–8:30 PM. Desert Green appointments get the same calls under the Desert Green Builders name. Extra Vercel env vars: `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_CONFIRM_AGENT_ID`.
 | Calendar + booking rules | Website booking backend (Apps Script `Code.gs`): same calendar, daily cap and drive-time rules as the website |
 
 ## One-time setup
@@ -23,7 +28,7 @@ When nobody answers the Quo line, Quo forwards the call to a Retell number, and 
    - Paste the new `Code.gs`.
    - Add the Script Property `PHONE_AGENT_SECRET` with the same value as `BOOKING_PHONE_SECRET`.
    - Deploy → Manage deployments → edit → New version.
-   - Run `installOmdanReminderTrigger` once and approve the permissions.
+   - Run `installConfirmationTrigger` once and approve the permissions.
 3. **Create the agent** (from this repo, with `RETELL_API_KEY`, `RETELL_TOOL_SECRET`, `APP_URL`, `OWNER_CELL` in `.env.local`):
    - `node phone-agent/setup.mjs voices male` lists voices with preview links. Pick one that sounds natural in English and Spanish, and put its id in `VOICE_ID`.
    - `node phone-agent/setup.mjs deploy` creates the agent. Run it again after any edit to `prompt.md` to update it.
@@ -35,4 +40,4 @@ When nobody answers the Quo line, Quo forwards the call to a Retell number, and 
 ## Notes
 - **Recording disclosure:** the greeting says the call may be recorded, because California requires all-party consent. If a caller sincerely asks whether it's an AI, the agent answers honestly.
 - **No prices:** the agent never quotes prices. Pricing questions are turned into booking the free on-site estimate.
-- **Reschedules and cancellations:** these aren't automatic yet. The agent takes the request, and the after-call text to David says "To do: …".
+- **Reschedules and cancellations:** both agents push to reschedule first and cancel only if the customer insists. David gets a text either way. A cancelled lead goes back on the call list.

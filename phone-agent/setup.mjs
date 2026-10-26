@@ -54,7 +54,7 @@ async function listVoices() {
   console.log(`\n${rows.length} voices. Filter: node phone-agent/setup.mjs voices male`)
 }
 
-function tools(appUrl, secret, ownerCell) {
+function allTools(appUrl, secret, ownerCell) {
   const headers = { "x-retell-secret": secret }
   const lang = { type: "string", enum: ["en", "es"], description: "Language the call is in" }
   const custom = (name, route, description, properties, required, speak) => ({
@@ -63,18 +63,19 @@ function tools(appUrl, secret, ownerCell) {
     speak_during_execution: !!speak, execution_message_description: speak, execution_message_type: "prompt",
     speak_after_execution: true, timeout_ms: 25000,
   })
-  return [
-    custom("lookup_caller", "lookup",
+  return {
+    lookup: custom("lookup_caller", "lookup",
       "Look up the caller by phone number to see if they're a past lead, have an upcoming estimate, or are a customer with a job. Call once, early in the call.",
       { phone: { type: "string", description: "Phone number if different from caller ID, else omit" } }, []),
-    custom("check_availability", "availability",
-      "Get open times for a free on-site estimate at the caller's ZIP code. Also says if the ZIP is outside our service area.",
+    availability: custom("check_availability", "availability",
+      "Get open times for a free on-site estimate at the caller's ZIP code (also for rescheduling). Also says if the ZIP is outside our service area.",
       {
         zip:            { type: "string", description: "5-digit ZIP code of the property" },
+        brand:          { type: "string", enum: ["omdan", "desert_green"], description: "Company of the appointment when rescheduling (from lookup_caller / the call details); omit for new Omdan bookings" },
         preferred_date: { type: "string", description: "YYYY-MM-DD if the caller asked for a specific day" },
         part_of_day:    { type: "string", enum: ["morning", "afternoon", "evening", "any"] },
       }, ["zip"], "Briefly say you're looking at the calendar, e.g. 'One sec, let me pull up the calendar.'"),
-    custom("book_estimate", "book",
+    book: custom("book_estimate", "book",
       "Book the free on-site estimate once the caller picked a time from check_availability and you've confirmed their details.",
       {
         full_name:       { type: "string", description: "First and last name" },
@@ -89,17 +90,31 @@ function tools(appUrl, secret, ownerCell) {
         project_summary: { type: "string", description: "One sentence with the useful project details" },
       }, ["full_name", "street", "city", "zip", "date", "time", "services"],
       "Say you're locking it in, e.g. 'Perfect, let me lock that in for you.'"),
-    custom("confirm_appointment", "confirm",
-      "Mark the caller's upcoming estimate as confirmed. Use the appointment_ref from lookup_caller.",
+    confirm: custom("confirm_appointment", "confirm",
+      "Mark the customer's upcoming estimate as confirmed. Use the appointment_ref you were given.",
       { appointment_ref: { type: "string" } }, ["appointment_ref"]),
-    custom("send_text", "send-text",
+    reschedule: custom("reschedule_appointment", "reschedule",
+      "Move the customer's upcoming estimate to a new time they picked from check_availability.",
+      {
+        appointment_ref: { type: "string" },
+        new_date:        { type: "string", description: "Exact date value from check_availability, YYYY-MM-DD" },
+        new_time:        { type: "string", description: "Exact time value from check_availability, HH:mm" },
+      }, ["appointment_ref", "new_date", "new_time"], "Say you're moving it, e.g. 'Perfect, let me move that for you.'"),
+    cancel: custom("cancel_appointment", "cancel",
+      "Cancel the customer's upcoming estimate. ONLY after you offered to reschedule and they still don't want it.",
+      {
+        appointment_ref:    { type: "string" },
+        reason:             { type: "string", description: "Why they're cancelling, in a few words" },
+        offered_reschedule: { type: "boolean", description: "True only if you already offered to reschedule and they declined" },
+      }, ["appointment_ref", "offered_reschedule"]),
+    sendText: custom("send_text", "send-text",
       "Text the caller links (website, estimate, projects, reviews, license, or a service page) and/or a short note, from Omdan's business number.",
       {
         phone: { type: "string", description: "Number to text if different from caller ID" },
         links: { type: "array", items: { type: "string", enum: ["website", "estimate", "projects", "reviews", "license", "turf", "pavers", "concrete", "gravel", "pool", "kitchen", "bathroom", "windows", "roofing", "insulation", "hvac", "gutters", "plumbing", "painting", "cool-life-paint"] } },
         note:  { type: "string", description: "Optional short note, e.g. 'Text photos of your yard to this number.'" },
       }, []),
-    {
+    transfer: {
       type: "transfer_call", name: "transfer_to_david",
       description: "Transfer the call to David (owner) when the rules in the prompt say to.",
       transfer_destination: { type: "predefined", number: ownerCell },
@@ -108,9 +123,24 @@ function tools(appUrl, secret, ownerCell) {
       execution_message_description: "Tell them you're getting David on the line, one moment.",
       execution_message_type: "prompt",
     },
-    { type: "end_call", name: "end_call", description: "End the call after saying goodbye, or for spam/robocalls." },
-  ]
+    end: { type: "end_call", name: "end_call", description: "End the call after saying goodbye, or for spam/robocalls." },
+  }
 }
+
+function tools(appUrl, secret, ownerCell) {
+  const t = allTools(appUrl, secret, ownerCell)
+  return [t.lookup, t.availability, t.book, t.confirm, t.reschedule, t.cancel, t.sendText, t.transfer, t.end]
+}
+
+function confirmTools(appUrl, secret, ownerCell) {
+  const t = allTools(appUrl, secret, ownerCell)
+  return [t.availability, t.confirm, t.reschedule, t.cancel, t.transfer, t.end]
+}
+
+const CONFIRM_POST_CALL = [
+  { type: "boolean", name: "reached_customer", description: "True if you spoke with the customer (not voicemail, not someone else, not no answer)" },
+  { type: "string",  name: "outcome",          description: "One of: confirmed, rescheduled, cancelled, no_decision, voicemail, wrong_person" },
+]
 
 const POST_CALL = [
   { type: "string",  name: "caller_name",        description: "Caller's full name if given, else empty" },
@@ -176,7 +206,39 @@ async function deploy() {
     : await retell("POST", "/create-agent", agentBody)
   ids.agent_id = agent.agent_id
   fs.writeFileSync(idsFile, JSON.stringify(ids, null, 2) + "\n")
-  console.log(`Agent ${ids.agent_id} ready. Next: buy/attach a phone number to it in the Retell dashboard.`)
+  console.log(`Agent ${ids.agent_id} ready.`)
+
+  // Confirmation calls (outbound): own prompt + tools, same voice and webhook.
+  const confirmLlmBody = {
+    general_prompt: fs.readFileSync(path.join(here, "confirm-prompt.md"), "utf8").replaceAll("{{agent_name}}", agentName),
+    start_speaker:  "user",
+    begin_after_user_silence_ms: 2000,
+    general_tools:  confirmTools(appUrl, secret, ownerCell),
+    model_config:   { type: "cascading", primary: { model }, temperature: 0.3 },
+  }
+  const confirmLlm = ids.confirm_llm_id
+    ? await retell("PATCH", `/update-retell-llm/${ids.confirm_llm_id}`, confirmLlmBody)
+    : await retell("POST", "/create-retell-llm", confirmLlmBody)
+  ids.confirm_llm_id = confirmLlm.llm_id
+  const confirmAgentBody = {
+    ...agentBody,
+    agent_name:      "Omdan confirmation calls",
+    response_engine: { type: "retell-llm", llm_id: ids.confirm_llm_id },
+    post_call_analysis_data: CONFIRM_POST_CALL,
+    end_call_after_silence_ms: 20000,
+    max_call_duration_ms: 600000,
+  }
+  const confirmAgent = ids.confirm_agent_id
+    ? await retell("PATCH", `/update-agent/${ids.confirm_agent_id}`, confirmAgentBody)
+    : await retell("POST", "/create-agent", confirmAgentBody)
+  ids.confirm_agent_id = confirmAgent.agent_id
+  fs.writeFileSync(idsFile, JSON.stringify(ids, null, 2) + "\n")
+  console.log(`Confirmation agent ${ids.confirm_agent_id} ready.`)
+
+  if (process.env.RETELL_FROM_NUMBER) {
+    await retell("PATCH", `/update-phone-number/${encodeURIComponent(process.env.RETELL_FROM_NUMBER)}`, { outbound_agent_id: ids.confirm_agent_id })
+    console.log(`Outbound calls from ${process.env.RETELL_FROM_NUMBER} use the confirmation agent.`)
+  }
 }
 
 const cmd = process.argv[2]

@@ -151,6 +151,30 @@ export async function updateCalendarEvent(
   })
 }
 
+/** Moves an event to a new start time, keeping its length, title and
+ *  everything else (e.g. a customer rescheduled with the phone receptionist).
+ *  Clears the "confirmed" mark: the new time hasn't been confirmed yet. */
+export async function moveCalendarEvent(calendarId: string, eventId: string, startISO: string): Promise<void> {
+  const calendar = getCalendarClient()
+  const { data: current } = await calendar.events.get({ calendarId, eventId })
+  const oldStart = new Date(current.start?.dateTime ?? "")
+  const oldEnd = new Date(current.end?.dateTime ?? "")
+  const lengthMs = oldEnd.getTime() - oldStart.getTime() > 0 ? oldEnd.getTime() - oldStart.getTime() : EVENT_DURATION_MINUTES * 60000
+  const start = new Date(startISO)
+  const priv = current.extendedProperties?.private ?? {}
+  await calendar.events.patch({
+    calendarId,
+    eventId,
+    requestBody: {
+      start: { dateTime: start.toISOString(), timeZone: "America/Los_Angeles" },
+      end:   { dateTime: new Date(start.getTime() + lengthMs).toISOString(), timeZone: "America/Los_Angeles" },
+      ...(priv.omdan_confirmed === "1"
+        ? { colorId: priv.omdan_prev_color || null, extendedProperties: { private: { omdan_confirmed: "0", omdan_prev_color: "" } } }
+        : {}),
+    },
+  })
+}
+
 /** Deletes an event — e.g. a job got cancelled or unscheduled. Treats "already
  *  gone" (404/410, someone deleted it by hand) as success, not an error. */
 export async function deleteCalendarEvent(calendarId: string, eventId: string): Promise<void> {

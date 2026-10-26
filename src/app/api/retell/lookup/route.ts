@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
-import { verifyRetellSecret, readToolCall, toolReply, phoneDigits, speakDateTime } from "@/lib/retell"
+import { verifyRetellSecret, readToolCall, toolReply, phoneDigits, speakDateTime, customerNumber } from "@/lib/retell"
+import { BRANDS, leadBrand, zipOf } from "@/lib/appointments"
 import { createServiceClient } from "@/lib/supabase/service"
 
 // POST /api/retell/lookup — Retell tool "lookup_caller".
@@ -13,14 +14,14 @@ export async function POST(req: NextRequest) {
 
   const { args, call } = await readToolCall<{ phone?: string; language?: "en" | "es" }>(req)
   const lang = args.language === "es" ? "es" : "en"
-  const digits = phoneDigits(args.phone || call.from_number)
+  const digits = phoneDigits(args.phone || customerNumber(call))
   if (digits.length !== 10) return toolReply({ ok: true, found: false, message: "No caller ID. Treat as a new caller." })
 
   const service = createServiceClient()
   const like = `%${digits.slice(-4)}%`
   const [leadsRes, customersRes] = await Promise.all([
     service.from("meta_leads")
-      .select("id, full_name, phone, address, list, scheduled_at, calendar_event_id")
+      .select("id, full_name, phone, address, list, scheduled_at, calendar_event_id, notes")
       .ilike("phone", like).order("created_at", { ascending: false }).limit(20),
     service.from("customers")
       .select("id, name, phone, address, status, service_type")
@@ -50,12 +51,15 @@ export async function POST(req: NextRequest) {
     name: customer?.name ?? leads[0]?.full_name ?? null,
     address: upcoming?.address ?? customer?.address ?? leads[0]?.address ?? null,
     upcoming_estimate: upcoming
-      ? { appointment_ref: upcoming.id, when: speakDateTime(upcoming.scheduled_at!, lang), address: upcoming.address }
+      ? {
+          appointment_ref: upcoming.id, when: speakDateTime(upcoming.scheduled_at!, lang), address: upcoming.address,
+          zip: zipOf(upcoming.address), brand: leadBrand(upcoming), company_name: BRANDS[leadBrand(upcoming)].name,
+        }
       : null,
     is_customer_with_job: jobs.length > 0,
     jobs: jobs.map((j) => ({ title: j.title, status: j.status })),
     message: upcoming
-      ? "Returning caller with an upcoming estimate. Greet them by first name; if they're calling about it, confirm it with confirm_appointment."
+      ? "Returning caller with an upcoming estimate. Greet them by first name. If they're calling about it, confirm it (confirm_appointment) or, if they can't make it, reschedule it (check_availability with its brand + zip, then reschedule_appointment)."
       : jobs.length
         ? "Existing customer with a job. For anything about their job, offer to transfer to David."
         : "Known caller (past lead). Greet them by first name.",

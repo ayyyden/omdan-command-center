@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
     preferred_date?: string   // YYYY-MM-DD
     part_of_day?:    "morning" | "afternoon" | "evening" | "any"
     language?:       "en" | "es"
+    brand?:          "omdan" | "desert_green"
   }>(req)
   const lang = args.language === "es" ? "es" : "en"
   const zip = String(args.zip ?? "").replace(/\D/g, "").slice(0, 5)
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
 
   let data: { ok?: boolean; inArea?: boolean; days?: { date: string; slots: { time: string }[] }[] }
   try {
-    const res = await fetch(`${base}?action=availability&brand=omdan&zip=${zip}`, { cache: "no-store" })
+    const res = await fetch(`${base}?action=availability&brand=${args.brand === "desert_green" ? "" : "omdan"}&zip=${zip}`, { cache: "no-store" })
     data = await res.json()
   } catch (err) {
     console.error("[retell/availability] backend failed:", err)

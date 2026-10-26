@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { verifyRetellSecret, readToolCall, toolReply, bookingScriptUrl, speakSlot } from "@/lib/retell"
+import { verifyRetellSecret, readToolCall, toolReply, bookingScriptUrl, speakSlot, customerNumber } from "@/lib/retell"
 import { toE164, sendQuoSms } from "@/lib/quo-client"
 
 // Service keys the booking backend knows for brand "omdan" (Code.gs OMDAN.labels).
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   const secret = process.env.BOOKING_PHONE_SECRET
   if (!base || !secret) return toolReply({ ok: false, message: "Booking is unavailable right now. Tell the caller David will call them shortly to lock in the time." })
 
-  const phone = toE164(args.phone || call.from_number || "")
+  const phone = toE164(args.phone || customerNumber(call) || "")
   const services = (args.services ?? []).filter((s) => SERVICES.includes(s))
   const missing = [
     !/\S+\s+\S+/.test(args.full_name ?? "") && "first and last name",

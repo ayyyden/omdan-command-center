@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { verifyRetellSecret, readToolCall, toolReply } from "@/lib/retell"
+import { verifyRetellSecret, readToolCall, toolReply, customerNumber } from "@/lib/retell"
 import { sendQuoSms } from "@/lib/quo-client"
 
 const SITE = "https://omdandevelopment.com"
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
     language?: "en" | "es"
   }>(req)
   const lang = args.language === "es" ? "es" : "en"
-  const to = args.phone || call.from_number
+  const to = args.phone || customerNumber(call)
   if (!to) return toolReply({ ok: false, message: "Ask for the best cell number to text." })
 
   const links = (args.links ?? []).filter((k) => LINKS[k]).slice(0, 4)
