@@ -293,7 +293,9 @@ export async function processConfirmationCall(service: SupabaseClient, call: Ret
 
   if (meta.stage === "first" && !row.text_sent_at) {
     const sms = await sendQuoSms(lead.phone, confirmationText(lead))
-    if (sms.ok) await service.from("appointment_confirmations").update({ text_sent_at: new Date().toISOString() }).eq("id", row.id)
+    await service.from("appointment_confirmations")
+      .update(sms.ok ? { text_sent_at: new Date().toISOString() } : { notes: `Confirmation text failed: ${sms.error}`.slice(0, 500) }).eq("id", row.id)
+    if (!sms.ok) await notifyOwner(`Couldn't text ${lead.full_name} (${lead.phone}) the confirmation request: ${sms.error.slice(0, 160)}`)
   } else if (meta.stage === "final") {
     await notifyOwner(`Heads-up: ${lead.full_name} (${BRANDS[leadBrand(lead)].name}) has NOT confirmed their ${speakDateTime(lead.scheduled_at)} estimate, and didn't confirm on the last call. ${lead.phone}`)
   }
