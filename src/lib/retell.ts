@@ -78,6 +78,32 @@ export function speakSlot(date: string, time: string, lang: "en" | "es" = "en"):
   return `${formatInTimeZone(when, TZ, "EEEE, MMMM d")} at ${formatInTimeZone(when, TZ, "h:mm a")}`
 }
 
+/**
+ * How a person says a time on the phone: "tomorrow at 10 AM", "Wednesday at 2:30 PM",
+ * "Monday the 3rd at noon" (more than 6 days out). For texts, use speakSlot (full date).
+ */
+export function sayWhen(date: string, time: string, lang: "en" | "es" = "en"): string {
+  const when = fromZonedTime(`${date}T${time}:00`, TZ)
+  const today = formatInTimeZone(new Date(), TZ, "yyyy-MM-dd")
+  const days = Math.round((fromZonedTime(`${date}T12:00:00`, TZ).getTime() - fromZonedTime(`${today}T12:00:00`, TZ).getTime()) / 86400000)
+  const [h, m] = time.split(":").map(Number)
+  if (lang === "es") {
+    const weekday = new Intl.DateTimeFormat("es-US", { timeZone: TZ, weekday: "long" }).format(when)
+    const day = days === 0 ? "hoy" : days === 1 ? "mañana" : days <= 6 ? `el ${weekday}` : `el ${weekday} ${new Intl.DateTimeFormat("es-US", { timeZone: TZ, day: "numeric", month: "long" }).format(when)}`
+    const h12 = ((h + 11) % 12) + 1
+    const clock = h === 12 && m === 0 ? "al mediodía" : `a la${h12 === 1 ? "" : "s"} ${h12}${m ? `:${String(m).padStart(2, "0")}` : ""} de la ${h < 12 ? "mañana" : h < 19 ? "tarde" : "noche"}`
+    return `${day} ${clock}`
+  }
+  const day = days === 0 ? "today" : days === 1 ? "tomorrow" : days <= 6 ? formatInTimeZone(when, TZ, "EEEE") : `${formatInTimeZone(when, TZ, "EEEE")} the ${formatInTimeZone(when, TZ, "do")}`
+  const clock = h === 12 && m === 0 ? "noon" : `${((h + 11) % 12) + 1}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`
+  return `${day} at ${clock}`
+}
+
+export function sayWhenIso(iso: string, lang: "en" | "es" = "en"): string {
+  const d = new Date(iso)
+  return sayWhen(formatInTimeZone(d, TZ, "yyyy-MM-dd"), formatInTimeZone(d, TZ, "HH:mm"), lang)
+}
+
 export function speakDateTime(iso: string, lang: "en" | "es" = "en"): string {
   const d = new Date(iso)
   return speakSlot(formatInTimeZone(d, TZ, "yyyy-MM-dd"), formatInTimeZone(d, TZ, "HH:mm"), lang)

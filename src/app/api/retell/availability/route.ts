@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { verifyRetellSecret, readToolCall, toolReply, bookingScriptUrl, speakSlot } from "@/lib/retell"
+import { verifyRetellSecret, readToolCall, toolReply, bookingScriptUrl, sayWhen } from "@/lib/retell"
 
 // POST /api/retell/availability — Retell tool "check_availability".
 // Asks the website booking backend (same rules as the website: open days,
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
   return toolReply({
     ok: true,
     note: args.preferred_date && !preferred ? "That day is full or closed; these are the closest open times." : undefined,
-    slots: picked.map((s) => ({ date: s.date, time: s.time, say: speakSlot(s.date, s.time, lang) })),
+    slots: picked.map((s) => ({ date: s.date, time: s.time, say: sayWhen(s.date, s.time, lang) })),
     message: "Offer two of these times, not the whole list. Book with the exact date and time values.",
   })
 }

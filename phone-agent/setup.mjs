@@ -10,7 +10,8 @@
 //   OWNER_CELL           David's personal cell for transfers (NOT the Quo number: that would loop)
 //   VOICE_ID             from `voices`
 //   AGENT_NAME           optional, the name the receptionist uses (default "Daniel")
-//   RETELL_LLM_MODEL     optional (default "claude-5.5-sonnet")
+//   RETELL_LLM_MODEL     optional (default "claude-5.5-sonnet"); RETELL_LLM_TIER optional (default "fast": lower latency)
+//   RETELL_CONFIRM_MODEL optional, model for the short confirmation calls (default "claude-5.5-haiku")
 //   RETELL_VOICE_MODEL   optional (default "eleven_flash_v2_5")
 // The created ids are saved in phone-agent/retell-ids.json so the next deploy updates in place.
 
@@ -32,6 +33,18 @@ const env = (k, fallback) => {
   const v = process.env[k] ?? fallback
   if (v === undefined || v === "") { console.error(`Missing ${k}`); process.exit(1) }
   return v
+}
+
+/** Create/update an LLM; if the model doesn't offer the requested speed tier, retry on its standard tier. */
+async function saveLlm(id, body) {
+  const send = (b) => id ? retell("PATCH", `/update-retell-llm/${id}`, b) : retell("POST", "/create-retell-llm", b)
+  try {
+    return await send(body)
+  } catch (err) {
+    if (!/tier .* is not offered/.test(String(err))) throw err
+    console.log(`(${body.model_config.primary.model} has no "${body.model_config.primary.tier}" tier, using standard)`)
+    return send({ ...body, model_config: { ...body.model_config, primary: { model: body.model_config.primary.model } } })
+  }
 }
 
 async function retell(method, route, body) {
@@ -162,17 +175,16 @@ async function deploy() {
 
   const prompt = fs.readFileSync(path.join(here, "prompt.md"), "utf8").replaceAll("{{agent_name}}", agentName)
   const model = env("RETELL_LLM_MODEL", "claude-5.5-sonnet")
+  const tier = env("RETELL_LLM_TIER", "fast")
   const llmBody = {
     general_prompt: prompt,
     start_speaker:  "agent",
-    begin_message:  `Thanks for calling Omdan Development, this is ${agentName}. Just so you know, this call may be recorded. How can I help you today?`,
+    begin_message:  `Hi, thanks for calling Omdan Development, this is ${agentName}! Just a heads up, calls are recorded. What can I do for you?`,
     general_tools:  tools(appUrl, secret, ownerCell),
-    model_config:   { type: "cascading", primary: { model }, temperature: 0.4 },
+    model_config:   { type: "cascading", primary: { model, tier }, temperature: 0.5 },
   }
 
-  const llm = ids.llm_id
-    ? await retell("PATCH", `/update-retell-llm/${ids.llm_id}`, llmBody)
-    : await retell("POST", "/create-retell-llm", llmBody)
+  const llm = await saveLlm(ids.llm_id, llmBody)
   ids.llm_id = llm.llm_id
   console.log(`LLM ${ids.llm_id} ${ids.agent_id ? "updated" : "created"}`)
 
@@ -180,15 +192,16 @@ async function deploy() {
     agent_name:          "Omdan Development receptionist",
     response_engine:     { type: "retell-llm", llm_id: ids.llm_id },
     voice_id:            env("VOICE_ID"),
-    voice_model:         env("RETELL_VOICE_MODEL", "eleven_flash_v2_5"),
+    voice_model:         env("RETELL_VOICE_MODEL", "eleven_v3_conversational"),
     language:            ["en-US", "es-ES"],
-    voice_temperature:   1,
-    voice_speed:         1,
-    responsiveness:      0.9,
+    voice_temperature:   1.15,
+    voice_speed:         1.04,
+    responsiveness:      1,
     interruption_sensitivity: 0.8,
     enable_backchannel:  true,
     backchannel_words:   ["mm-hm", "yeah", "got it", "okay", "ajá", "claro"],
-    ambient_sound:       null,
+    ambient_sound:       "call-center",
+    ambient_sound_volume: 0.35,
     denoising_mode:      "noise-and-background-speech-cancellation",
     boosted_keywords:    ["Omdan", "pavers", "turf", "Cool Deck", "Cool Life", "xeriscape", "Palm Springs", "Palm Desert",
                           "Rancho Mirage", "Cathedral City", "Indio", "La Quinta", "Yucca Valley", "Twentynine Palms", "Yucaipa",
@@ -214,11 +227,9 @@ async function deploy() {
     start_speaker:  "user",
     begin_after_user_silence_ms: 2000,
     general_tools:  confirmTools(appUrl, secret, ownerCell),
-    model_config:   { type: "cascading", primary: { model }, temperature: 0.3 },
+    model_config:   { type: "cascading", primary: { model: env("RETELL_CONFIRM_MODEL", "claude-5.5-haiku"), tier }, temperature: 0.4 },
   }
-  const confirmLlm = ids.confirm_llm_id
-    ? await retell("PATCH", `/update-retell-llm/${ids.confirm_llm_id}`, confirmLlmBody)
-    : await retell("POST", "/create-retell-llm", confirmLlmBody)
+  const confirmLlm = await saveLlm(ids.confirm_llm_id, confirmLlmBody)
   ids.confirm_llm_id = confirmLlm.llm_id
   const confirmAgentBody = {
     ...agentBody,

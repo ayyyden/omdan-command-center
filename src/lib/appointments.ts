@@ -6,7 +6,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
-import { TZ, bookingScriptUrl, speakDateTime, speakSlot, phoneDigits, type RetellCall } from "@/lib/retell"
+import { TZ, bookingScriptUrl, speakDateTime, speakSlot, sayWhen, sayWhenIso, phoneDigits, type RetellCall } from "@/lib/retell"
 import { sendQuoSms } from "@/lib/quo-client"
 import { setEventConfirmed, moveCalendarEvent, deleteCalendarEvent } from "@/lib/google-calendar"
 
@@ -195,7 +195,7 @@ export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLea
       : `${company.name}: All set, ${firstName(lead.full_name)}! Your free estimate is now ${when}${lead.address ? ` at ${lead.address}` : ""}. Thank you!`)
   }
   await notifyOwner(`Sofia RESCHEDULED (${company.name}): ${lead.full_name} ${lead.phone ?? ""}\nFrom ${speakDateTime(lead.scheduled_at!)} to ${speakSlot(newDate, newTime)}`)
-  return { ok: true as const, message: `Moved to ${when}. A text with the new time was sent.` }
+  return { ok: true as const, message: `Moved to ${sayWhen(newDate, newTime, lang)}. A text with the new time was sent.` }
 }
 
 export async function cancelLead(service: SupabaseClient, lead: ScheduledLead, reason: string) {
@@ -248,7 +248,7 @@ export async function startConfirmationCall(lead: ScheduledLead, row: Confirmati
         brand,
         customer_first_name: firstName(lead.full_name),
         customer_full_name:  lead.full_name,
-        appointment_when:    speakDateTime(lead.scheduled_at!, lang),
+        appointment_when:    sayWhenIso(lead.scheduled_at!, lang),
         appointment_day:     ptParts(new Date().toISOString()).date === ptParts(lead.scheduled_at!).date ? (lang === "es" ? "hoy" : "today") : (lang === "es" ? "mañana" : "tomorrow"),
         appointment_address: lead.address ?? "",
         appointment_ref:     lead.id,

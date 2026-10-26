@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { verifyRetellSecret, readToolCall, toolReply, phoneDigits, speakDateTime, customerNumber } from "@/lib/retell"
+import { verifyRetellSecret, readToolCall, toolReply, phoneDigits, sayWhenIso, customerNumber } from "@/lib/retell"
 import { BRANDS, leadBrand, zipOf } from "@/lib/appointments"
 import { createServiceClient } from "@/lib/supabase/service"
 
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     address: upcoming?.address ?? customer?.address ?? leads[0]?.address ?? null,
     upcoming_estimate: upcoming
       ? {
-          appointment_ref: upcoming.id, when: speakDateTime(upcoming.scheduled_at!, lang), address: upcoming.address,
+          appointment_ref: upcoming.id, when: sayWhenIso(upcoming.scheduled_at!, lang), address: upcoming.address,
           zip: zipOf(upcoming.address), brand: leadBrand(upcoming), company_name: BRANDS[leadBrand(upcoming)].name,
         }
       : null,

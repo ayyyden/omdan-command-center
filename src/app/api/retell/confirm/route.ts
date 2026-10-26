@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { verifyRetellSecret, readToolCall, toolReply, speakDateTime, customerNumber } from "@/lib/retell"
+import { verifyRetellSecret, readToolCall, toolReply, sayWhenIso, customerNumber } from "@/lib/retell"
 import { createServiceClient } from "@/lib/supabase/service"
 import { findCallerAppointment, markConfirmed } from "@/lib/appointments"
 
@@ -18,5 +18,5 @@ export async function POST(req: NextRequest) {
   if ("error" in found) return toolReply({ ok: false, message: found.error })
 
   await markConfirmed(service, found.lead, call.direction === "outbound" ? "confirmation call" : "phone call")
-  return toolReply({ ok: true, message: `Confirmed for ${speakDateTime(found.lead.scheduled_at!, args.language === "es" ? "es" : "en")}.` })
+  return toolReply({ ok: true, message: `Confirmed for ${sayWhenIso(found.lead.scheduled_at!, args.language === "es" ? "es" : "en")}.` })
 }

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { verifyRetellSecret, readToolCall, toolReply, bookingScriptUrl, speakSlot, customerNumber } from "@/lib/retell"
+import { verifyRetellSecret, readToolCall, toolReply, bookingScriptUrl, speakSlot, sayWhen, customerNumber } from "@/lib/retell"
 import { toE164, sendQuoSms } from "@/lib/quo-client"
 
 // Service keys the booking backend knows for brand "omdan" (Code.gs OMDAN.labels).
@@ -88,6 +88,6 @@ export async function POST(req: NextRequest) {
   return toolReply({
     ok: true,
     confirmation_text_sent: sms.ok,
-    message: `Booked for ${when}. ${sms.ok ? "A confirmation text was sent." : "The confirmation text could not be sent; tell them they'll get a reminder the day before."}`,
+    message: `Booked for ${sayWhen(args.date!, args.time!, lang)}. ${sms.ok ? "A confirmation text was sent." : "The confirmation text could not be sent; tell them they'll get a reminder the day before."}`,
   })
 }
