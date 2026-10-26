@@ -10,7 +10,7 @@
 //   OWNER_CELL           David's personal cell for transfers (NOT the Quo number: that would loop)
 //   VOICE_ID             from `voices`
 //   AGENT_NAME           optional, the name the receptionist uses (default "Daniel")
-//   RETELL_LLM_MODEL     optional (default "claude-5.5-sonnet"); RETELL_LLM_TIER optional (default "fast": lower latency)
+//   RETELL_LLM_MODEL     optional (default "claude-5.5-haiku"); RETELL_LLM_TIER optional (default "fast": lower latency)
 //   RETELL_CONFIRM_MODEL optional, model for the short confirmation calls (default "claude-5.5-haiku")
 //   RETELL_VOICE_MODEL   optional (default "eleven_flash_v2_5")
 // The created ids are saved in phone-agent/retell-ids.json so the next deploy updates in place.
@@ -174,12 +174,12 @@ async function deploy() {
   const ids = fs.existsSync(idsFile) ? JSON.parse(fs.readFileSync(idsFile, "utf8")) : {}
 
   const prompt = fs.readFileSync(path.join(here, "prompt.md"), "utf8").replaceAll("{{agent_name}}", agentName)
-  const model = env("RETELL_LLM_MODEL", "claude-5.5-sonnet")
+  const model = env("RETELL_LLM_MODEL", "claude-5.5-haiku")   // fast replies matter more than a bigger model on the phone
   const tier = env("RETELL_LLM_TIER", "fast")
   const llmBody = {
     general_prompt: prompt,
     start_speaker:  "agent",
-    begin_message:  `Hi, thanks for calling Omdan Development, this is ${agentName}! Just a heads up, calls are recorded. What can I do for you?`,
+    begin_message:  `Omdan Development, this is ${agentName}, calls are recorded. How can I help?`,
     general_tools:  tools(appUrl, secret, ownerCell),
     model_config:   { type: "cascading", primary: { model, tier }, temperature: 0.5 },
   }
@@ -192,12 +192,12 @@ async function deploy() {
     agent_name:          "Omdan Development receptionist",
     response_engine:     { type: "retell-llm", llm_id: ids.llm_id },
     voice_id:            env("VOICE_ID"),
-    voice_model:         env("RETELL_VOICE_MODEL", "eleven_v3_conversational"),
+    voice_model:         env("RETELL_VOICE_MODEL", "eleven_flash_v2_5"),   // smooth, low-latency streaming (v3 spoke in choppy chunks)
     language:            ["en-US", "es-ES"],
-    voice_temperature:   1.15,
+    voice_temperature:   1,
     voice_speed:         1.04,
     responsiveness:      1,
-    interruption_sensitivity: 0.8,
+    interruption_sensitivity: 1,
     enable_backchannel:  true,
     backchannel_words:   ["mm-hm", "yeah", "got it", "okay", "ajá", "claro"],
     ambient_sound:       "call-center",
