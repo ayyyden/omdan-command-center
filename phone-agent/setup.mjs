@@ -87,7 +87,7 @@ function allTools(appUrl, secret, ownerCell) {
         brand:          { type: "string", enum: ["omdan", "desert_green"], description: "Company of the appointment when rescheduling (from lookup_caller / the call details); omit for new Omdan bookings" },
         preferred_date: { type: "string", description: "YYYY-MM-DD if the caller asked for a specific day" },
         part_of_day:    { type: "string", enum: ["morning", "afternoon", "evening", "any"] },
-      }, ["zip"], "Briefly say you're looking at the calendar, e.g. 'One sec, let me pull up the calendar.'"),
+      }, ["zip"]),
     book: custom("book_estimate", "book",
       "Book the free on-site estimate once the caller picked a time from check_availability and you've confirmed their details.",
       {
@@ -101,8 +101,7 @@ function allTools(appUrl, secret, ownerCell) {
         services:        { type: "array", items: { type: "string", enum: ["turf", "pavers", "concrete", "gravel", "full-remodel", "pool", "kitchen", "bathroom", "windows", "roofing", "insulation", "hvac", "gutters", "plumbing", "painting", "cool-life-paint"] } },
         start:           { type: "string", enum: ["asap", "1-3", "3plus", "planning"], description: "When they want to start" },
         project_summary: { type: "string", description: "One sentence with the useful project details" },
-      }, ["full_name", "street", "city", "zip", "date", "time", "services"],
-      "Say you're locking it in, e.g. 'Perfect, let me lock that in for you.'"),
+      }, ["full_name", "street", "city", "zip", "date", "time", "services"]),
     confirm: custom("confirm_appointment", "confirm",
       "Mark the customer's upcoming estimate as confirmed. Use the appointment_ref you were given.",
       { appointment_ref: { type: "string" } }, ["appointment_ref"]),
@@ -112,7 +111,7 @@ function allTools(appUrl, secret, ownerCell) {
         appointment_ref: { type: "string" },
         new_date:        { type: "string", description: "Exact date value from check_availability, YYYY-MM-DD" },
         new_time:        { type: "string", description: "Exact time value from check_availability, HH:mm" },
-      }, ["appointment_ref", "new_date", "new_time"], "Say you're moving it, e.g. 'Perfect, let me move that for you.'"),
+      }, ["appointment_ref", "new_date", "new_time"]),
     cancel: custom("cancel_appointment", "cancel",
       "Cancel the customer's upcoming estimate. ONLY after you offered to reschedule and they still don't want it.",
       {
@@ -194,8 +193,8 @@ async function deploy() {
     voice_id:            env("VOICE_ID"),
     voice_model:         env("RETELL_VOICE_MODEL", "eleven_flash_v2_5"),   // smooth, low-latency streaming (v3 spoke in choppy chunks)
     language:            ["en-US", "es-ES"],
-    voice_temperature:   1,
-    voice_speed:         1.04,
+    voice_temperature:   0.6,   // steadier pace (Ivanna is an "expressive" voice)
+    voice_speed:         1.02,
     responsiveness:      1,
     interruption_sensitivity: 1,
     enable_backchannel:  true,

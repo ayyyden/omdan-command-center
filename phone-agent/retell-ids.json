@@ -2,5 +2,7 @@
   "llm_id": "llm_5e6077273dc76b3096b2f51c2d1e",
   "agent_id": "agent_6006ce8666f3b7afe60ebc555e",
   "confirm_llm_id": "llm_7173c17e70320ad172fe3e091b0e",
-  "confirm_agent_id": "agent_3ca127222f773fbf044dd7c19b"
+  "confirm_agent_id": "agent_3ca127222f773fbf044dd7c19b",
+  "s2s_llm_id": "llm_4f1baaa3e38a032379a53aae3bc0",
+  "s2s_agent_id": "agent_05752c891eb6b9b0a0ba4ef6a9"
 }
