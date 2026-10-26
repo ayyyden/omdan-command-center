@@ -32,6 +32,8 @@ export async function POST(req: NextRequest) {
     interests?:         string | null
     language?:          string | null
     phone_verified?:    boolean
+    source?:            string | null   // "phone" = booked by the AI phone receptionist
+    project_notes?:     string | null
     // Ad attribution captured on the landing page (assets/js/attribution.js)
     utm_source?:        string | null
     utm_medium?:        string | null
@@ -65,12 +67,13 @@ export async function POST(req: NextRequest) {
   }
 
   const notes = [
-    "Source: Website (desertgreenbuilders.com)",
+    body.source === "phone" ? "Source: Phone call (AI receptionist)" : "Source: Website (desertgreenbuilders.com)",
     body.homeowner ? `Homeowner: ${body.homeowner}` : null,
     body.yard ? `Yard: ${body.yard}` : null,
     body.interests ? `Interested in: ${body.interests}` : null,
     body.language ? `Language: ${body.language}` : null,
-    body.phone_verified ? "Phone verified by text code" : null,
+    body.phone_verified && body.source !== "phone" ? "Phone verified by text code" : null,
+    body.project_notes ? `Project: ${body.project_notes}` : null,
   ].filter(Boolean).join("\n")
 
   const { data, error } = await service
