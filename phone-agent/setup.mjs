@@ -228,7 +228,7 @@ async function deploy() {
     interruption_sensitivity: 1,
     enable_backchannel:  false,   // no "mm-hm"/"got it" while the caller talks (owner's choice)
     ambient_sound:       "call-center",
-    ambient_sound_volume: 0.35,
+    ambient_sound_volume: 0.15,   // subtle office sound (owner asked for it lower)
     denoising_mode:      "noise-and-background-speech-cancellation",
     boosted_keywords:    ["Omdan", "pavers", "turf", "Cool Deck", "Cool Life", "xeriscape", "Palm Springs", "Palm Desert",
                           "Rancho Mirage", "Cathedral City", "Indio", "La Quinta", "Yucca Valley", "Twentynine Palms", "Yucaipa",
