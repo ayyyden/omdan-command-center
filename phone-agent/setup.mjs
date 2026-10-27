@@ -79,7 +79,8 @@ function allTools(appUrl, secret, ownerCell) {
   return {
     lookup: custom("lookup_caller", "lookup",
       "Look up the caller by phone number to see if they're a past lead, have an upcoming estimate, or are a customer with a job. Call once, early in the call.",
-      { phone: { type: "string", description: "Phone number if different from caller ID, else omit" } }, []),
+      { phone: { type: "string", description: "Phone number if different from caller ID, else omit" } }, [],
+      "Two or three words while you look, like \"One sec.\""),
     availability: custom("check_availability", "availability",
       "Get open times for a free on-site estimate at the caller's ZIP code (also for rescheduling). Also says if the ZIP is outside our service area.",
       {
@@ -87,7 +88,8 @@ function allTools(appUrl, secret, ownerCell) {
         brand:          { type: "string", enum: ["omdan", "desert_green"], description: "Company of the appointment when rescheduling (from lookup_caller / the call details); omit for new Omdan bookings" },
         preferred_date: { type: "string", description: "YYYY-MM-DD if the caller asked for a specific day" },
         part_of_day:    { type: "string", enum: ["morning", "afternoon", "evening", "any"] },
-      }, ["zip"]),
+      }, ["zip"],
+      "A few words while you check, like \"Let me look at the calendar.\""),
     book: custom("book_estimate", "book",
       "Book the free on-site estimate once the caller picked a time from check_availability and you've confirmed their details.",
       {
@@ -101,7 +103,8 @@ function allTools(appUrl, secret, ownerCell) {
         services:        { type: "array", items: { type: "string", enum: ["turf", "pavers", "concrete", "gravel", "full-remodel", "pool", "kitchen", "bathroom", "windows", "roofing", "insulation", "hvac", "gutters", "plumbing", "painting", "cool-life-paint"] } },
         start:           { type: "string", enum: ["asap", "1-3", "3plus", "planning"], description: "When they want to start" },
         project_summary: { type: "string", description: "One sentence with the useful project details" },
-      }, ["full_name", "street", "city", "zip", "date", "time", "services"]),
+      }, ["full_name", "street", "city", "zip", "date", "time", "services"],
+      "A few words while you book it, like \"Perfect, booking that now.\""),
     confirm: custom("confirm_appointment", "confirm",
       "Mark the customer's upcoming estimate as confirmed. Use the appointment_ref you were given.",
       { appointment_ref: { type: "string" } }, ["appointment_ref"]),
@@ -111,7 +114,8 @@ function allTools(appUrl, secret, ownerCell) {
         appointment_ref: { type: "string" },
         new_date:        { type: "string", description: "Exact date value from check_availability, YYYY-MM-DD" },
         new_time:        { type: "string", description: "Exact time value from check_availability, HH:mm" },
-      }, ["appointment_ref", "new_date", "new_time"]),
+      }, ["appointment_ref", "new_date", "new_time"],
+      "A few words while you move it, like \"Okay, moving it now.\""),
     cancel: custom("cancel_appointment", "cancel",
       "Cancel the customer's upcoming estimate. ONLY after you offered to reschedule and they still don't want it.",
       {
