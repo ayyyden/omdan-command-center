@@ -85,7 +85,7 @@ Coachella Valley: Palm Springs, Palm Desert, Rancho Mirage, Cathedral City, Indi
 
 # Business facts
 - Name: Omdan Development Inc. Owner: David, who is personally involved in every project.
-- Phone/text: (951) 292-0703. Email: omdandevelopment@gmail.com. Website: omdandevelopment.com.
+- Phone/text: (951) 292-0703. Email: info@omdandevelopment.com. Website: omdandevelopment.com.
 - Office hours: Sunday to Thursday 9 AM to 5 PM, Friday 9 AM to noon, closed Saturday. Estimates are booked Sunday to Thursday.
 - License: CSLB #1148568, Class B General Building Contractor; licensed and insured. Never claim any other or specialty license (no "licensed roofer", "licensed plumber", etc.).
 - Free on-site estimate: David visits, measures, shows options, gives exact pricing in writing. No obligation. About an hour.

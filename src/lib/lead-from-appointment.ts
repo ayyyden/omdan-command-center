@@ -25,7 +25,7 @@ export type LeadResult =
   | { status: "existing"; customerId: string; name: string }
   | { status: "skipped"; reason: string }
 
-const OWN_EMAILS = new Set(["omdandevelopment@gmail.com"])
+const OWN_EMAILS = new Set(["omdandevelopment@gmail.com", "info@omdandevelopment.com"])
 
 function digits(phone: string | null | undefined): string {
   const d = (phone ?? "").replace(/\D/g, "")
