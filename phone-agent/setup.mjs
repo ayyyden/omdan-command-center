@@ -205,7 +205,7 @@ async function deploy() {
   const llmBody = {
     general_prompt: prompt,
     start_speaker:  "agent",
-    begin_message:  `Omdan Development, ${agentName} speaking.`,
+    begin_message:  "Hello?",   // owner's choice: no company name or intro up front
     general_tools:  [...tools(appUrl, secret, ownerCell),
       ...(ids.es_agent_id ? [swapTool("switch_to_spanish", ids.es_agent_id, "Hand the call to the Spanish line when the caller speaks or asks for Spanish.")] : [])],
     model_config:   { type: "cascading", primary: { model, tier }, temperature: 0.5 },
