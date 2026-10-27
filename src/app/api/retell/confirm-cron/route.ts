@@ -4,16 +4,19 @@ import {
   LEAD_COLUMNS, getConfirmation, ptParts, ptInstant, startConfirmationCall, processConfirmationCall,
   leadBrand, type ScheduledLead, type ConfirmationRow,
 } from "@/lib/appointments"
+import { calendarAppointments } from "@/lib/calendar-appointments"
 import type { RetellCall } from "@/lib/retell"
 
 // POST /api/retell/confirm-cron
 // Runs every 5 minutes (booking backend Apps Script trigger runConfirmations).
-// For every scheduled estimate in the next ~36 hours:
+// For every estimate on the Google Calendar in the next ~36 hours
+// (jobs, all-day events and events without a phone are skipped):
 //   before 12 PM  -> confirmation call the day before at 6 PM
 //   12 PM onward  -> confirmation call the same day at 10 AM
 //   no answer / no decision -> confirmation text (processConfirmationCall)
 //   still not confirmed -> last call 30 minutes before; if that fails, David gets a heads-up text
-// Bookings made after the confirmation-call time count as confirmed (they just booked).
+// Bookings made after the confirmation-call time count as confirmed (they just booked),
+// and so do appointments already marked confirmed on the calendar.
 // Calls only go out between 7:30 AM and 8:30 PM Pacific.
 //
 // Auth: x-website-secret = WEBSITE_LEADS_SECRET (the booking backend's key).
@@ -49,20 +52,26 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: call.ok, call })
   }
-  const { data, error } = await service.from("meta_leads")
-    .select(LEAD_COLUMNS)
-    .eq("list", "scheduled")
-    .gt("scheduled_at", now.toISOString())
-    .lt("scheduled_at", new Date(now.getTime() + 36 * 60 * MIN).toISOString())
-    .order("scheduled_at")
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // Who to call comes from the Google Calendar (see calendar-appointments.ts).
+  // Syncs two weeks ahead so Sofia also recognises these customers when they call in;
+  // confirmation calls only look at the next 36 hours.
+  let calendar: Awaited<ReturnType<typeof calendarAppointments>>
+  try {
+    calendar = await calendarAppointments(service, 14 * 24, { dry })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error("[confirm-cron] calendar read failed:", message)
+    return NextResponse.json({ error: `Couldn't read the calendar: ${message}` }, { status: 502 })
+  }
 
   const nowPt = ptParts(now.toISOString())
   const minutesPt = Number(nowPt.time.slice(0, 2)) * 60 + Number(nowPt.time.slice(3))
   const callHours = minutesPt >= 7 * 60 + 30 && minutesPt <= 20 * 60 + 30
 
   const report: Record<string, unknown>[] = []
-  for (const lead of (data ?? []) as ScheduledLead[]) {
+  const horizon = now.getTime() + 36 * 60 * MIN
+  for (const { lead, bookedAt, calendarConfirmed } of calendar.appointments) {
+    if (new Date(lead.scheduled_at!).getTime() > horizon) continue
     if (!lead.phone || !lead.scheduled_at) continue
     const start = new Date(lead.scheduled_at)
     const { date, hour } = ptParts(lead.scheduled_at)
@@ -77,8 +86,16 @@ export async function POST(req: NextRequest) {
     if (!dry && !row) { entry.action = "no tracking row"; continue }
     if (row && row.status !== "pending") { entry.action = `skip (${row.status})`; continue }
 
+    // Already marked confirmed on the calendar: nothing to call about.
+    if (calendarConfirmed) {
+      entry.action = "confirmed on the calendar"
+      if (row) await service.from("appointment_confirmations")
+        .update({ status: "confirmed", confirmed_at: now.toISOString(), confirmed_via: "calendar" }).eq("id", row.id)
+      continue
+    }
+
     // Booked after the confirmation-call time: they just booked, no need to confirm.
-    if (new Date(lead.created_at) > new Date(firstDue.getTime() - 60 * MIN)) {
+    if (new Date(bookedAt) > new Date(firstDue.getTime() - 60 * MIN)) {
       entry.action = "booked recently, counted as confirmed"
       if (row) await service.from("appointment_confirmations")
         .update({ status: "confirmed", confirmed_at: now.toISOString(), confirmed_via: "booked recently" }).eq("id", row.id)
@@ -121,7 +138,7 @@ export async function POST(req: NextRequest) {
     entry.action = "waiting"
   }
 
-  return NextResponse.json({ ok: true, now: now.toISOString(), callHours, dry, appointments: report })
+  return NextResponse.json({ ok: true, now: now.toISOString(), callHours, dry, appointments: report, skipped: calendar.skipped })
 }
 
 /** If a call ended over 10 minutes ago and we never got its result, fetch it from Retell. */

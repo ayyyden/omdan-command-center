@@ -197,6 +197,7 @@ export interface CalendarEventSummary {
   description: string | null
   htmlLink:    string | null  // link to open the real event in Google Calendar
   confirmed:   boolean        // customer confirmed the appointment (Calendar page button)
+  created?:    string | null  // when the event was put on the calendar
 }
 
 /**
@@ -230,6 +231,7 @@ export async function listUpcomingEvents(
     description: e.description ?? null,
     htmlLink:    e.htmlLink ?? null,
     confirmed:   e.extendedProperties?.private?.omdan_confirmed === "1",
+    created:     e.created ?? null,
   }))
 }
 
