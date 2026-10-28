@@ -57,9 +57,11 @@ export interface ConfirmationRow {
 
 export const LEAD_COLUMNS = "id, full_name, phone, address, city, scheduled_at, calendar_event_id, calendar_id, notes, list, created_at"
 
-/** Omdan bookings say so in their notes ("Omdan Development: …" from the website,
+/** A "Company:" line (copied from the calendar event) decides; otherwise Omdan bookings say so in their notes ("Omdan Development: …" from the website,
  *  or the phone receptionist); everything else on the calendar is Desert Green. */
 export function leadBrand(lead: Pick<ScheduledLead, "notes">): Brand {
+  const company = [...(lead.notes ?? "").matchAll(/^Company:\s*(.+)$/gim)].pop()?.[1]
+  if (company) return /omdan/i.test(company) ? "omdan" : "desert_green"
   return /Omdan Development|Phone call \(AI receptionist\)/i.test(lead.notes ?? "") ? "omdan" : "desert_green"
 }
 
@@ -117,7 +119,7 @@ export async function findCallerAppointment(service: SupabaseClient, ref: string
   if (!ref) return { error: "Call lookup_caller first to find their appointment." as const }
   const { data } = await service.from("meta_leads").select(LEAD_COLUMNS).eq("id", ref).maybeSingle()
   const lead = data as ScheduledLead | null
-  if (!lead || lead.list !== "scheduled" || !lead.scheduled_at) return { error: "That appointment isn't on the schedule anymore. Offer to book a new one." as const }
+  if (!lead || lead.list !== "scheduled" || !lead.scheduled_at || !lead.calendar_event_id) return { error: "That appointment isn't on the schedule anymore. Offer to book a new one." as const }
   if (phone && phoneDigits(lead.phone) !== phoneDigits(phone)) {
     return { error: "That appointment isn't under this caller's number. Don't share details; offer a callback from David." as const }
   }

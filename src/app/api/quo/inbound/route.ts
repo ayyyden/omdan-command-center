@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   const service = createServiceClient()
   const now = new Date()
   const { data } = await service.from("meta_leads").select(LEAD_COLUMNS)
-    .eq("list", "scheduled").gt("scheduled_at", now.toISOString())
+    .eq("list", "scheduled").not("calendar_event_id", "is", null).gt("scheduled_at", now.toISOString())
     .lt("scheduled_at", new Date(now.getTime() + 72 * 3600_000).toISOString())
     .ilike("phone", `%${digits.slice(-4)}%`).order("scheduled_at")
   const lead = ((data ?? []) as ScheduledLead[]).find((l) => phoneDigits(l.phone) === digits)

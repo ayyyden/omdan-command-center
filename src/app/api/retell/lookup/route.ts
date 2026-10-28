@@ -36,7 +36,8 @@ export async function POST(req: NextRequest) {
 
   const now = Date.now()
   const upcoming = leads
-    .filter((l) => l.list === "scheduled" && l.scheduled_at && new Date(l.scheduled_at).getTime() > now)
+    // Only appointments on the Google Calendar count (the confirm cron keeps them in sync).
+    .filter((l) => l.list === "scheduled" && l.calendar_event_id && l.scheduled_at && new Date(l.scheduled_at).getTime() > now)
     .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())[0]
 
   const customer = customers[0]
