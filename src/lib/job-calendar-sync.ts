@@ -40,7 +40,7 @@ export async function syncJobCalendarEvent(jobId: string): Promise<{ ok: true } 
 
   let startISO: string
   try {
-    startISO = fromZonedTime(`${job.scheduled_date}T${job.scheduled_time ?? "09:00"}:00`, "America/Los_Angeles").toISOString()
+    startISO = fromZonedTime(`${job.scheduled_date}T${String(job.scheduled_time ?? "09:00").slice(0, 5)}:00`, "America/Los_Angeles").toISOString()
   } catch {
     return { ok: false, error: "Invalid scheduled_date/scheduled_time" }
   }
