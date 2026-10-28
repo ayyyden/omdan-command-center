@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
 import { TZ, bookingScriptUrl, speakDateTime, speakSlot, sayWhen, sayWhenIso, phoneDigits, type RetellCall } from "@/lib/retell"
 import { sendQuoSms } from "@/lib/quo-client"
-import { setEventConfirmed, moveCalendarEvent, deleteCalendarEvent } from "@/lib/google-calendar"
+import { setEventConfirmed, moveCalendarEvent, deleteCalendarEvent, createAppointmentEvent } from "@/lib/google-calendar"
 
 export type Brand = "omdan" | "desert_green"
 export type Lang = "en" | "es"
@@ -175,9 +175,24 @@ export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLea
   const old = ptParts(lead.scheduled_at!)
   const newStart = ptInstant(newDate, newTime)
   const calendarId = lead.calendar_id || process.env.META_LEADS_MAIN_CALENDAR_ID
-  if (lead.calendar_event_id && calendarId) {
-    try { await moveCalendarEvent(calendarId, lead.calendar_event_id, newStart.toISOString()) }
-    catch (err) {
+  // Not on the calendar yet (added to the CRM by hand): put it there at the new time,
+  // since the calendar is what the confirmation calls read.
+  let link: { calendar_event_id: string; calendar_id: string } | null = null
+  if (calendarId) {
+    try {
+      if (lead.calendar_event_id) {
+        await moveCalendarEvent(calendarId, lead.calendar_event_id, newStart.toISOString())
+      } else {
+        const { eventId } = await createAppointmentEvent(calendarId, {
+          title:           `Estimate: ${lead.full_name}`,
+          description:     [lead.phone ? `Phone: ${lead.phone}` : null, `Company: ${BRANDS[brand].name}`, "Rescheduled by Sofia (phone)"].filter(Boolean).join("\n"),
+          location:        lead.address,
+          startISO:        newStart.toISOString(),
+          durationMinutes: 120,
+        })
+        link = { calendar_event_id: eventId, calendar_id: calendarId }
+      }
+    } catch (err) {
       console.error("[appointments] calendar move failed:", err)
       return { ok: false as const, message: "Couldn't move it on the calendar. Tell them David will text to confirm the new time." }
     }
@@ -192,7 +207,7 @@ export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLea
     confirmed_at: new Date().toISOString(), confirmed_via: "rescheduled by phone",
   }, { onConflict: "meta_lead_id,scheduled_at" })
   await addLeadNote(service, lead, `Rescheduled by phone from ${speakDateTime(lead.scheduled_at!)} to ${speakSlot(newDate, newTime)}`,
-    { scheduled_at: newStart.toISOString() })
+    { scheduled_at: newStart.toISOString(), ...link })
 
   const when = speakSlot(newDate, newTime, lang)
   const company = BRANDS[brand]
