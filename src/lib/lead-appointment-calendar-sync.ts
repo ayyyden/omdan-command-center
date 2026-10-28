@@ -38,7 +38,7 @@ export async function syncLeadAppointmentCalendarEvent(appointmentId: string): P
 
   let startISO: string
   try {
-    startISO = fromZonedTime(`${appt.scheduled_date}T${appt.start_time ?? "09:00"}:00`, "America/Los_Angeles").toISOString()
+    startISO = fromZonedTime(`${appt.scheduled_date}T${String(appt.start_time ?? "09:00").slice(0, 5)}:00`, "America/Los_Angeles").toISOString()
   } catch {
     return { ok: false, error: "Invalid scheduled_date/start_time" }
   }
