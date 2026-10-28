@@ -258,13 +258,11 @@ export async function startConfirmationCall(lead: ScheduledLead, row: Confirmati
   if (!key || !from || !agent || !lead.phone) return { ok: false as const, error: "Retell outbound not configured" }
   const brand = leadBrand(lead)
   const lang = leadLanguage(lead)
-  const res = await fetch("https://api.retellai.com/v2/create-phone-call", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const headers = { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }
+  const body = (overrideAgent: boolean) => JSON.stringify({
       from_number:      from,
-      to_number:        lead.phone.replace(/[^\d+]/g, "").replace(/^(\d{10})$/, "+1$1").replace(/^1(\d{10})$/, "+1$1"),
-      override_agent_id: agent,
+      to_number:        lead.phone!.replace(/[^\d+]/g, "").replace(/^(\d{10})$/, "+1$1").replace(/^1(\d{10})$/, "+1$1"),
+      ...(overrideAgent ? { override_agent_id: agent } : {}),
       // The agent listens in English; customers who booked in Spanish get a Spanish-listening call.
       ...(lang === "es" ? { agent_override: { agent: { language: "es-ES" } } } : {}),
       metadata:         { kind: "confirmation", stage: kind, confirmation_id: row.id, meta_lead_id: lead.id },
@@ -282,12 +280,26 @@ export async function startConfirmationCall(lead: ScheduledLead, row: Confirmati
         call_kind:           kind,
         language:            lang,
       },
-    }),
-  })
+    })
+  const create = (overrideAgent: boolean) =>
+    fetch("https://api.retellai.com/v2/create-phone-call", { method: "POST", headers, body: body(overrideAgent) })
+  let res = await create(true)
+  // "Not Found" means Retell doesn't know the agent or the from number. The number's
+  // own outbound agent is the confirmation agent, so retry without the override.
+  if (res.status === 404) res = await create(false)
   const data = await res.json().catch(() => ({})) as { call_id?: string; message?: string }
   if (!res.ok || !data.call_id) {
     console.error("[appointments] create call failed:", res.status, JSON.stringify(data).slice(0, 300))
-    return { ok: false as const, error: data.message ?? `Retell ${res.status}` }
+    let error = data.message ?? `Retell ${res.status}`
+    if (res.status === 404) {
+      // Say which setting Retell doesn't recognise, so it can be fixed in Vercel.
+      const [a, n] = await Promise.all([
+        fetch(`https://api.retellai.com/get-agent/${agent}`, { headers }),
+        fetch(`https://api.retellai.com/get-phone-number/${encodeURIComponent(from)}`, { headers }),
+      ])
+      error += ` (RETELL_CONFIRM_AGENT_ID ${agent}: ${a.ok ? "ok" : a.status}; RETELL_FROM_NUMBER ${from}: ${n.ok ? "ok" : n.status})`
+    }
+    return { ok: false as const, error }
   }
   return { ok: true as const, call_id: data.call_id }
 }
