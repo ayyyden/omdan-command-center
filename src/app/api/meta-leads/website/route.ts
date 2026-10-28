@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/service"
 import { attributeMetaLead, cleanUtm } from "@/lib/meta-attribution"
+import { bookingConfirmationText, sendBookingConfirmation } from "@/lib/booking-texts"
+import { speakDateTime } from "@/lib/retell"
 
 // POST /api/meta-leads/website
 // Called by the desertgreenbuilders.com booking backend (Google Apps Script)
@@ -100,5 +102,17 @@ export async function POST(req: NextRequest) {
 
   const attribution = await attributeMetaLead(service, data.id, { utm: cleanUtm(body) }).catch(() => null)
 
-  return NextResponse.json({ ok: true, lead: data, attribution: attribution?.attribution ?? null }, { status: 201 })
+  // "You're booked" text from the company's own Quo number, so the customer knows
+  // the number when we call or text later. Phone bookings already got one from Sofia.
+  let text: { ok: boolean; error?: string } = { ok: false, error: "skipped" }
+  if (body.source !== "phone" && body.phone) {
+    const brand = /^Omdan Development:/.test(body.interests ?? "") ? "omdan" : "desert_green"
+    const lang = /spanish/i.test(body.language ?? "") ? "es" : "en"
+    text = await sendBookingConfirmation(body.phone, brand, bookingConfirmationText({
+      brand, fullName: full_name, when: speakDateTime(when.toISOString(), lang), address: body.address, lang,
+    }))
+    if (!text.ok) console.error("[meta-leads/website] confirmation text failed:", text.error)
+  }
+
+  return NextResponse.json({ ok: true, lead: data, attribution: attribution?.attribution ?? null, text: text.ok ? "sent" : text.error }, { status: 201 })
 }

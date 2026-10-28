@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { Topbar } from "@/components/shared/topbar"
 import { CustomerForm } from "@/components/customers/customer-form"
+import { BookLeadForm } from "@/components/customers/book-lead-form"
 
 interface PageProps {
   searchParams: Promise<{
@@ -12,6 +13,7 @@ interface PageProps {
     address?:         string
     notes?:           string
     return_to?:       string
+    plain?:           string
   }>
 }
 
@@ -45,6 +47,19 @@ export default async function NewCustomerPage({ searchParams }: PageProps) {
         lead_source: "propstream",
       }
     : undefined
+
+  // Default: book the estimate (same questions as the website). PropStream
+  // hand-offs and "without an appointment" use the plain lead form.
+  if (!prefill && !params.plain) {
+    return (
+      <div>
+        <Topbar title="Add New Lead" subtitle="Books the free estimate, adds it to Google Calendar and texts the customer" />
+        <div className="p-4 sm:p-6 max-w-2xl">
+          <BookLeadForm pms={pms ?? []} />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
