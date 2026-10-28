@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { verifyRetellSecret, phoneDigits, speakDateTime } from "@/lib/retell"
 import { createServiceClient } from "@/lib/supabase/service"
+import { handleFollowupReply } from "@/lib/followups"
 import {
   LEAD_COLUMNS, getConfirmation, markConfirmed, startConfirmationCall, notifyOwner, ptParts,
   leadLanguage, leadBrand, BRANDS, textCustomer, type ScheduledLead,
@@ -24,6 +25,10 @@ export async function POST(req: NextRequest) {
   const msg = body.data?.object
   if (body.type !== "message.received" || !msg?.from || msg.direction === "outgoing") return NextResponse.json({ ok: true, skipped: true })
   const text = String(msg.text ?? msg.body ?? "")
+  // Getting follow-up texts? Any reply stops them and goes to the team.
+  if (await handleFollowupReply(createServiceClient(), msg.from, text).catch(() => false)) {
+    return NextResponse.json({ ok: true, action: "follow-up reply sent to the team" })
+  }
   const yes = YES.test(text), change = !yes && CHANGE.test(text)
   if (!yes && !change) return NextResponse.json({ ok: true, skipped: true })
 

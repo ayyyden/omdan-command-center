@@ -6,7 +6,7 @@ import { buildHtmlEmail, smtpConfigured } from "@/lib/email"
 import { generateEstimateScope } from "@/lib/scope-generator"
 import { generateEstimatePDFBuffer } from "@/lib/pdf/generate-estimate-pdf"
 import { generateInvoicePDFBuffer } from "@/lib/pdf/generate-invoice-pdf"
-import { notifyLia } from "@/lib/lia-notifications"
+import { notifyLia, notifyLiaAction } from "@/lib/lia-notifications"
 import { normalizePaymentLabel } from "@/lib/lia-text-normalizer"
 import { deriveJobTitle } from "@/lib/job-title"
 import { createAppointmentEvent, createCalendarEvent } from "@/lib/google-calendar"
@@ -18,6 +18,7 @@ import { syncLeadAppointmentCalendarEvent } from "@/lib/lead-appointment-calenda
 import { getTodayLA } from "@/lib/utils"
 import type { BankReviewPayload } from "@/lib/bank-review"
 import { recordCallAttempt } from "@/lib/call-attempts"
+import { applyLeadOutcomes, type LeadOutcomeInput } from "@/lib/lead-checkins"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -2372,6 +2373,24 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       unresolved,
       error_detail:    errors,
     })
+  }
+
+  // ─── log_lead_outcomes ───────────────────────────────────────────────────
+  // How the day's estimates went (8 PM check-in): reschedule, follow-up texts,
+  // close, or sale → approved estimate + job. One approval for all of them.
+
+  if (approval.action_type === "log_lead_outcomes") {
+    const outcomes = (payload.outcomes ?? []) as LeadOutcomeInput[]
+    if (!Array.isArray(outcomes) || !outcomes.length) {
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: "No outcomes to log", updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: "No outcomes to log" }, { status: 400 })
+    }
+    const results = await applyLeadOutcomes(supabase, ownerUserId, outcomes)
+    await notifyLiaAction({ text: `✅ Logged:\n${results.map((r) => `• ${r}`).join("\n")}` })
+    await supabase.from("assistant_approvals")
+      .update({ status: "executed", executed_at: now, result: { results }, updated_at: now }).eq("id", id)
+    return NextResponse.json({ action_type: "log_lead_outcomes", success: true, results, message: results.join("\n") })
   }
 
   return NextResponse.json({ error: `Unknown action_type: ${approval.action_type}` }, { status: 400 })

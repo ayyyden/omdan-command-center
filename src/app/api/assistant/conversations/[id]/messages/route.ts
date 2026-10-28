@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service"
 import { buildCrmContext, callLiaBrain } from "@/lib/lia-brain"
 import { isRawPartnerLead, parsePartnerLead } from "@/lib/partner-lead-parser"
 import { getTodayLA } from "@/lib/utils"
+import { pendingCheckinsContext } from "@/lib/lead-checkins"
 
 interface RouteCtx { params: Promise<{ id: string }> }
 
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest, { params }: RouteCtx) {
   ])
 
   const today      = getTodayLA()  // LA-local, not server UTC
-  const crmContext = buildCrmContext(customers, jobs, appointments)
+  const crmContext = buildCrmContext(customers, jobs, appointments) + await pendingCheckinsContext(service)
 
   // ── Raw partner lead detection (bypasses Claude entirely) ─────────────────
   // Prevents prior conversation history from causing Claude to misclassify

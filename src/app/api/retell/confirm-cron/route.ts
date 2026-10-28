@@ -6,6 +6,8 @@ import {
 } from "@/lib/appointments"
 import { calendarAppointments } from "@/lib/calendar-appointments"
 import type { RetellCall } from "@/lib/retell"
+import { sendDailyCheckin } from "@/lib/lead-checkins"
+import { runFollowups } from "@/lib/followups"
 
 // POST /api/retell/confirm-cron
 // Runs every 5 minutes (booking backend Apps Script trigger runConfirmations).
@@ -21,6 +23,8 @@ import type { RetellCall } from "@/lib/retell"
 //
 // Auth: x-website-secret = WEBSITE_LEADS_SECRET (the booking backend's key).
 // ?dry=1 reports what it would do without calling anyone.
+// Same 5-minute tick also sends Lia's 8 PM "How did today go?" check-in and the
+// follow-up texts that are due.
 
 const MIN = 60_000
 
@@ -52,6 +56,12 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: call.ok, call })
   }
+  // Evening check-in and follow-up texts ride the same tick; neither blocks the calls.
+  const extras = dry ? null : await Promise.all([
+    sendDailyCheckin(service, now).catch((err) => ({ sent: false, reason: String(err) })),
+    runFollowups(service, now).catch((err) => ({ sent: 0, error: String(err) })),
+  ])
+
   // Who to call comes from the Google Calendar (see calendar-appointments.ts).
   // Syncs two weeks ahead so Sofia also recognises these customers when they call in;
   // confirmation calls only look at the next 36 hours.
@@ -138,7 +148,7 @@ export async function POST(req: NextRequest) {
     entry.action = "waiting"
   }
 
-  return NextResponse.json({ ok: true, now: now.toISOString(), callHours, dry, appointments: report, skipped: calendar.skipped })
+  return NextResponse.json({ ok: true, now: now.toISOString(), callHours, dry, appointments: report, skipped: calendar.skipped, checkin: extras?.[0], followups: extras?.[1] })
 }
 
 /** If a call ended over 10 minutes ago and we never got its result, fetch it from Retell. */

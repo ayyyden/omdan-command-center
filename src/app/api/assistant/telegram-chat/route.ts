@@ -3,6 +3,7 @@ import { verifyAssistantSecret } from "@/lib/assistant-auth"
 import { createServiceClient } from "@/lib/supabase/service"
 import { buildCrmContext, callLiaBrain } from "@/lib/lia-brain"
 import { getTodayLA } from "@/lib/utils"
+import { pendingCheckinsContext } from "@/lib/lead-checkins"
 
 // POST /api/assistant/telegram-chat
 // Called by the lia-bridge for conversational AI fallback in Telegram.
@@ -147,7 +148,7 @@ export async function POST(req: Request) {
   ])
 
   const today      = getTodayLA()  // LA-local, not server UTC
-  const crmContext = buildCrmContext(customers, jobs, appointments)
+  const crmContext = buildCrmContext(customers, jobs, appointments) + await pendingCheckinsContext(service)
   const parsed     = await callLiaBrain(history ?? [], crmContext, today)
 
   // ── Create approval if action proposed ─────────────────────────────────────

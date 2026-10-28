@@ -87,7 +87,7 @@ export function ptInstant(date: string, time: string): Date {
   return fromZonedTime(`${date}T${time}:00`, TZ)
 }
 
-async function addLeadNote(service: SupabaseClient, lead: ScheduledLead, line: string, extra: Record<string, unknown> = {}) {
+export async function addLeadNote(service: SupabaseClient, lead: ScheduledLead, line: string, extra: Record<string, unknown> = {}) {
   const stamp = new Date().toLocaleString("en-US", { timeZone: TZ })
   await service.from("meta_leads")
     .update({ ...extra, notes: [lead.notes, `${line} (${stamp})`].filter(Boolean).join("\n") })
@@ -167,11 +167,13 @@ export async function openSlots(brand: Brand, zip: string) {
   return await res.json() as { ok?: boolean; inArea?: boolean; days?: { date: string; slots: { time: string }[] }[] }
 }
 
-export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLead, newDate: string, newTime: string, lang: Lang) {
+/** by "owner": David set the new time himself (Lia's evening check-in), so it
+ *  skips the open-times check and doesn't text him about his own change. */
+export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLead, newDate: string, newTime: string, lang: Lang, by: "phone" | "owner" = "phone") {
   const brand = leadBrand(lead)
   const zip = zipOf(lead.address)
-  const avail = await openSlots(brand, zip).catch(() => null)
-  const free = avail?.days?.find((d) => d.date === newDate)?.slots.some((s) => s.time === newTime)
+  const avail = by === "owner" ? null : await openSlots(brand, zip).catch(() => null)
+  const free = by === "owner" || avail?.days?.find((d) => d.date === newDate)?.slots.some((s) => s.time === newTime)
   if (!free) return { ok: false as const, message: "That time isn't open anymore. Check availability again and offer the next two times." }
 
   const old = ptParts(lead.scheduled_at!)
@@ -187,7 +189,7 @@ export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLea
       } else {
         const { eventId } = await createAppointmentEvent(calendarId, {
           title:           `Estimate: ${lead.full_name}`,
-          description:     [lead.phone ? `Phone: ${lead.phone}` : null, `Company: ${BRANDS[brand].name}`, "Rescheduled by Sofia (phone)"].filter(Boolean).join("\n"),
+          description:     [lead.phone ? `Phone: ${lead.phone}` : null, `Company: ${BRANDS[brand].name}`, by === "owner" ? "Rescheduled by David" : "Rescheduled by Sofia (phone)"].filter(Boolean).join("\n"),
           location:        lead.address,
           startISO:        newStart.toISOString(),
           durationMinutes: 120,
@@ -206,9 +208,9 @@ export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLea
   // They just picked the new time on the phone: count it as confirmed.
   await service.from("appointment_confirmations").upsert({
     meta_lead_id: lead.id, scheduled_at: newStart.toISOString(), brand, status: "confirmed",
-    confirmed_at: new Date().toISOString(), confirmed_via: "rescheduled by phone",
+    confirmed_at: new Date().toISOString(), confirmed_via: by === "owner" ? "rescheduled by David" : "rescheduled by phone",
   }, { onConflict: "meta_lead_id,scheduled_at" })
-  await addLeadNote(service, lead, `Rescheduled by phone from ${speakDateTime(lead.scheduled_at!)} to ${speakSlot(newDate, newTime)}`,
+  await addLeadNote(service, lead, `Rescheduled by ${by === "owner" ? "David" : "phone"} from ${speakDateTime(lead.scheduled_at!)} to ${speakSlot(newDate, newTime)}`,
     { scheduled_at: newStart.toISOString(), ...link })
 
   const when = speakSlot(newDate, newTime, lang)
@@ -218,7 +220,7 @@ export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLea
       ? `${company.name}: Listo, ${firstName(lead.full_name)}. Su estimado gratis quedó para el ${when}${lead.address ? ` en ${lead.address}` : ""}. ¡Gracias!`
       : `${company.name}: All set, ${firstName(lead.full_name)}! Your free estimate is now ${when}${lead.address ? ` at ${lead.address}` : ""}. Thank you!`)
   }
-  await notifyOwner(`Sofia RESCHEDULED (${company.name}): ${lead.full_name} ${lead.phone ?? ""}\nFrom ${speakDateTime(lead.scheduled_at!)} to ${speakSlot(newDate, newTime)}`)
+  if (by === "phone") await notifyOwner(`Sofia RESCHEDULED (${company.name}): ${lead.full_name} ${lead.phone ?? ""}\nFrom ${speakDateTime(lead.scheduled_at!)} to ${speakSlot(newDate, newTime)}`)
   return { ok: true as const, message: `Moved to ${sayWhen(newDate, newTime, lang)}. A text with the new time was sent.` }
 }
 
