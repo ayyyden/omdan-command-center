@@ -8,6 +8,7 @@ import { calendarAppointments } from "@/lib/calendar-appointments"
 import type { RetellCall } from "@/lib/retell"
 import { sendDailyCheckin } from "@/lib/lead-checkins"
 import { runFollowups } from "@/lib/followups"
+import { retryMissingAppointmentEvents } from "@/lib/lead-appointment-calendar-sync"
 
 // POST /api/retell/confirm-cron
 // Runs every 5 minutes (booking backend Apps Script trigger runConfirmations).
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
   const extras = dry ? null : await Promise.all([
     sendDailyCheckin(service, now).catch((err) => ({ sent: false, reason: String(err) })),
     runFollowups(service, now).catch((err) => ({ sent: 0, error: String(err) })),
+    retryMissingAppointmentEvents().catch((err) => [{ id: "-", ok: false, error: String(err) }]),
   ])
 
   // Who to call comes from the Google Calendar (see calendar-appointments.ts).
@@ -148,7 +150,7 @@ export async function POST(req: NextRequest) {
     entry.action = "waiting"
   }
 
-  return NextResponse.json({ ok: true, now: now.toISOString(), callHours, dry, appointments: report, skipped: calendar.skipped, checkin: extras?.[0], followups: extras?.[1] })
+  return NextResponse.json({ ok: true, now: now.toISOString(), callHours, dry, appointments: report, skipped: calendar.skipped, checkin: extras?.[0], followups: extras?.[1], calendarRetries: extras?.[2] })
 }
 
 /** If a call ended over 10 minutes ago and we never got its result, fetch it from Retell. */

@@ -14,9 +14,9 @@ export type Brand = "omdan" | "desert_green"
 export type Lang = "en" | "es"
 
 // quoFrom: the company's own Quo number, so customers get texts from the number they know
-// (undefined = QUO_FROM_NUMBER, Omdan's).
+// Both are set explicitly: QUO_FROM_NUMBER (the default sender) is the Desert Green line.
 export const BRANDS: Record<Brand, { name: string; phone: string; quoFrom: string | undefined }> = {
-  omdan:        { name: "Omdan Development",     phone: "(951) 292-0703", quoFrom: undefined },
+  omdan:        { name: "Omdan Development",     phone: "(951) 292-0703", quoFrom: "+19512920703" },
   desert_green: { name: "Desert Green Builders", phone: "(760) 548-2781", quoFrom: "+17605482781" },
 }
 

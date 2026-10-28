@@ -71,3 +71,21 @@ export async function syncLeadAppointmentCalendarEvent(appointmentId: string): P
     return { ok: false, error: message }
   }
 }
+
+/** Upcoming appointments whose calendar event was never created (the calendar
+ *  was unreachable or read-only when they were booked): try again. Called by
+ *  the 5-minute cron, so they land on the calendar, and Sofia sees them, once
+ *  access works. */
+export async function retryMissingAppointmentEvents(limit = 5) {
+  const service = createServiceClient()
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })
+  const { data } = await service.from("lead_appointments").select("id")
+    .eq("status", "scheduled").is("calendar_event_id", null).not("customer_id", "is", null)
+    .gte("scheduled_date", today).order("scheduled_date").limit(limit)
+  const results: { id: string; ok: boolean; error?: string }[] = []
+  for (const a of data ?? []) {
+    const r = await syncLeadAppointmentCalendarEvent(a.id).catch((err) => ({ ok: false as const, error: String(err) }))
+    results.push({ id: a.id, ok: r.ok, ...(r.ok ? {} : { error: r.error }) })
+  }
+  return results
+}

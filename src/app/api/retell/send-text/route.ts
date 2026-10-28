@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { verifyRetellSecret, readToolCall, toolReply, customerNumber } from "@/lib/retell"
 import { sendQuoSms } from "@/lib/quo-client"
+import { BRANDS } from "@/lib/appointments"
 
 const SITE = "https://omdandevelopment.com"
 
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
     lang === "es" ? "Llame o escriba: (951) 292-0703" : "Call or text: (951) 292-0703",
   ].filter(Boolean)
 
-  const sms = await sendQuoSms(to, lines.join("\n"))
+  const sms = await sendQuoSms(to, lines.join("\n"), BRANDS.omdan.quoFrom)
   return toolReply(sms.ok
     ? { ok: true, message: "Text sent. Let them know it should arrive in a moment." }
     : { ok: false, message: "The text didn't go through. Read the website out loud: omdandevelopment.com." })

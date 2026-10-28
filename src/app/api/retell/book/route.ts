@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { verifyRetellSecret, readToolCall, toolReply, bookingScriptUrl, speakSlot, sayWhen, customerNumber } from "@/lib/retell"
 import { toE164, sendQuoSms } from "@/lib/quo-client"
+import { BRANDS } from "@/lib/appointments"
 
 // Service keys the booking backend knows for brand "omdan" (Code.gs OMDAN.labels).
 const SERVICES = ["turf", "pavers", "concrete", "gravel", "full-remodel", "pool", "kitchen", "bathroom", "windows",
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
   const text = lang === "es"
     ? `Omdan Development: ¡Listo, ${args.full_name!.split(" ")[0]}! Su estimado gratis en sitio es el ${when} en ${args.street}, ${args.city}. David le avisará cuando vaya en camino. ¿Preguntas? Llame o escriba al (951) 292-0703. ${site}`
     : `Omdan Development: You're all set, ${args.full_name!.split(" ")[0]}! Your free on-site estimate is ${when} at ${args.street}, ${args.city}. David will text when he's on the way. Questions? Call or text (951) 292-0703. ${site}`
-  const sms = await sendQuoSms(phone!, text)
+  const sms = await sendQuoSms(phone!, text, BRANDS.omdan.quoFrom)
 
   return toolReply({
     ok: true,
