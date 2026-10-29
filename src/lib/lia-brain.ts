@@ -103,7 +103,7 @@ RULES:
 - Do not invent brands, measurements, warranties, or anything the user did not specify.
 - Before proposing create_lead_appointment, check LEAD APPOINTMENTS in CRM CONTEXT — if the same customer already has one within 7 days of the requested date, mention that in your message, but still propose the action so the user can decide.
 - "Add/schedule X for [day/time]" does NOT require X to already exist as a formal customer — that's normal, most people asked about this way are brand new. Never respond with anything like "no customer found" for a person who just isn't in the system yet. Instead: (1) query_crm(meta_leads, full_name search for their name) — if they're already on a Meta Lead call list, use update_meta_lead_outcome (answered_scheduled) instead, which correctly moves them off the call list too; (2) if not found there or anywhere else, just use create_lead_appointment — it's built for exactly this, a brand new person with no existing record.
-- EVENING CHECK-IN: at 8 PM the team gets a numbered "How did today go?" list of that day's estimates. When someone answers (numbers or names, any wording: "1 didn't answer, 2 sale 27632, 3 reschedule next tuesday 2-3pm"), map every lead to an outcome and propose ONE log_lead_outcomes with all of them, using the ids from EVENING CHECK-INS. If an answer is unclear for one lead, still include the clear ones and ask about the unclear one in your message. Don't ask them to confirm what they already said.
+- EVENING CHECK-IN: at 8 PM the team gets a numbered "How did today go?" list of that day's estimates. When someone answers (numbers or names, any wording: "1 didn't answer, 2 sale 27632, 3 reschedule next tuesday 2-3pm"), map every lead to an outcome and propose ONE log_lead_outcomes with all of them, using the ids from EVENING CHECK-INS. Never leave a lead out: "needs to be rescheduled" with no new time = needs_reschedule; a test or something that wasn't real = other with a note. Your message text is one short line (e.g. "Here's how I'll log today:"), don't repeat the summary. Don't ask them to confirm what they already said.
 - If the user asks to cancel or change a pending approval, tell them to reject the card, then re-describe what they want.
 - If you're just greeting, chatting, or answering a question with no data-changing intent, reply naturally with no tool call at all.
 
@@ -504,7 +504,7 @@ Filters: enum-like fields (status, category, type, ...) match exactly; free-text
   },
   {
     name: "log_lead_outcomes",
-    description: "Log how one or more estimates went — the answer to the 8 PM \"How did today go?\" check-in (see EVENING CHECK-INS in CRM CONTEXT), or any time someone tells you how an estimate went. Put EVERY lead they mention in one call (one approval). Outcomes: no_show = client didn't answer / wasn't there (starts follow-up texts to rebook); rescheduled = moved to a new day/time (needs new_date + new_time; updates Google Calendar and texts the customer); no_sale = no sale, no follow-up (closes the lead); no_sale_follow_up = no sale yet but follow up (starts the casual follow-up texts: day 2, 5, 10, 21, then monthly); sale = sold (amount in dollars; creates an approved estimate for that amount and a job); other = anything else (saved as a note).",
+    description: "Log how one or more estimates went — the answer to the 8 PM \"How did today go?\" check-in (see EVENING CHECK-INS in CRM CONTEXT), or any time someone tells you how an estimate went. Put EVERY lead they mention in one call (one approval). Outcomes: no_show = client didn't answer / wasn't there (starts follow-up texts to rebook); rescheduled = moved to a new day/time (needs new_date + new_time; updates Google Calendar and texts the customer); needs_reschedule = has to be moved but no new time given (texts the client asking for a day and time; their reply comes back to the team); no_sale = no sale, no follow-up (closes the lead); no_sale_follow_up = no sale yet but follow up (starts the casual follow-up texts: day 2, 5, 10, 21, then monthly); sale = sold (amount in dollars; creates an approved estimate for that amount and a job); other = anything else (saved as a note).",
     input_schema: {
       type: "object",
       properties: {
@@ -517,7 +517,7 @@ Filters: enum-like fields (status, category, type, ...) match exactly; free-text
               checkin_id:   { type: ["string", "null"], description: "From EVENING CHECK-INS, when this answers one." },
               meta_lead_id: { type: "string", description: "From EVENING CHECK-INS or query_crm(meta_leads)." },
               full_name:    { type: "string" },
-              outcome:      { type: "string", enum: ["no_show", "rescheduled", "no_sale", "no_sale_follow_up", "sale", "other"] },
+              outcome:      { type: "string", enum: ["no_show", "rescheduled", "needs_reschedule", "no_sale", "no_sale_follow_up", "sale", "other"] },
               new_date:     { type: ["string", "null"], description: "YYYY-MM-DD, for rescheduled. Resolve \"next Tuesday\" from TODAY." },
               new_time:     { type: ["string", "null"], description: "HH:MM 24h start time, for rescheduled (\"between 2-3 pm\" = 14:00)." },
               amount:       { type: ["number", "null"], description: "Sale amount in dollars, for sale (\"sale 27632\" = 27632)." },

@@ -76,6 +76,7 @@ export async function startFollowup(service: SupabaseClient, input: {
   language?:     "en" | "es"
   job?:          string | null
   reason?:       "no_sale" | "no_show"
+  step?:         number   // start later in the schedule (e.g. 1 when the first text was already sent)
 }) {
   const phone = toE164(input.phone)
   if (!phone) return { ok: false as const, error: "no valid phone number" }
@@ -90,8 +91,8 @@ export async function startFollowup(service: SupabaseClient, input: {
     language:     input.language ?? "en",
     job:          input.job ?? null,
     reason:       input.reason ?? "no_sale",
-    step:         0,
-    next_at:      dueAt(now, 0),
+    step:         input.step ?? 0,
+    next_at:      dueAt(now, input.step ?? 0),
   }).select("id, next_at").single()
   if (error) return { ok: false as const, error: error.message }
   return { ok: true as const, id: data.id as string, first_text_at: data.next_at as string }

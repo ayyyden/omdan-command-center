@@ -12,6 +12,15 @@ import { notifyLiaAction } from "@/lib/lia-notifications"
 import { phoneDigits, speakSlot } from "@/lib/retell"
 import { startFollowup, stopFollowups } from "@/lib/followups"
 import { deriveJobTitle } from "@/lib/job-title"
+import { sendQuoSms } from "@/lib/quo-client"
+import { firstName, type Brand } from "@/lib/appointments"
+
+function rescheduleAskText(fullName: string, brand: Brand, lang: "en" | "es") {
+  const name = firstName(fullName)
+  return lang === "es"
+    ? `Hola ${name}, soy David de ${BRANDS[brand].name}. Necesitamos cambiar la hora de su estimado. ¿Qué día y hora le quedan bien?`
+    : `Hi ${name}, it's David with ${BRANDS[brand].name}. We need to move your estimate to a new time. What day and time work best for you?`
+}
 
 const CHECKIN_TIME = "20:00"   // PT
 
@@ -79,7 +88,7 @@ export async function pendingCheckinsContext(service: SupabaseClient): Promise<s
   return lines.length ? `\n\nEVENING CHECK-INS WAITING FOR DAVID'S ANSWER (numbers match the 8 PM "How did today go?" list):\n${lines.join("\n")}` : ""
 }
 
-export type LeadOutcome = "no_show" | "rescheduled" | "no_sale" | "no_sale_follow_up" | "sale" | "other"
+export type LeadOutcome = "no_show" | "rescheduled" | "needs_reschedule" | "no_sale" | "no_sale_follow_up" | "sale" | "other"
 
 export interface LeadOutcomeInput {
   checkin_id?:   string | null
@@ -135,8 +144,18 @@ export async function applyLeadOutcomes(service: SupabaseClient, ownerUserId: st
           results.push(`${name}: no show, ${f?.ok ? "follow-up texts started (first one in 2 days)" : `follow-up not started: ${f?.error ?? "no phone"}`}`)
           break
         }
+        case "needs_reschedule":
         case "rescheduled": {
-          if (!o.new_date || !o.new_time) { results.push(`${name}: need the new day and time to reschedule`); break }
+          if (o.outcome === "needs_reschedule" || !o.new_date || !o.new_time) {
+            // No new time yet: text the client to pick one; their reply goes to the team.
+            if (!lead.phone) { results.push(`${name}: no phone, call them to find a new time`); break }
+            await setCustomer({ status: "Follow-Up Needed" })
+            const sms = await sendQuoSms(lead.phone, rescheduleAskText(name, brand, lang), BRANDS[brand].quoFrom)
+            const f = await startFollowup(service, { meta_lead_id: lead.id, customer_id: customer?.id, full_name: name, phone: lead.phone, brand, language: lang, job: jobOf(lead), reason: "no_show", step: 1 })
+            await addLeadNote(service, lead, `Estimate needs a new time${note ? ` (${note})` : ""}; texted the client to pick one`)
+            results.push(`${name}: ${sms.ok ? "texted them to pick a new time, their reply comes to you" : `text failed (${sms.error ?? "unknown"}), call them`}${f.ok ? "" : ` (follow-up not started: ${f.error})`}`)
+            break
+          }
           const r = await rescheduleLead(service, lead, o.new_date, o.new_time, lang, "owner")
           if (r.ok) {
             await stopFollowups(service, lead.phone ?? "")

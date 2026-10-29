@@ -964,6 +964,26 @@ function formatClaudeActionForTelegram(
     if (p.duration_minutes) lines.push(`⏱ Duration: ${p.duration_minutes} min`)
     if (p.location)         lines.push(`📍 Location: ${p.location}`)
     if (p.notes)            lines.push(`📝 Notes: ${p.notes}`)
+  } else if (action.type === "log_lead_outcomes") {
+    const label: Record<string, string> = {
+      no_show:           "didn't show → follow-up texts to rebook",
+      rescheduled:       "rescheduled",
+      needs_reschedule:  "needs a new time → text asking them to pick one",
+      no_sale:           "no sale → closed, no follow-up",
+      no_sale_follow_up: "no sale → follow-up texts (day 2, 5, 10, 21, monthly)",
+      sale:              "SOLD → estimate + job created",
+      other:             "note only",
+    }
+    lines.push("📋 How today went")
+    lines.push("")
+    const outcomes = Array.isArray(p.outcomes) ? p.outcomes as Record<string, unknown>[] : []
+    outcomes.forEach((o, i) => {
+      let what = label[String(o.outcome)] ?? String(o.outcome)
+      if (o.outcome === "rescheduled" && o.new_date) what = `rescheduled to ${o.new_date}${o.new_time ? ` ${o.new_time}` : ""} → calendar + text`
+      if (o.outcome === "sale" && o.amount) what = `SOLD ${fmt(o.amount)} → estimate + job created`
+      lines.push(`${i + 1}. ${o.full_name ?? "?"}: ${what}`)
+      if (o.note) lines.push(`    📝 ${String(o.note).slice(0, 120)}`)
+    })
   } else {
     lines.push(`⚡ ${action.summary}`)
   }
@@ -2101,7 +2121,9 @@ app.post("/webhook/telegram", async (req: Request, res: Response) => {
         summary: aiActionSummary,
         payload: aiActionPayload,
       })
-      await sendTelegramWithButtons(chatId, `${aiText}\n\n${previewText}`, [[
+      // Skip Lia's text when it only repeats the card's summary.
+      const intro = aiText.trim() && aiText.trim() !== aiActionSummary.trim() ? `${aiText}\n\n` : ""
+      await sendTelegramWithButtons(chatId, `${intro}${previewText}`, [[
         { text: "✅ Approve", callback_data: `approve:${aiApprovalId}` },
         { text: "❌ Reject",  callback_data: `reject:${aiApprovalId}` },
       ]])
