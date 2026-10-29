@@ -188,9 +188,12 @@ export function parseIntent(text: string): Intent {
     return { type: "add_lead_estimate", rawText: trimmed }
   }
 
-  // Health / connectivity check
-  if (/connected|health|alive|online|test/.test(lower)) return { type: "health_check" }
-  if (/are you|lia.*connect/.test(lower))               return { type: "health_check" }
+  // Health / connectivity check: only a short, standalone ping ("you online?",
+  // "test"). A longer message that merely contains one of these words, like
+  // an 8 PM check-in answer "2. It was a test, didn't happen", goes to the brain.
+  const words = lower.split(/\s+/).filter(Boolean).length
+  if (words <= 5 && /\b(connected|health|alive|online|test|ping)\b/.test(lower)) return { type: "health_check" }
+  if (words <= 5 && /^(lia[,\s]*)?(are you (there|up|on|working|connected)|you there)\b/.test(lower)) return { type: "health_check" }
 
   // Daily attention / summary — must be a clear, standalone request for the
   // summary itself, not just a message that happens to contain a word like
