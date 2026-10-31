@@ -8,7 +8,8 @@ interface RouteCtx { params: Promise<{ id: string }> }
 const SELECT_FIELDS = `
   id, full_name, email, phone, city, address, raw_paste,
   list, last_outcome, scheduled_at, calendar_event_id, calendar_id,
-  missed_call_count, notes, created_at, updated_at
+  missed_call_count, notes, created_at, updated_at,
+  attribution, utm_source, fbclid, meta_leadgen_id
 `
 
 const MISSED_CALL_ARCHIVE_THRESHOLD = 10

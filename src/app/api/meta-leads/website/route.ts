@@ -5,6 +5,7 @@ import { bookingConfirmationText, sendBookingConfirmation } from "@/lib/booking-
 import { speakDateTime } from "@/lib/retell"
 import { notifyLiaAction } from "@/lib/lia-notifications"
 import { notifyOwner } from "@/lib/appointments"
+import { leadSource } from "@/lib/lead-source"
 
 // POST /api/meta-leads/website
 // Called by the desertgreenbuilders.com booking backend (Google Apps Script)
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
     utm_content?:       string | null
     utm_term?:          string | null
     fbclid?:            string | null
+    gclid?:             string | null   // Google Ads click id
   }
 
   const full_name = body.full_name?.trim()
@@ -78,6 +80,9 @@ export async function POST(req: NextRequest) {
     body.language ? `Language: ${body.language}` : null,
     body.phone_verified && body.source !== "phone" ? "Phone verified by text code" : null,
     body.project_notes ? `Project: ${body.project_notes}` : null,
+    body.gclid || /google/i.test(body.utm_source ?? "")
+      ? `Google Ads click${body.utm_campaign ? `, campaign ${body.utm_campaign}` : ""}${body.utm_term ? `, keyword "${body.utm_term}"` : ""}`
+      : null,
   ].filter(Boolean).join("\n")
 
   const { data, error } = await service
@@ -122,6 +127,7 @@ export async function POST(req: NextRequest) {
     const project = (body.interests ?? "").replace(/^Omdan Development:\s*/, "").trim()
     const alert = [
       `🆕 New ${brandName} estimate booked on the website`,
+      `Source: ${leadSource({ notes, raw_paste: ref, attribution: attribution?.attribution, utm_source: body.utm_source, fbclid: body.fbclid }).label}`,
       `👤 ${full_name}${body.phone ? `  ${body.phone}` : ""}`,
       `📅 ${speakDateTime(when.toISOString(), "en")}`,
       body.address ? `📍 ${body.address}` : null,

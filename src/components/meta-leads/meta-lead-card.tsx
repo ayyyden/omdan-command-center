@@ -10,6 +10,7 @@ import { EditLeadDialog } from "@/components/meta-leads/edit-lead-dialog"
 import { AddAddressDialog } from "@/components/meta-leads/add-address-dialog"
 import { OutcomeMenu } from "@/components/meta-leads/outcome-menu"
 import type { MetaLead } from "@/types"
+import { leadSource } from "@/lib/lead-source"
 
 interface MetaLeadCardProps {
   lead: MetaLead
@@ -77,12 +78,16 @@ export function MetaLeadCard({ lead, onUpdated, onDeleted }: MetaLeadCardProps) 
   }
 
   const when = formatDateTime(lead.scheduled_at)
+  const source = leadSource(lead)
 
   return (
     <div className="rounded-xl border bg-card shadow-sm p-3 space-y-2.5">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-sm text-foreground leading-tight">{lead.full_name}</p>
+          <Badge variant={source.kind === "facebook" || source.kind === "google" ? "default" : "secondary"} className="mt-1 mr-1 text-[10px]">
+            {source.label}
+          </Badge>
           {(isArchived || lead.missed_call_count >= 1) && (
             <Badge variant="warning" className="mt-1 text-[10px]">
               Missed {lead.missed_call_count}x

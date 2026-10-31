@@ -308,6 +308,10 @@ export interface MetaLead {
   notes: string | null
   created_at: string
   updated_at: string
+  attribution?: string | null
+  utm_source?: string | null
+  fbclid?: string | null
+  meta_leadgen_id?: string | null
 }
 
 export interface MetaLeadsGrouped {
