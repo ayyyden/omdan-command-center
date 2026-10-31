@@ -3,6 +3,8 @@ import { createServiceClient } from "@/lib/supabase/service"
 import { attributeMetaLead, cleanUtm } from "@/lib/meta-attribution"
 import { bookingConfirmationText, sendBookingConfirmation } from "@/lib/booking-texts"
 import { speakDateTime } from "@/lib/retell"
+import { notifyLiaAction } from "@/lib/lia-notifications"
+import { notifyOwner } from "@/lib/appointments"
 
 // POST /api/meta-leads/website
 // Called by the desertgreenbuilders.com booking backend (Google Apps Script)
@@ -112,6 +114,25 @@ export async function POST(req: NextRequest) {
       brand, fullName: full_name, when: speakDateTime(when.toISOString(), lang), address: body.address, lang,
     }))
     if (!text.ok) console.error("[meta-leads/website] confirmation text failed:", text.error)
+
+    // Tell the team right away (Telegram + a text to the owner's cell). The Apps
+    // Script's lead email alone was easy to miss. Phone bookings already get the
+    // after-call summary text.
+    const brandName = brand === "omdan" ? "Omdan Development" : "Desert Green Builders"
+    const project = (body.interests ?? "").replace(/^Omdan Development:\s*/, "").trim()
+    const alert = [
+      `🆕 New ${brandName} estimate booked on the website`,
+      `👤 ${full_name}${body.phone ? `  ${body.phone}` : ""}`,
+      `📅 ${speakDateTime(when.toISOString(), "en")}`,
+      body.address ? `📍 ${body.address}` : null,
+      project ? `🛠 ${project}` : null,
+      body.homeowner ? `🏠 Homeowner: ${body.homeowner}` : null,
+      lang === "es" ? "🗣 Spanish" : null,
+    ].filter(Boolean).join("\n")
+    await Promise.all([
+      notifyLiaAction({ text: alert }).catch(() => false),
+      notifyOwner(alert.replace(/^🆕 /, "").replace(/[📅👤📍🛠🏠🗣] ?/gu, "")).catch(() => {}),
+    ])
   }
 
   return NextResponse.json({ ok: true, lead: data, attribution: attribution?.attribution ?? null, text: text.ok ? "sent" : text.error }, { status: 201 })
