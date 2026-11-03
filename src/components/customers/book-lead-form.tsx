@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils"
 const JOB_TYPES = [
   "Artificial turf", "Pavers", "Concrete", "Gravel / DG / xeriscape", "Full backyard remodel",
   "Pool remodel / resurfacing", "Kitchen remodel", "Bathroom remodel", "Windows", "Roofing",
-  "Insulation", "HVAC", "Gutters", "Plumbing", "Exterior painting", "Cool Life paint",
+  "Insulation", "HVAC", "Gutters", "Plumbing", "Exterior painting", "Cool Life paint", "Mold removal",
 ]
 const OTHER = "__other"
 

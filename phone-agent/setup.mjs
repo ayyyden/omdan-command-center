@@ -100,7 +100,7 @@ function allTools(appUrl, secret, ownerCell) {
         zip:             { type: "string", description: "5-digit ZIP" },
         date:            { type: "string", description: "Exact date value from check_availability, YYYY-MM-DD" },
         time:            { type: "string", description: "Exact time value from check_availability, HH:mm" },
-        services:        { type: "array", items: { type: "string", enum: ["turf", "pavers", "concrete", "gravel", "full-remodel", "pool", "kitchen", "bathroom", "windows", "roofing", "insulation", "hvac", "gutters", "plumbing", "painting", "cool-life-paint"] } },
+        services:        { type: "array", items: { type: "string", enum: ["turf", "pavers", "concrete", "gravel", "full-remodel", "pool", "kitchen", "bathroom", "windows", "roofing", "insulation", "hvac", "gutters", "plumbing", "painting", "cool-life-paint", "mold"] } },
         start:           { type: "string", enum: ["asap", "1-3", "3plus", "planning"], description: "When they want to start" },
         project_summary: { type: "string", description: "One sentence with the useful project details" },
       }, ["full_name", "street", "city", "zip", "date", "time", "services"],
@@ -127,7 +127,7 @@ function allTools(appUrl, secret, ownerCell) {
       "Text the caller links (website, estimate, projects, reviews, license, or a service page) and/or a short note, from Omdan's business number.",
       {
         phone: { type: "string", description: "Number to text if different from caller ID" },
-        links: { type: "array", items: { type: "string", enum: ["website", "estimate", "projects", "reviews", "license", "turf", "pavers", "concrete", "gravel", "pool", "kitchen", "bathroom", "windows", "roofing", "insulation", "hvac", "gutters", "plumbing", "painting", "cool-life-paint"] } },
+        links: { type: "array", items: { type: "string", enum: ["website", "estimate", "projects", "reviews", "license", "turf", "pavers", "concrete", "gravel", "pool", "kitchen", "bathroom", "windows", "roofing", "insulation", "hvac", "gutters", "plumbing", "painting", "cool-life-paint", "mold"] } },
         note:  { type: "string", description: "Optional short note, e.g. 'Text photos of your yard to this number.'" },
       }, []),
     transfer: {

@@ -5,7 +5,7 @@ import { BRANDS } from "@/lib/appointments"
 
 // Service keys the booking backend knows for brand "omdan" (Code.gs OMDAN.labels).
 const SERVICES = ["turf", "pavers", "concrete", "gravel", "full-remodel", "pool", "kitchen", "bathroom", "windows",
-  "roofing", "insulation", "hvac", "gutters", "plumbing", "painting", "cool-life-paint"]
+  "roofing", "insulation", "hvac", "gutters", "plumbing", "painting", "cool-life-paint", "mold"]
 const STARTS = ["asap", "1-3", "3plus", "planning"]
 
 // POST /api/retell/book — Retell tool "book_estimate".

@@ -27,6 +27,7 @@ const LINKS: Record<string, { en: string; es: string; url: string }> = {
   plumbing:  { en: "plumbing",          es: "plomería",                  url: `${SITE}/plumbing/` },
   painting:  { en: "exterior painting", es: "pintura exterior",          url: `${SITE}/exterior-painting/` },
   "cool-life-paint": { en: "Cool Life Paint", es: "Cool Life Paint",     url: `${SITE}/cool-life-paint/` },
+  mold:      { en: "mold removal",      es: "eliminación de moho",       url: `${SITE}/mold-removal/` },
 }
 
 // POST /api/retell/send-text — Retell tool "send_text".
