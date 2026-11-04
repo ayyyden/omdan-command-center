@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server"
 import { requirePermission } from "@/lib/auth-helpers"
+import { createServiceClient } from "@/lib/supabase/service"
+import { upsertLeadCard, todayLabel } from "@/lib/lead-card"
 
 const SELECT_FIELDS = `
   id, full_name, email, phone, city, address, raw_paste,
@@ -65,6 +67,19 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return Response.json({ error: error.message }, { status: 500 })
+
+  // Lead card right away (lead-card.ts)
+  const pasted = (body.raw_paste ?? "").trim()
+  await upsertLeadCard(createServiceClient(), {
+    name:       full_name,
+    phone:      body.phone,
+    email:      body.email,
+    city:       body.city,
+    leadSource: /facebook|instagram|meta|fb\.com/i.test(pasted) ? "facebook" : "other",
+    heading:    `Added on Meta Lead Jobs — ${todayLabel()}`,
+    details:    pasted ? pasted.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 40) : [],
+    metaLeadId: (data as { id?: string } | null)?.id ?? null,
+  }, userId).catch((e) => console.error("[meta-leads] lead card failed:", e))
 
   return Response.json({ lead: data }, { status: 201 })
 }

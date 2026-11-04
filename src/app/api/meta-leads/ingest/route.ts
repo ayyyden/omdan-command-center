@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { verifyAssistantSecret } from "@/lib/assistant-auth"
 import { createServiceClient } from "@/lib/supabase/service"
 import { attributeMetaLead } from "@/lib/meta-attribution"
+import { upsertLeadCard, todayLabel } from "@/lib/lead-card"
 
 // POST /api/meta-leads/ingest
 // Called by the lia-bridge Telegram webhook when the "desertleads" bot posts
@@ -69,5 +70,18 @@ export async function POST(req: NextRequest) {
   // Tie the lead to its campaign / ad set / ad / form (Ad Advisor). Never blocks the lead.
   const attribution = await attributeMetaLead(service, data.id, { leadgenId: ref }).catch(() => null)
 
-  return NextResponse.json({ ok: true, lead: data, attribution: attribution?.attribution ?? null }, { status: 201 })
+  // Lead card right away, with everything from the form (lead-card.ts)
+  const formLines = (body.raw_text ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 40)
+  const card = await upsertLeadCard(service, {
+    name:       full_name,
+    phone:      body.phone,
+    email:      body.email,
+    city:       body.city,
+    leadSource: "facebook",
+    heading:    `Facebook / Instagram instant form — ${todayLabel()}`,
+    details:    formLines.length ? formLines : notesParts,
+    metaLeadId: data.id,
+  }).catch((e) => { console.error("[meta-leads/ingest] lead card failed:", e); return null })
+
+  return NextResponse.json({ ok: true, lead: data, customer_id: card?.customerId ?? null, attribution: attribution?.attribution ?? null }, { status: 201 })
 }
