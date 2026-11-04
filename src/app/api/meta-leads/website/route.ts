@@ -6,6 +6,7 @@ import { speakDateTime } from "@/lib/retell"
 import { notifyLiaAction } from "@/lib/lia-notifications"
 import { notifyOwner } from "@/lib/appointments"
 import { leadSource } from "@/lib/lead-source"
+import { upsertLeadCard } from "@/lib/lead-card"
 
 // POST /api/meta-leads/website
 // Called by the desertgreenbuilders.com booking backend (Google Apps Script)
@@ -109,6 +110,21 @@ export async function POST(req: NextRequest) {
 
   const attribution = await attributeMetaLead(service, data.id, { utm: cleanUtm(body) }).catch(() => null)
 
+  // Lead card right away, with everything from the form (lead-card.ts)
+  const kind = leadSource({ notes, raw_paste: ref, attribution: attribution?.attribution, utm_source: body.utm_source, fbclid: body.fbclid }).kind
+  const card = await upsertLeadCard(service, {
+    name:            full_name,
+    phone:           body.phone,
+    address:         body.address,
+    city:            body.city,
+    leadSource:      kind === "phone" ? "phone_call" : kind === "google" ? "google" : kind === "facebook" ? "facebook" : "website",
+    serviceType:     (body.interests ?? "").replace(/^Omdan Development:\s*/, "").trim().slice(0, 120) || null,
+    heading:         `${body.source === "phone" ? "Booked by phone (AI receptionist)" : "Booked on the website"} — estimate appointment ${speakDateTime(when.toISOString(), "en")}`,
+    details:         notes.split("\n"),
+    metaLeadId:      data.id,
+    calendarEventId: body.calendar_event_id?.trim() || null,
+  }).catch((e) => { console.error("[meta-leads/website] lead card failed:", e); return null })
+
   // "You're booked" text from the company's own Quo number, so the customer knows
   // the number when we call or text later. Phone bookings already got one from Sofia.
   let text: { ok: boolean; error?: string } = { ok: false, error: "skipped" }
@@ -141,5 +157,5 @@ export async function POST(req: NextRequest) {
     ])
   }
 
-  return NextResponse.json({ ok: true, lead: data, attribution: attribution?.attribution ?? null, text: text.ok ? "sent" : text.error }, { status: 201 })
+  return NextResponse.json({ ok: true, lead: data, customer_id: card?.customerId ?? null, attribution: attribution?.attribution ?? null, text: text.ok ? "sent" : text.error }, { status: 201 })
 }

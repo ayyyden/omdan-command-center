@@ -48,6 +48,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/api/contracts/sign/") ||
     pathname.startsWith("/api/estimates/approve") ||
     pathname.startsWith("/api/estimates/public-pdf/") ||
+    pathname.startsWith("/api/leads/google-ads") ||
     pathname.startsWith("/api/change-orders/approve")
 
   if (!user && !isPublicPath) {
