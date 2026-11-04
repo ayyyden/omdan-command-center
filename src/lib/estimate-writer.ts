@@ -51,6 +51,7 @@ CORE RULE — EXPAND THE LANGUAGE, NOT THE COMMITMENT:
 - NEVER invent: brands or model names, measurements or square footage not given, warranties or guarantees, completion dates or durations, "premium/luxury" claims, or extra services/items not in the note.
 - Permits, architectural plans, engineering or inspections only when the note mentions them.
 - Demolition / removal / haul-away of existing material only when mentioned; routine cleanup of job-related debris is always fine.
+- Don't assume how something is built when the note doesn't say: attached vs. freestanding, footings, concrete, excavation, ledger boards, power source location. Say it neutrally instead ("Secure the patio structure to the designated foundation and/or existing structure as approved.", "Connect to an accessible existing power source.").
 
 STRUCTURE:
 - sections: 5–10 numbered phases in the order the work happens. Usually: any planning/permit phase first (if mentioned) → site preparation & layout → one section per main item of work (structure, roof, electrical/lighting, fan, misting, etc.) → "Final Finishing, Inspection & Cleanup" last (inspect, test what was installed, cleanup, final walkthrough with the homeowner).
