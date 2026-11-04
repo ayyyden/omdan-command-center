@@ -4,7 +4,7 @@ import { verifyAssistantSecret } from "@/lib/assistant-auth"
 import { createServiceClient } from "@/lib/supabase/service"
 import { buildHtmlEmail, smtpConfigured } from "@/lib/email"
 import { generateEstimateScope } from "@/lib/scope-generator"
-import { generateEstimatePDFBuffer } from "@/lib/pdf/generate-estimate-pdf"
+import { sendEstimateEmail } from "@/lib/estimate-delivery"
 import { generateInvoicePDFBuffer } from "@/lib/pdf/generate-invoice-pdf"
 import { notifyLia, notifyLiaAction } from "@/lib/lia-notifications"
 import { normalizePaymentLabel } from "@/lib/lia-text-normalizer"
@@ -351,143 +351,16 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       return NextResponse.json({ error: "SMTP not configured" }, { status: 500 })
     }
 
-    // Fetch company name, approval token, payment steps
-    const [{ data: company }, { data: est }, { data: customerRow }, { data: dbPaymentSteps }] = await Promise.all([
-      supabase.from("company_settings")
-        .select("company_name, email, phone")
-        .eq("user_id", ownerUserId)
-        .maybeSingle(),
-      supabase.from("estimates")
-        .select("approval_token, scope_of_work, created_at")
-        .eq("id", estimate_id)
-        .single(),
-      supabase.from("customers")
-        .select("name, phone, email, address")
-        .eq("id", customer_id)
-        .single(),
-      supabase.from("estimate_payment_steps")
-        .select("name, amount, sort_order")
-        .eq("estimate_id", estimate_id)
-        .order("sort_order", { ascending: true }),
-    ])
-
-    const companyName   = company?.company_name ?? "Omdan"
-    const approvalToken = est?.approval_token
-    const approvalLink  = approvalToken
-      ? `${appUrl}/approve-estimate/${approvalToken}`
-      : estimate_url
-    const scopeOfWork   = est?.scope_of_work ?? scope ?? null
-
-    // Generate PDF with scope + payment schedule + approval link
-    let pdfBuffer: Buffer | null = null
+    // The one standard estimate send (estimate-delivery.ts): same PDF design,
+    // branded email with "Review & Sign" link, 15-day validity, PDF on the lead card
     try {
-      pdfBuffer = await generateEstimatePDFBuffer({
-        estimate: {
-          id:            estimate_id,
-          title:         estimate_title,
-          created_at:    est?.created_at ?? now,
-          scope_of_work: scopeOfWork,
-          total:         Number(total),
-          payment_steps: (dbPaymentSteps?.length ? dbPaymentSteps : (payment_steps ?? [])).map((s, i) => ({ name: s.name, amount: s.amount, sort_order: (s as { sort_order?: number }).sort_order ?? i })),
-          approval_link: approvalLink,
-        },
-        customer: {
-          name:    customerRow?.name    ?? customer_name,
-          phone:   customerRow?.phone   ?? null,
-          email:   customerRow?.email   ?? to_email,
-          address: customerRow?.address ?? null,
-        },
-        ownerUserId,
-      })
-    } catch (pdfErr) {
-      console.error("[execute/send_estimate] PDF generation failed:", pdfErr)
+      await sendEstimateEmail({ estimateId: estimate_id, to: to_email, userId: ownerUserId, appUrl, via: "lia" })
+    } catch (sendErr) {
+      const message = sendErr instanceof Error ? sendErr.message : String(sendErr)
+      await supabase.from("assistant_approvals")
+        .update({ status: "failed", error: message, updated_at: now }).eq("id", id)
+      return NextResponse.json({ error: message }, { status: 500 })
     }
-
-    // Build HTML email
-    const paymentLines = (payment_steps ?? []).map(
-      (s) => `${s.name}: $${Number(s.amount).toLocaleString()}`
-    )
-
-    const bodyLines: string[] = [
-      `Hi ${customer_name},`,
-      "",
-      `${companyName} has prepared an estimate for your project.`,
-      "",
-      `<strong>Project:</strong> ${estimate_title}`,
-      `<strong>Total: $${Number(total).toLocaleString()}</strong>`,
-    ]
-
-    if (paymentLines.length) {
-      bodyLines.push("", "<strong>Payment Schedule:</strong>")
-      paymentLines.forEach((l) => bodyLines.push(`&nbsp;&nbsp;• ${l}`))
-    }
-
-    bodyLines.push(
-      "",
-      pdfBuffer
-        ? "A PDF copy of your estimate is attached. Please review and approve using the button below."
-        : "Please review and approve your estimate using the button below.",
-    )
-
-    const html = buildHtmlEmail({
-      title:       `Your Estimate from ${companyName}`,
-      preheader:   `$${Number(total).toLocaleString()} estimate ready for your review`,
-      companyName,
-      bodyLines,
-      ctaLabel:    "Review & Approve Estimate",
-      ctaUrl:      approvalLink,
-    })
-
-    // Send email with PDF attachment
-    const transporter = nodemailer.createTransport({
-      host:   process.env.SMTP_HOST ?? "smtp.gmail.com",
-      port:   Number(process.env.SMTP_PORT ?? 587),
-      secure: false,
-      auth:   { user: process.env.SMTP_USER!, pass: process.env.SMTP_PASS! },
-    })
-
-    await transporter.sendMail({
-      from:    process.env.SMTP_FROM ?? process.env.SMTP_USER,
-      to:      to_email,
-      subject: `Your Estimate from ${companyName}`,
-      html,
-      attachments: pdfBuffer
-        ? [{ filename: `estimate-${estimate_id.slice(0, 8)}.pdf`, content: pdfBuffer, contentType: "application/pdf" }]
-        : [],
-    })
-
-    // Upload PDF to storage (best-effort)
-    if (pdfBuffer) {
-      try {
-        const storagePath = `estimates/${estimate_id}.pdf`
-        const { error: uploadErr } = await supabase.storage
-          .from("documents")
-          .upload(storagePath, pdfBuffer, { contentType: "application/pdf", upsert: true })
-        if (!uploadErr) {
-          const { data: urlData } = supabase.storage.from("documents").getPublicUrl(storagePath)
-          await supabase.from("estimates").update({ pdf_url: urlData.publicUrl }).eq("id", estimate_id)
-        }
-      } catch { /* non-critical */ }
-    }
-
-    // Update estimate → sent
-    await supabase.from("estimates")
-      .update({ status: "sent", sent_at: now })
-      .eq("id", estimate_id)
-      .eq("status", "draft")
-
-    // Log communication (best-effort)
-    try {
-      await supabase.from("communication_logs").insert({
-        user_id:     ownerUserId,
-        customer_id,
-        estimate_id,
-        type:        "estimate_follow_up",
-        subject:     `Your Estimate from ${companyName}`,
-        body:        `Estimate sent via Lia assistant to ${to_email}${pdfBuffer ? " (with PDF)" : ""}`,
-        channel:     "email",
-      })
-    } catch { /* non-critical */ }
 
     // Mark approval as executed
     await supabase.from("assistant_approvals")
@@ -498,7 +371,7 @@ export async function POST(_req: Request, { params }: RouteCtx) {
       action_type: "send_estimate",
       success:     true,
       sent_to:     to_email,
-      pdf_attached: !!pdfBuffer,
+      pdf_attached: true,
     })
   }
 

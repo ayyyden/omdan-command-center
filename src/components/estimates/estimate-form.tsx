@@ -18,7 +18,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatCurrency, cn } from "@/lib/utils"
-import { Loader2, Plus, Trash2, Send, Wand2, AlertCircle } from "lucide-react"
+import { Loader2, Plus, Trash2, Send, Wand2, AlertCircle, Sparkles, CheckCircle2, UserRound, Save } from "lucide-react"
+import { serializeScope, defaultEstimateEmail } from "@/lib/estimate-format"
 import { upsertEstimateFollowUp } from "@/lib/reminders"
 import type { Customer, Estimate } from "@/types"
 
@@ -119,6 +120,18 @@ export function EstimateForm({
   const [body, setBody]   = useState("")
   const [generatingTitle, setGeneratingTitle] = useState(false)
 
+  // "Describe the job" -> AI writes the detailed scope (estimate-writer.ts)
+  const [brief, setBrief]               = useState<string>((estimate as any)?.brief ?? "")
+  const [writing, setWriting]           = useState(false)
+  const [writeWarning, setWriteWarning] = useState<string | null>(null)
+
+  // "Prepared for": the lead's details as they'll print on the estimate —
+  // fix them here and save them back to the lead card
+  const [customerList, setCustomerList] = useState<Customer[]>(customers)
+  const [pf, setPf]             = useState({ name: "", phone: "", email: "", address: "" })
+  const [pfDirty, setPfDirty]   = useState(false)
+  const [savingPf, setSavingPf] = useState(false)
+
   const followUpTemplates = templates.filter((t) => t.type === "estimate_follow_up")
 
   const form = useForm<EstimateFormValues>({
@@ -140,6 +153,56 @@ export function EstimateForm({
     },
   })
 
+  const customerId = useWatch({ control: form.control, name: "customer_id" })
+  // Load the lead's details whenever a different customer is picked
+  const [pfFor, setPfFor] = useState<string | null>(null)
+  if (customerId && pfFor !== customerId) {
+    const c = customerList.find((x) => x.id === customerId)
+    if (c) {
+      setPfFor(customerId)
+      setPf({ name: c.name ?? "", phone: c.phone ?? "", email: c.email ?? "", address: c.address ?? "" })
+      setPfDirty(false)
+    }
+  }
+
+  async function savePreparedFor(): Promise<boolean> {
+    if (!customerId) return false
+    if (!pf.name.trim()) { toast({ title: "The lead needs a name", variant: "destructive" }); return false }
+    setSavingPf(true)
+    const supabase = createClient()
+    const patch = { name: pf.name.trim(), phone: pf.phone.trim() || null, email: pf.email.trim() || null, address: pf.address.trim() || null }
+    const { error } = await supabase.from("customers").update(patch).eq("id", customerId)
+    setSavingPf(false)
+    if (error) { toast({ title: "Couldn't update the lead card", description: error.message, variant: "destructive" }); return false }
+    setCustomerList((list) => list.map((c) => (c.id === customerId ? ({ ...c, ...patch } as Customer) : c)))
+    setPfDirty(false)
+    toast({ title: "Lead card updated", description: patch.name })
+    return true
+  }
+
+  async function writeWithAI() {
+    if (brief.trim().length < 8) { toast({ title: "Describe the job first", variant: "destructive" }); return }
+    setWriting(true); setWriteWarning(null)
+    try {
+      const res = await fetch("/api/estimates/write", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brief }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Couldn't write the scope")
+      form.setValue("title", data.title, { shouldDirty: true })
+      form.setValue("scope_of_work", serializeScope(data.sections), { shouldDirty: true })
+      if (data.total) form.setValue("manual_total_price", data.total, { shouldDirty: true })
+      if (data.payment_steps?.length) {
+        form.setValue("payment_steps", data.payment_steps.map((p: { name: string; description: string; amount: number }) => ({ id: uuidv4(), name: p.name, description: p.description, amount: p.amount })), { shouldDirty: true })
+      }
+      if (data.notes?.length) form.setValue("notes", data.notes.join("\n"), { shouldDirty: true })
+      setWriteWarning(data.warning ?? null)
+      toast({ title: "Scope written", description: `${data.sections.length} sections · ${data.payment_steps?.length ?? 0} payments — check it, then save.` })
+    } catch (err) {
+      toast({ title: "Couldn't write the scope", description: err instanceof Error ? err.message : String(err), variant: "destructive" })
+    } finally {
+      setWriting(false)
+    }
+  }
+
   const { fields, append, remove } = useFieldArray({ control: form.control, name: "line_items" })
   const { fields: paymentStepFields, append: appendStep, remove: removeStep } = useFieldArray({ control: form.control, name: "payment_steps" })
 
@@ -156,6 +219,7 @@ export function EstimateForm({
 
   const paymentStepsTotal = (paymentSteps ?? []).reduce((s, p) => s + (p.amount ?? 0), 0)
   const paymentStepsOverage = paymentStepsTotal > displayTotal && displayTotal > 0
+  const paymentsMatch = (paymentSteps ?? []).length > 0 && displayTotal > 0 && Math.round(paymentStepsTotal * 100) === Math.round(displayTotal * 100)
 
   function appendRow() {
     append({ id: uuidv4(), description: "", quantity: 1, unit_price: 0, category: "labor", taxable: true })
@@ -189,7 +253,7 @@ export function EstimateForm({
   }
 
   function buildTplData(values: EstimateFormValues): Record<string, string> {
-    const selectedCustomer = customers.find((c) => c.id === values.customer_id)
+    const selectedCustomer = customerList.find((c) => c.id === values.customer_id)
     const total = values.manual_total_price && values.manual_total_price > 0
       ? values.manual_total_price
       : calcTotals(values.line_items, values.markup_percent, values.tax_percent).total
@@ -235,18 +299,23 @@ export function EstimateForm({
       status:              values.status,
       notes:               values.notes,
       user_id:             userId,
-    }
+      brief:               brief.trim() || null,
+    } as Record<string, unknown>
 
     let error
     let savedId = estimate?.id ?? null
 
-    if (estimate) {
-      ;({ error } = await supabase.from("estimates").update(payload).eq("id", estimate.id))
-    } else {
-      const { data: inserted, error: insertError } = await supabase
-        .from("estimates").insert(payload).select("id").single()
-      error = insertError
+    const write = async (row: Record<string, unknown>) => {
+      if (estimate) return (await supabase.from("estimates").update(row).eq("id", estimate.id)).error
+      const { data: inserted, error: insertError } = await supabase.from("estimates").insert(row).select("id").single()
       savedId = inserted?.id ?? null
+      return insertError
+    }
+    error = await write(payload)
+    // Before migration 066 the "brief" column doesn't exist yet — save without it
+    if (error && /brief/.test(error.message)) {
+      delete payload.brief
+      error = await write(payload)
     }
 
     if (error) {
@@ -297,6 +366,11 @@ export function EstimateForm({
   async function handleSaveAndSend() {
     const isValid = await form.trigger()
     if (!isValid) return
+    if (!pf.email.trim()) {
+      toast({ title: "Add the customer's email first", description: "Fill it in under Prepared for, then Save to lead card.", variant: "destructive" })
+      return
+    }
+    if (pfDirty && !(await savePreparedFor())) return
 
     const values = form.getValues()
     setSavingForSend(true)
@@ -305,20 +379,14 @@ export function EstimateForm({
     if (!id) return
 
     setSavedEstimateId(id)
-    const selectedCustomer = customers.find((c) => c.id === values.customer_id)
-    setTo(selectedCustomer?.email ?? "")
+    const selectedCustomer = customerList.find((c) => c.id === values.customer_id)
+    setTo(pf.email || selectedCustomer?.email || "")
+    const std = defaultEstimateEmail(pf.name || selectedCustomer?.name || "", values.title)
 
-    const tplData = buildTplData(values)
-    const firstTpl = followUpTemplates[0]
-    if (firstTpl) {
-      setSelectedTplId(firstTpl.id)
-      setSubject(firstTpl.subject ? renderTemplate(firstTpl.subject, tplData) : `Estimate for ${selectedCustomer?.name ?? ""}: ${values.title}`)
-      setBody(renderTemplate(firstTpl.body, tplData))
-    } else {
-      setSelectedTplId("")
-      setSubject(`Estimate for ${selectedCustomer?.name ?? ""}: ${values.title}`)
-      setBody("")
-    }
+    // The standard estimate email; saved templates stay one pick away
+    setSelectedTplId("")
+    setSubject(std.subject)
+    setBody(std.body)
     setSendOpen(true)
   }
 
@@ -353,6 +421,33 @@ export function EstimateForm({
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        {/* Describe the job → AI writes the detailed scope */}
+        <Card className="border-primary/30 bg-primary/[0.03]">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2"><Sparkles className="w-4 h-4 text-primary" /> Describe the job</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Textarea
+              value={brief}
+              onChange={(e) => setBrief(e.target.value)}
+              className="min-h-[96px] text-sm"
+              placeholder={"Write it like a quick note after the visit, e.g.\npatio installation with 4-6 lights, 1 ceiling fan, aluminum with insulated roof (double layer) and a mist line. total 18726, 4 payments: architectural planning and permit submitted 7000, material arrive 5000, patio installed 5000, completion and clean up 1726"}
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" onClick={writeWithAI} disabled={writing || brief.trim().length < 8} className="gap-1.5">
+                {writing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {writing ? "Writing the scope…" : "Write it for me"}
+              </Button>
+              <p className="text-xs text-muted-foreground">Fills in the title, detailed scope, payment schedule, total and notes. You can edit everything after.</p>
+            </div>
+            {writeWarning && (
+              <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-sm">
+                <AlertCircle className="w-4 h-4 shrink-0" />{writeWarning}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Header */}
         <Card>
           <CardContent className="pt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -389,9 +484,13 @@ export function EstimateForm({
 
             <FormField control={form.control} name="scope_of_work" render={({ field }) => (
               <FormItem className="sm:col-span-2">
-                <FormLabel>Scope of Work</FormLabel>
+                <FormLabel>Scope of Work <span className="font-normal text-muted-foreground text-xs">· &quot;1. Heading&quot; lines with &quot;- bullet&quot; lines under them</span></FormLabel>
                 <FormControl>
-                  <Textarea placeholder="Describe the full scope of work..." className="min-h-[80px]" {...field} />
+                  <Textarea
+                    placeholder={"1. Section heading\n- What gets done\n- What gets done\n\n2. Next section\n- …"}
+                    className="min-h-[260px] text-sm leading-relaxed"
+                    {...field}
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -422,6 +521,43 @@ export function EstimateForm({
             )} />
           </CardContent>
         </Card>
+
+        {/* Prepared for — the lead's details as they print on the estimate */}
+        {customerId && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2"><UserRound className="w-4 h-4 text-muted-foreground" /> Prepared for</span>
+                <Button type="button" size="sm" variant={pfDirty ? "default" : "outline"} className="gap-1.5 h-8" disabled={!pfDirty || savingPf} onClick={() => void savePreparedFor()}>
+                  {savingPf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : pfDirty ? <Save className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  {pfDirty ? "Save to lead card" : "Matches lead card"}
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {([
+                ["name", "Full name", "text", "Maria Gonzalez"],
+                ["phone", "Phone", "tel", "(760) 555-0123"],
+                ["email", "Email", "email", "customer@email.com"],
+                ["address", "Address", "text", "Street, City, CA ZIP"],
+              ] as const).map(([key, label, type, ph]) => (
+                <div key={key} className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">{label}</label>
+                  <Input
+                    type={type}
+                    value={pf[key]}
+                    placeholder={ph}
+                    onChange={(e) => { setPf((v) => ({ ...v, [key]: e.target.value })); setPfDirty(true) }}
+                    className={cn("h-9", key === "email" && !pf.email.trim() && "border-amber-500/60 bg-amber-500/5")}
+                  />
+                  {key === "email" && !pf.email.trim() && (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-400">No email yet — add it to send the estimate.</p>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Total Price (manual override — shown above line items) */}
         <Card>
@@ -605,9 +741,9 @@ export function EstimateForm({
 
               <FormField control={form.control} name="notes" render={({ field }) => (
                 <FormItem className="col-span-2">
-                  <FormLabel>Notes</FormLabel>
+                  <FormLabel>Project notes <span className="font-normal text-muted-foreground text-xs">(one per line)</span></FormLabel>
                   <FormControl>
-                    <Textarea placeholder="Payment terms, warranty, special conditions..." className="min-h-[80px]" {...field} />
+                    <Textarea placeholder="Project notes — one per line" className="min-h-[110px]" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -657,6 +793,15 @@ export function EstimateForm({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {paymentsMatch && (
+              <div className="flex items-center gap-2 text-sm text-success"><CheckCircle2 className="w-4 h-4" /> Payments add up to the total ({formatCurrency(displayTotal)}).</div>
+            )}
+            {!paymentsMatch && !paymentStepsOverage && (paymentSteps ?? []).length > 0 && displayTotal > 0 && (
+              <div className="flex items-center gap-2 p-3 rounded-lg border border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-sm">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                Payments add up to {formatCurrency(paymentStepsTotal)} — {formatCurrency(displayTotal - paymentStepsTotal)} short of the total.
+              </div>
+            )}
             {paymentStepsOverage && (
               <div className="flex items-center gap-2 p-3 rounded-lg border border-destructive/40 bg-destructive/5 text-destructive text-sm">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -781,7 +926,7 @@ export function EstimateForm({
                 placeholder="Hi, please find your estimate attached…" />
             </div>
 
-            <p className="text-xs text-muted-foreground">The estimate PDF will be generated and attached automatically.</p>
+            <p className="text-xs text-muted-foreground">Sent as a branded email with a <b>Review &amp; Sign Estimate</b> button and the PDF attached. Valid for 15 days from today.</p>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setSendOpen(false)} disabled={sending}>Cancel</Button>

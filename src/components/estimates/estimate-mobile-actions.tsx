@@ -1,5 +1,6 @@
 "use client"
 
+import { defaultEstimateEmail } from "@/lib/estimate-format"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
@@ -51,12 +52,11 @@ export function EstimateMobileActions({
   const [sending, setSending]       = useState(false)
   const [revising, setRevising]     = useState(false)
 
-  const followUpTpl = templates.find((t) => t.type === "estimate_follow_up")
+  // Pre-filled with the standard estimate email (estimate-format.ts)
   const [to, setTo]               = useState(customerEmail ?? "")
-  const [sendSubject, setSendSubject] = useState(
-    followUpTpl?.subject ? render(followUpTpl.subject, tplData) : `Estimate for ${customerName}: ${estimateTitle}`
-  )
-  const [sendBody, setSendBody] = useState(followUpTpl ? render(followUpTpl.body, tplData) : "")
+  const std = defaultEstimateEmail(customerName, estimateTitle)
+  const [sendSubject, setSendSubject] = useState(std.subject)
+  const [sendBody, setSendBody] = useState(std.body)
 
   async function generatePdf(): Promise<string | null> {
     setGenerating(true)

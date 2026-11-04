@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation"
 import { getSessionMember } from "@/lib/auth-helpers"
 import { can } from "@/lib/permissions"
+import { parseScope, estimateNumberLabel, formatLongDate } from "@/lib/estimate-format"
 import { Topbar } from "@/components/shared/topbar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -30,7 +31,7 @@ export default async function EstimateDetailPage({ params }: PageProps) {
   if (!can(session.role, "estimates:view")) redirect("/access-denied")
   const { userId, role, pmId, supabase } = session
 
-  const [{ data: estimate }, { data: pms }, { data: linkedJob }, { data: templates }, { data: companySettings }, { data: commLogs }] = await Promise.all([
+  const [{ data: estimate }, { data: pms }, { data: linkedJob }, { data: templates }, { data: companySettings }, { data: commLogs }, { data: paymentSteps }] = await Promise.all([
     supabase
       .from("estimates")
       .select("*, customer:customers(id, name, address, email), revised_from:estimates!revised_from_id(id, title)")
@@ -49,6 +50,7 @@ export default async function EstimateDetailPage({ params }: PageProps) {
     supabase.from("message_templates").select("id, name, type, subject, body").eq("is_active", true).order("name"),
     supabase.from("company_settings").select("company_name, phone, email, license_number, logo_url, address, google_review_link").order("updated_at", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("communication_logs").select("id, created_at, type, subject, body, channel").eq("estimate_id", id).order("created_at", { ascending: false }),
+    supabase.from("estimate_payment_steps").select("id, name, amount, description, sort_order").eq("estimate_id", id).order("sort_order"),
   ])
 
   if (!estimate) notFound()
@@ -63,6 +65,14 @@ export default async function EstimateDetailPage({ params }: PageProps) {
   }
 
   const lineItems = (estimate.line_items ?? []) as EstimateLineItem[]
+  const scope = parseScope(estimate.scope_of_work)
+  const steps = paymentSteps ?? []
+  const number = estimateNumberLabel((estimate as any).estimate_number)
+  const validUntil = (estimate as any).valid_until as string | null
+  const expired = !!validUntil && estimate.status === "sent" && validUntil < new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })
+  const signedAt = (estimate as any).signed_at as string | null
+  const signedPdfPath = (estimate as any).signed_pdf_path as string | null
+  const signedPdfUrl = signedPdfPath ? supabase.storage.from("documents").getPublicUrl(signedPdfPath).data.publicUrl : null
   const revisedFrom = (estimate as any).revised_from as { id: string; title: string } | null
 
   const linesByCategory = lineItems.reduce((acc, item) => {
@@ -150,10 +160,24 @@ export default async function EstimateDetailPage({ params }: PageProps) {
 
       <div className="p-4 sm:p-6 space-y-4 max-w-3xl">
         {/* Status callouts */}
-        {estimate.status === "sent" && (
+        {estimate.status === "sent" && !expired && (
           <div className="flex items-center gap-2 p-3 rounded-lg border border-warning/40 bg-warning/5 text-warning text-sm">
             <Clock className="w-4 h-4 shrink-0" />
-            Awaiting customer response.
+            Awaiting customer response{validUntil ? ` — valid until ${formatLongDate(validUntil)}` : ""}.
+          </div>
+        )}
+        {expired && (
+          <div className="flex items-center gap-2 p-3 rounded-lg border border-destructive/40 bg-destructive/5 text-destructive text-sm">
+            <Clock className="w-4 h-4 shrink-0" />
+            Expired on {formatLongDate(validUntil)} — the client can&apos;t sign it anymore. Send it again to give it another 15 days.
+          </div>
+        )}
+        {signedAt && (
+          <div className="flex items-center justify-between gap-2 p-3 rounded-lg border border-success/40 bg-success/5 text-success text-sm">
+            <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 shrink-0" />Signed by {(estimate as any).signer_name} on {formatLongDate(signedAt)}</span>
+            {signedPdfUrl && (
+              <a href={signedPdfUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-medium underline underline-offset-2">Signed PDF</a>
+            )}
           </div>
         )}
 
@@ -189,6 +213,18 @@ export default async function EstimateDetailPage({ params }: PageProps) {
         {/* Header Card */}
         <Card>
           <CardContent className="pt-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {number && (
+              <div>
+                <p className="text-xs text-muted-foreground">Estimate #</p>
+                <p className="text-sm font-medium">{number}</p>
+              </div>
+            )}
+            {validUntil && (
+              <div>
+                <p className="text-xs text-muted-foreground">Valid until</p>
+                <p className={`text-sm font-medium ${expired ? "text-destructive" : ""}`}>{formatLongDate(validUntil)}</p>
+              </div>
+            )}
             <div>
               <p className="text-xs text-muted-foreground">Customer</p>
               <Link href={`/customers/${estimate.customer_id}`} className="text-sm font-medium hover:text-primary">
@@ -225,14 +261,49 @@ export default async function EstimateDetailPage({ params }: PageProps) {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Scope of Work</CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm whitespace-pre-wrap">{estimate.scope_of_work}</p>
+            <CardContent className="space-y-4">
+              {scope.intro.map((p, i) => <p key={i} className="text-sm">{p}</p>)}
+              {scope.sections.map((sec, i) => (
+                <div key={i}>
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    <span className="grid place-items-center w-5 h-5 rounded-full bg-foreground text-background text-[10px] font-bold shrink-0">{i + 1}</span>
+                    {sec.heading}
+                  </p>
+                  <ul className="mt-1.5 ml-7 space-y-1 list-disc marker:text-primary text-sm text-muted-foreground">
+                    {sec.bullets.map((b, k) => <li key={k}>{b}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Payment schedule */}
+        {steps.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Payment Schedule</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-0 divide-y">
+              {steps.map((p, i) => (
+                <div key={p.id} className="flex items-start justify-between gap-3 py-2.5 first:pt-0">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{i + 1}. {p.name}</p>
+                    {p.description && <p className="text-xs text-muted-foreground">{p.description}</p>}
+                  </div>
+                  <span className="text-sm font-semibold tabular-nums shrink-0">{formatCurrency(Number(p.amount))}</span>
+                </div>
+              ))}
+              <div className="flex justify-between pt-2.5 font-bold">
+                <span>Total</span>
+                <span>{formatCurrency(Number(estimate.total))}</span>
+              </div>
             </CardContent>
           </Card>
         )}
 
         {/* Line Items */}
-        <Card>
+        {lineItems.length > 0 && <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Line Items</CardTitle>
           </CardHeader>
@@ -282,12 +353,12 @@ export default async function EstimateDetailPage({ params }: PageProps) {
               </div>
             </div>
           </CardContent>
-        </Card>
+        </Card>}
 
         {estimate.notes && (
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Notes</CardTitle>
+              <CardTitle className="text-base">Project Notes</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-sm whitespace-pre-wrap">{estimate.notes}</p>

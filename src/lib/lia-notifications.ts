@@ -17,17 +17,19 @@ export interface LiaNotificationEvent {
   extra?: string           // decline reason, error message, etc.
 }
 
-export function notifyLia(event: LiaNotificationEvent): void {
+// Returns the send so callers on Vercel can await it (an un-awaited fetch can
+// be cut off when the function returns — see notifyLiaAction below).
+export function notifyLia(event: LiaNotificationEvent): Promise<void> {
   const bridgeUrl = process.env.LIA_BRIDGE_URL
   const secret    = process.env.ASSISTANT_SECRET
-  if (!bridgeUrl || !secret) return   // not configured — skip silently
+  if (!bridgeUrl || !secret) return Promise.resolve()   // not configured — skip silently
 
-  fetch(`${bridgeUrl}/notify`, {
+  return fetch(`${bridgeUrl}/notify`, {
     method:  "POST",
     headers: { "Content-Type": "application/json", "x-assistant-secret": secret },
     body:    JSON.stringify(event),
     signal:  AbortSignal.timeout(8000),
-  }).catch((err) => {
+  }).then(() => undefined).catch((err) => {
     console.error("[lia-notify] POST /notify failed:", err?.message ?? err)
   })
 }
