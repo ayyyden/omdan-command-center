@@ -1,35 +1,22 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
-import { useForm, useFieldArray, useWatch } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { v4 as uuidv4 } from "uuid"
 import { createClient } from "@/lib/supabase/client"
-import { estimateSchema, type EstimateFormValues } from "@/lib/validations/estimate"
 import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { NumericInput } from "@/components/ui/numeric-input"
 import { Textarea } from "@/components/ui/textarea"
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { formatCurrency, cn } from "@/lib/utils"
-import { Loader2, Plus, Trash2, Send, Wand2, AlertCircle, Sparkles, CheckCircle2, UserRound, Save } from "lucide-react"
-import { serializeScope, defaultEstimateEmail } from "@/lib/estimate-format"
+import { cn } from "@/lib/utils"
+import { Loader2, Send, AlertCircle, Sparkles, CheckCircle2, UserRound, Save, Wand2, RotateCcw } from "lucide-react"
 import { upsertEstimateFollowUp } from "@/lib/reminders"
+import { serializeScope, parseScope, parseNotes, formatMoney, defaultEstimateEmail, ESTIMATE_VALID_DAYS } from "@/lib/estimate-format"
 import type { Customer, Estimate } from "@/types"
 
-interface Template {
-  id: string
-  name: string
-  type: string
-  subject: string | null
-  body: string
-}
+interface Template { id: string; name: string; type: string; subject: string | null; body: string }
 
 interface CompanySettings {
   company_name: string | null
@@ -52,110 +39,57 @@ interface EstimateFormProps {
   companySettings?: CompanySettings | null
 }
 
+/** What the AI writes — everything on the estimate besides the lead's details. */
+interface Written {
+  title: string
+  total: number | null
+  sections: { heading: string; bullets: string[] }[]
+  payment_steps: { name: string; description: string; amount: number }[]
+  notes: string[]
+}
+
 function renderTemplate(text: string, data: Record<string, string>): string {
   return text.replace(/\{\{(\w+)\}\}/g, (_, key) => data[key] ?? `{{${key}}}`)
 }
 
-function calcTotals(lineItems: EstimateFormValues["line_items"], markupPct: number, taxPct: number) {
-  const subtotal = lineItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0)
-  const markupAmount = subtotal * (markupPct / 100)
-  const taxableItemsTotal = lineItems.reduce((sum, item) => {
-    if (item.taxable === false) return sum
-    return sum + item.quantity * item.unit_price
-  }, 0)
-  const taxBase = taxableItemsTotal * (1 + markupPct / 100)
-  const taxAmount = taxBase * (taxPct / 100)
-  const total = subtotal + markupAmount + taxAmount
-  return { subtotal, markupAmount, taxAmount, total }
-}
-
-function generateTitleFromScope(scope: string): string {
-  const lower = scope.toLowerCase()
-  const keywords: Record<string, string> = {
-    kitchen: "Kitchen Renovation",
-    bathroom: "Bathroom Remodel",
-    deck: "Deck Installation",
-    roof: "Roofing Project",
-    flooring: "Flooring Installation",
-    paint: "Painting Project",
-    fence: "Fence Installation",
-    landscap: "Landscaping Project",
-    drywall: "Drywall Repair",
-    plumb: "Plumbing Work",
-    electric: "Electrical Work",
-    window: "Window Installation",
-    door: "Door Installation",
-    garage: "Garage Project",
-    basement: "Basement Renovation",
-    addition: "Home Addition",
-    remodel: "Home Remodel",
-    renovation: "Renovation Project",
-    repair: "Repair Work",
-    install: "Installation Project",
-    hvac: "HVAC Service",
-    ac: "AC Service",
-  }
-  for (const [kw, title] of Object.entries(keywords)) {
-    if (lower.includes(kw)) return title
-  }
-  const words = scope.trim().split(/\s+/).slice(0, 4).join(" ")
-  return words.charAt(0).toUpperCase() + words.slice(1)
-}
-
-export function EstimateForm({
-  estimate, customers, userId, preselectedCustomerId, defaultNotes,
-  templates = [], companySettings,
-}: EstimateFormProps) {
+// The estimate page is two things: pick the lead, describe the job in a few
+// words. The CRM writes the whole estimate (title, detailed numbered scope,
+// payment schedule, notes), shows it as it will look, and takes changes in
+// plain words. It won't save without a payment schedule that adds up.
+export function EstimateForm({ estimate, customers, userId, preselectedCustomerId, templates = [], companySettings }: EstimateFormProps) {
   const router = useRouter()
   const { toast } = useToast()
-  const lineItemsRef = useRef<HTMLDivElement>(null)
+  const est = estimate as (Estimate & { brief?: string | null; payment_steps?: { name: string; amount: number; description?: string | null }[] }) | undefined
 
-  const [sendOpen, setSendOpen]             = useState(false)
-  const [savingForSend, setSavingForSend]   = useState(false)
-  const [sending, setSending]               = useState(false)
-  const [savedEstimateId, setSavedEstimateId] = useState<string | null>(null)
-  const [selectedTplId, setSelectedTplId]   = useState("")
-  const [to, setTo]       = useState("")
-  const [subject, setSubject] = useState("")
-  const [body, setBody]   = useState("")
-  const [generatingTitle, setGeneratingTitle] = useState(false)
-
-  // "Describe the job" -> AI writes the detailed scope (estimate-writer.ts)
-  const [brief, setBrief]               = useState<string>((estimate as any)?.brief ?? "")
-  const [writing, setWriting]           = useState(false)
-  const [writeWarning, setWriteWarning] = useState<string | null>(null)
-
-  // "Prepared for": the lead's details as they'll print on the estimate —
-  // fix them here and save them back to the lead card
-  const [customerList, setCustomerList] = useState<Customer[]>(customers)
-  const [pf, setPf]             = useState({ name: "", phone: "", email: "", address: "" })
-  const [pfDirty, setPfDirty]   = useState(false)
-  const [savingPf, setSavingPf] = useState(false)
-
-  const followUpTemplates = templates.filter((t) => t.type === "estimate_follow_up")
-
-  const form = useForm<EstimateFormValues>({
-    resolver: zodResolver(estimateSchema),
-    defaultValues: {
-      customer_id:        estimate?.customer_id    ?? preselectedCustomerId ?? "",
-      title:              estimate?.title          ?? "",
-      scope_of_work:      estimate?.scope_of_work  ?? "",
-      manual_total_price: (estimate as any)?.manual_total_price ?? undefined,
-      line_items: estimate?.line_items?.map((item) => ({
-        ...item,
-        taxable: (item as any).taxable !== false,
-      })) ?? [],
-      markup_percent: estimate?.markup_percent ?? 0,
-      tax_percent:    estimate?.tax_percent    ?? 0,
-      status:         estimate?.status         ?? "draft",
-      notes:          estimate?.notes          ?? defaultNotes ?? "",
-      payment_steps:  (estimate as any)?.payment_steps ?? [],
-    },
+  // ── What the AI wrote (or what's saved, when editing) ─────────────────────
+  const [written, setWritten] = useState<Written | null>(() => {
+    if (!est) return null
+    const scope = parseScope(est.scope_of_work)
+    if (!scope.sections.length) return null   // an old free-text scope → write it again
+    return {
+      title: est.title,
+      total: Number(est.total) || null,
+      sections: scope.sections,
+      payment_steps: (est.payment_steps ?? []).map((p) => ({ name: p.name, amount: Number(p.amount), description: p.description ?? "" })),
+      notes: parseNotes(est.notes),
+    }
   })
+  const [brief, setBrief] = useState<string>(() => {
+    if (est?.brief) return est.brief
+    // Older estimates where the note was typed straight into the scope box
+    if (est?.scope_of_work && !parseScope(est.scope_of_work).sections.length) return est.scope_of_work
+    return ""
+  })
+  const [change, setChange] = useState("")
+  const [writing, setWriting] = useState<"write" | "change" | null>(null)
 
-  const customerId = useWatch({ control: form.control, name: "customer_id" })
-  // Load the lead's details whenever a different customer is picked
+  // ── The lead ("Prepared for") ─────────────────────────────────────────────
+  const [customerList, setCustomerList] = useState<Customer[]>(customers)
+  const [customerId, setCustomerId] = useState<string>(est?.customer_id ?? preselectedCustomerId ?? "")
+  const [pf, setPf] = useState({ name: "", phone: "", email: "", address: "" })
   const [pfFor, setPfFor] = useState<string | null>(null)
+  const [pfDirty, setPfDirty] = useState(false)
+  const [savingPf, setSavingPf] = useState(false)
   if (customerId && pfFor !== customerId) {
     const c = customerList.find((x) => x.id === customerId)
     if (c) {
@@ -165,13 +99,34 @@ export function EstimateForm({
     }
   }
 
+  // ── Save / send ───────────────────────────────────────────────────────────
+  const [saving, setSaving] = useState<"save" | "send" | null>(null)
+  const [sendOpen, setSendOpen] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [savedId, setSavedId] = useState<string | null>(est?.id ?? null)
+  const [to, setTo] = useState("")
+  const [subject, setSubject] = useState("")
+  const [body, setBody] = useState("")
+  const [tplId, setTplId] = useState("")
+  const followUpTemplates = templates.filter((t) => t.type === "estimate_follow_up")
+
+  const steps = written?.payment_steps ?? []
+  const paymentsSum = steps.reduce((t, p) => t + Math.round(p.amount * 100), 0) / 100
+  const noTotal = !!written && !written.total
+  const noPayments = !!written && steps.length === 0
+  const paymentsOff = !!written?.total && steps.length > 0 && Math.round(paymentsSum * 100) !== Math.round(written.total * 100)
+  const problem = !written ? null
+    : noTotal ? "There's no total price. Add it to your description (e.g. “total 48777”) and write it again."
+    : noPayments ? "There's no payment schedule. Add the payments to your description (e.g. “5 payments: 10000 demo, 20000 material arrival…”) or ask for them below."
+    : paymentsOff ? `The payments add up to ${formatMoney(paymentsSum)}, not ${formatMoney(written.total ?? 0)}. Ask for a change below.`
+    : null
+
   async function savePreparedFor(): Promise<boolean> {
     if (!customerId) return false
     if (!pf.name.trim()) { toast({ title: "The lead needs a name", variant: "destructive" }); return false }
     setSavingPf(true)
-    const supabase = createClient()
     const patch = { name: pf.name.trim(), phone: pf.phone.trim() || null, email: pf.email.trim() || null, address: pf.address.trim() || null }
-    const { error } = await supabase.from("customers").update(patch).eq("id", customerId)
+    const { error } = await createClient().from("customers").update(patch).eq("id", customerId)
     setSavingPf(false)
     if (error) { toast({ title: "Couldn't update the lead card", description: error.message, variant: "destructive" }); return false }
     setCustomerList((list) => list.map((c) => (c.id === customerId ? ({ ...c, ...patch } as Customer) : c)))
@@ -180,236 +135,120 @@ export function EstimateForm({
     return true
   }
 
-  async function writeWithAI() {
+  async function runAI(mode: "write" | "change") {
     if (brief.trim().length < 8) { toast({ title: "Describe the job first", variant: "destructive" }); return }
-    setWriting(true); setWriteWarning(null)
+    if (mode === "change" && !change.trim()) return
+    setWriting(mode)
     try {
-      const res = await fetch("/api/estimates/write", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brief }) })
+      const res = await fetch("/api/estimates/write", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mode === "change" ? { brief, change, current: written } : { brief }),
+      })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? "Couldn't write the scope")
-      form.setValue("title", data.title, { shouldDirty: true })
-      form.setValue("scope_of_work", serializeScope(data.sections), { shouldDirty: true })
-      if (data.total) form.setValue("manual_total_price", data.total, { shouldDirty: true })
-      if (data.payment_steps?.length) {
-        form.setValue("payment_steps", data.payment_steps.map((p: { name: string; description: string; amount: number }) => ({ id: uuidv4(), name: p.name, description: p.description, amount: p.amount })), { shouldDirty: true })
-      }
-      if (data.notes?.length) form.setValue("notes", data.notes.join("\n"), { shouldDirty: true })
-      setWriteWarning(data.warning ?? null)
-      toast({ title: "Scope written", description: `${data.sections.length} sections · ${data.payment_steps?.length ?? 0} payments — check it, then save.` })
+      if (!res.ok) throw new Error(data.error ?? "Couldn't write the estimate")
+      setWritten({ title: data.title, total: data.total, sections: data.sections, payment_steps: data.payment_steps ?? [], notes: data.notes ?? [] })
+      if (mode === "change") setChange("")
     } catch (err) {
-      toast({ title: "Couldn't write the scope", description: err instanceof Error ? err.message : String(err), variant: "destructive" })
+      toast({ title: "Couldn't write the estimate", description: err instanceof Error ? err.message : String(err), variant: "destructive" })
     } finally {
-      setWriting(false)
+      setWriting(null)
     }
   }
 
-  const { fields, append, remove } = useFieldArray({ control: form.control, name: "line_items" })
-  const { fields: paymentStepFields, append: appendStep, remove: removeStep } = useFieldArray({ control: form.control, name: "payment_steps" })
+  async function saveEstimate(): Promise<string | null> {
+    if (!customerId) { toast({ title: "Pick the lead card first", variant: "destructive" }); return null }
+    if (!written) { toast({ title: "Press “Write the estimate” first", variant: "destructive" }); return null }
+    if (problem) { toast({ title: "Not ready yet", description: problem, variant: "destructive" }); return null }
+    if (pfDirty && !(await savePreparedFor())) return null
 
-  const lineItems          = useWatch({ control: form.control, name: "line_items" })
-  const markupPct          = useWatch({ control: form.control, name: "markup_percent" })
-  const taxPct             = useWatch({ control: form.control, name: "tax_percent" })
-  const manualTotalPrice   = useWatch({ control: form.control, name: "manual_total_price" })
-  const paymentSteps       = useWatch({ control: form.control, name: "payment_steps" })
-  const scopeOfWork        = useWatch({ control: form.control, name: "scope_of_work" })
-
-  const { subtotal, markupAmount, taxAmount, total: lineItemTotal } = calcTotals(lineItems ?? [], markupPct ?? 0, taxPct ?? 0)
-  const useManualTotal = manualTotalPrice != null && manualTotalPrice > 0
-  const displayTotal = useManualTotal ? manualTotalPrice! : lineItemTotal
-
-  const paymentStepsTotal = (paymentSteps ?? []).reduce((s, p) => s + (p.amount ?? 0), 0)
-  const paymentStepsOverage = paymentStepsTotal > displayTotal && displayTotal > 0
-  const paymentsMatch = (paymentSteps ?? []).length > 0 && displayTotal > 0 && Math.round(paymentStepsTotal * 100) === Math.round(displayTotal * 100)
-
-  function appendRow() {
-    append({ id: uuidv4(), description: "", quantity: 1, unit_price: 0, category: "labor", taxable: true })
-    setTimeout(() => {
-      if (!lineItemsRef.current) return
-      const inputs = lineItemsRef.current.querySelectorAll<HTMLInputElement>("[data-line-desc]")
-      const last = inputs[inputs.length - 1]
-      last?.focus(); last?.select()
-    }, 30)
-  }
-
-  function focusDescAt(index: number) {
-    if (!lineItemsRef.current) return
-    const inputs = lineItemsRef.current.querySelectorAll<HTMLInputElement>("[data-line-desc]")
-    const target = inputs[index]
-    target?.focus(); target?.select()
-  }
-
-  function handleGenerateTitle() {
-    const scope = scopeOfWork?.trim()
-    if (!scope) {
-      toast({ title: "Enter a Scope of Work first to generate a title.", variant: "destructive" })
-      return
-    }
-    setGeneratingTitle(true)
-    setTimeout(() => {
-      const generated = generateTitleFromScope(scope)
-      form.setValue("title", generated)
-      setGeneratingTitle(false)
-    }, 300)
-  }
-
-  function buildTplData(values: EstimateFormValues): Record<string, string> {
-    const selectedCustomer = customerList.find((c) => c.id === values.customer_id)
-    const total = values.manual_total_price && values.manual_total_price > 0
-      ? values.manual_total_price
-      : calcTotals(values.line_items, values.markup_percent, values.tax_percent).total
-    return {
-      customer_name:  selectedCustomer?.name             ?? "",
-      estimate_total: formatCurrency(total),
-      company_name:   companySettings?.company_name      ?? "",
-      sender_name:    companySettings?.company_name      ?? "",
-      sender_phone:   "9512920703",
-      sender_email:   companySettings?.email             ?? "",
-      review_link:    companySettings?.google_review_link ?? "",
-    }
-  }
-
-  function applyTemplate(tplId: string, tplData: Record<string, string>) {
-    const tpl = followUpTemplates.find((t) => t.id === tplId)
-    if (!tpl) return
-    if (tpl.subject) setSubject(renderTemplate(tpl.subject, tplData))
-    setBody(renderTemplate(tpl.body, tplData))
-  }
-
-  async function saveEstimate(values: EstimateFormValues): Promise<string | null> {
     const supabase = createClient()
-    const { subtotal, markupAmount, taxAmount, total } = calcTotals(
-      values.line_items, values.markup_percent, values.tax_percent,
-    )
-    const finalTotal = values.manual_total_price && values.manual_total_price > 0
-      ? values.manual_total_price
-      : total
-
-    const payload = {
-      customer_id:         values.customer_id,
-      title:               values.title,
-      scope_of_work:       values.scope_of_work,
-      manual_total_price:  values.manual_total_price ?? null,
-      line_items:          values.line_items,
-      markup_percent:      values.markup_percent,
-      markup_amount:       markupAmount,
-      tax_percent:         values.tax_percent,
-      tax_amount:          taxAmount,
-      subtotal,
-      total:               finalTotal,
-      status:              values.status,
-      notes:               values.notes,
-      user_id:             userId,
-      brief:               brief.trim() || null,
-    } as Record<string, unknown>
-
-    let error
-    let savedId = estimate?.id ?? null
-
+    const total = written.total!
+    const payload: Record<string, unknown> = {
+      customer_id:        customerId,
+      title:              written.title,
+      scope_of_work:      serializeScope(written.sections),
+      manual_total_price: total,
+      subtotal:           total,
+      markup_percent:     0,
+      markup_amount:      0,
+      tax_percent:        0,
+      tax_amount:         0,
+      total,
+      line_items:         [],
+      notes:              written.notes.join("\n"),
+      brief:              brief.trim() || null,
+      user_id:            userId,
+      ...(est ? {} : { status: "draft" }),
+    }
+    let id = est?.id ?? null
     const write = async (row: Record<string, unknown>) => {
-      if (estimate) return (await supabase.from("estimates").update(row).eq("id", estimate.id)).error
-      const { data: inserted, error: insertError } = await supabase.from("estimates").insert(row).select("id").single()
-      savedId = inserted?.id ?? null
-      return insertError
+      if (est) return (await supabase.from("estimates").update(row).eq("id", est.id)).error
+      const { data, error } = await supabase.from("estimates").insert(row).select("id").single()
+      id = data?.id ?? null
+      return error
     }
-    error = await write(payload)
-    // Before migration 066 the "brief" column doesn't exist yet — save without it
-    if (error && /brief/.test(error.message)) {
-      delete payload.brief
-      error = await write(payload)
-    }
+    let error = await write(payload)
+    if (error && /brief/.test(error.message)) { delete payload.brief; error = await write(payload) }
+    if (error || !id) { toast({ title: "Couldn't save the estimate", description: error?.message, variant: "destructive" }); return null }
 
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" })
-      return null
-    }
-
-    // Save payment steps
-    if (savedId) {
-      await supabase.from("estimate_payment_steps").delete().eq("estimate_id", savedId)
-      const steps = (values.payment_steps ?? []).filter((s) => s.name && s.amount > 0)
-      if (steps.length > 0) {
-        await supabase.from("estimate_payment_steps").insert(
-          steps.map((s, i) => ({
-            estimate_id:  savedId,
-            name:         s.name,
-            amount:       s.amount,
-            description:  s.description || null,
-            sort_order:   i,
-          }))
-        )
-      }
-    }
-
-    if (values.status === "sent" && savedId) {
-      const customer = customers.find((c) => c.id === values.customer_id)
-      if (customer) {
-        await upsertEstimateFollowUp(supabase, {
-          userId,
-          estimateId: savedId,
-          customerId: values.customer_id,
-          customerName: customer.name,
-        })
-      }
-    }
-
-    return savedId
+    await supabase.from("estimate_payment_steps").delete().eq("estimate_id", id)
+    const { error: stepsErr } = await supabase.from("estimate_payment_steps").insert(
+      steps.map((p, i) => ({ estimate_id: id, name: p.name, amount: p.amount, description: p.description || null, sort_order: i })),
+    )
+    if (stepsErr) { toast({ title: "Couldn't save the payment schedule", description: stepsErr.message, variant: "destructive" }); return null }
+    setSavedId(id)
+    return id
   }
 
-  async function onSubmit(values: EstimateFormValues) {
-    const id = await saveEstimate(values)
+  async function handleSave() {
+    setSaving("save")
+    const id = await saveEstimate()
+    setSaving(null)
     if (!id) return
-    toast({ title: estimate ? "Estimate updated" : "Estimate created", description: values.title })
-    router.push("/estimates")
+    toast({ title: est ? "Estimate updated" : "Estimate saved", description: written?.title })
+    router.push(`/estimates/${id}`)
     router.refresh()
   }
 
   async function handleSaveAndSend() {
-    const isValid = await form.trigger()
-    if (!isValid) return
     if (!pf.email.trim()) {
-      toast({ title: "Add the customer's email first", description: "Fill it in under Prepared for, then Save to lead card.", variant: "destructive" })
+      toast({ title: "Add the customer's email first", description: "Fill it in under Prepared for.", variant: "destructive" })
       return
     }
-    if (pfDirty && !(await savePreparedFor())) return
-
-    const values = form.getValues()
-    setSavingForSend(true)
-    const id = await saveEstimate(values)
-    setSavingForSend(false)
-    if (!id) return
-
-    setSavedEstimateId(id)
-    const selectedCustomer = customerList.find((c) => c.id === values.customer_id)
-    setTo(pf.email || selectedCustomer?.email || "")
-    const std = defaultEstimateEmail(pf.name || selectedCustomer?.name || "", values.title)
-
-    // The standard estimate email; saved templates stay one pick away
-    setSelectedTplId("")
-    setSubject(std.subject)
-    setBody(std.body)
+    setSaving("send")
+    const id = await saveEstimate()
+    setSaving(null)
+    if (!id || !written) return
+    const std = defaultEstimateEmail(pf.name, written.title)
+    setTo(pf.email.trim()); setSubject(std.subject); setBody(std.body); setTplId("")
     setSendOpen(true)
   }
 
-  async function handleSend() {
-    if (!savedEstimateId || !to) {
-      toast({ title: "Recipient email is required", variant: "destructive" })
-      return
+  function applyTemplate(id: string) {
+    setTplId(id)
+    const tpl = followUpTemplates.find((t) => t.id === id)
+    if (!tpl) return
+    const data = {
+      customer_name: pf.name, estimate_total: formatMoney(written?.total ?? 0),
+      company_name: companySettings?.company_name ?? "", sender_name: companySettings?.company_name ?? "",
+      sender_phone: companySettings?.phone ?? "", sender_email: companySettings?.email ?? "", review_link: companySettings?.google_review_link ?? "",
     }
+    if (tpl.subject) setSubject(renderTemplate(tpl.subject, data))
+    setBody(renderTemplate(tpl.body, data))
+  }
+
+  async function handleSend() {
+    if (!savedId || !to) return
     setSending(true)
     try {
-      const res = await fetch(`/api/estimates/${savedEstimateId}/send`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ to, subject, body }),
-      })
+      const res = await fetch(`/api/estimates/${savedId}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to, subject, body }) })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toast({ title: "Failed to send", description: (data as any).error ?? "Unknown error", variant: "destructive" })
-        return
-      }
-      toast({ title: "Estimate sent", description: `Email sent to ${to}` })
+      if (!res.ok) { toast({ title: "Failed to send", description: (data as { error?: string }).error ?? "Unknown error", variant: "destructive" }); return }
+      await upsertEstimateFollowUp(createClient(), { userId, estimateId: savedId, customerId, customerName: pf.name })
+      toast({ title: "Estimate sent", description: `Emailed to ${to}` })
       setSendOpen(false)
-      router.push(`/estimates/${savedEstimateId}`)
+      router.push(`/estimates/${savedId}`)
       router.refresh()
     } catch {
       toast({ title: "Failed to send", description: "Network error", variant: "destructive" })
@@ -418,131 +257,41 @@ export function EstimateForm({
     }
   }
 
+  const busy = !!writing || !!saving
+  const label = "text-[11px] font-semibold uppercase tracking-[0.16em] text-[#A88532]"
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-        {/* Describe the job → AI writes the detailed scope */}
-        <Card className="border-primary/30 bg-primary/[0.03]">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><Sparkles className="w-4 h-4 text-primary" /> Describe the job</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Textarea
-              value={brief}
-              onChange={(e) => setBrief(e.target.value)}
-              className="min-h-[96px] text-sm"
-              placeholder={"Write it like a quick note after the visit, e.g.\npatio installation with 4-6 lights, 1 ceiling fan, aluminum with insulated roof (double layer) and a mist line. total 18726, 4 payments: architectural planning and permit submitted 7000, material arrive 5000, patio installed 5000, completion and clean up 1726"}
-            />
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" onClick={writeWithAI} disabled={writing || brief.trim().length < 8} className="gap-1.5">
-                {writing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {writing ? "Writing the scope…" : "Write it for me"}
+    <div className="space-y-5 max-w-3xl">
+      {/* ── 1. The lead card ────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2"><UserRound className="w-4 h-4 text-muted-foreground" /> 1 · Lead</span>
+            {customerId && (
+              <Button type="button" size="sm" variant={pfDirty ? "default" : "outline"} className="gap-1.5 h-8" disabled={!pfDirty || savingPf} onClick={() => void savePreparedFor()}>
+                {savingPf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : pfDirty ? <Save className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                {pfDirty ? "Save to lead card" : "Matches lead card"}
               </Button>
-              <p className="text-xs text-muted-foreground">Fills in the title, detailed scope, payment schedule, total and notes. You can edit everything after.</p>
-            </div>
-            {writeWarning && (
-              <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-sm">
-                <AlertCircle className="w-4 h-4 shrink-0" />{writeWarning}
-              </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Header */}
-        <Card>
-          <CardContent className="pt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField control={form.control} name="customer_id" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Customer *</FormLabel>
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                  <FormControl><SelectTrigger><SelectValue placeholder="Select customer" /></SelectTrigger></FormControl>
-                  <SelectContent>
-                    {customers.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )} />
-
-            <FormField control={form.control} name="status" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Status</FormLabel>
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                  <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                  <SelectContent>
-                    <SelectItem value="draft">Draft</SelectItem>
-                    <SelectItem value="sent">Sent</SelectItem>
-                    <SelectItem value="approved">Approved</SelectItem>
-                    <SelectItem value="rejected">Rejected</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )} />
-
-            <FormField control={form.control} name="scope_of_work" render={({ field }) => (
-              <FormItem className="sm:col-span-2">
-                <FormLabel>Scope of Work <span className="font-normal text-muted-foreground text-xs">· &quot;1. Heading&quot; lines with &quot;- bullet&quot; lines under them</span></FormLabel>
-                <FormControl>
-                  <Textarea
-                    placeholder={"1. Section heading\n- What gets done\n- What gets done\n\n2. Next section\n- …"}
-                    className="min-h-[260px] text-sm leading-relaxed"
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-
-            {/* Title with generate button */}
-            <FormField control={form.control} name="title" render={({ field }) => (
-              <FormItem className="sm:col-span-2">
-                <FormLabel>Estimate Title *</FormLabel>
-                <div className="flex gap-2">
-                  <FormControl className="flex-1">
-                    <Input placeholder="Kitchen Remodel — Phase 1" {...field} />
-                  </FormControl>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="shrink-0"
-                    onClick={handleGenerateTitle}
-                    disabled={generatingTitle}
-                    title="Generate title from Scope of Work"
-                  >
-                    {generatingTitle ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                  </Button>
-                </div>
-                <FormMessage />
-              </FormItem>
-            )} />
-          </CardContent>
-        </Card>
-
-        {/* Prepared for — the lead's details as they print on the estimate */}
-        {customerId && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center justify-between gap-2">
-                <span className="flex items-center gap-2"><UserRound className="w-4 h-4 text-muted-foreground" /> Prepared for</span>
-                <Button type="button" size="sm" variant={pfDirty ? "default" : "outline"} className="gap-1.5 h-8" disabled={!pfDirty || savingPf} onClick={() => void savePreparedFor()}>
-                  {savingPf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : pfDirty ? <Save className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                  {pfDirty ? "Save to lead card" : "Matches lead card"}
-                </Button>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Select value={customerId} onValueChange={(v) => setCustomerId(v)}>
+            <SelectTrigger><SelectValue placeholder="Pick the lead card" /></SelectTrigger>
+            <SelectContent>
+              {customerList.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {customerId && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {([
                 ["name", "Full name", "text", "Maria Gonzalez"],
                 ["phone", "Phone", "tel", "(760) 555-0123"],
                 ["email", "Email", "email", "customer@email.com"],
                 ["address", "Address", "text", "Street, City, CA ZIP"],
-              ] as const).map(([key, label, type, ph]) => (
+              ] as const).map(([key, lbl, type, ph]) => (
                 <div key={key} className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">{label}</label>
+                  <label className="text-xs font-medium text-muted-foreground">{lbl}</label>
                   <Input
                     type={type}
                     value={pf[key]}
@@ -550,383 +299,170 @@ export function EstimateForm({
                     onChange={(e) => { setPf((v) => ({ ...v, [key]: e.target.value })); setPfDirty(true) }}
                     className={cn("h-9", key === "email" && !pf.email.trim() && "border-amber-500/60 bg-amber-500/5")}
                   />
-                  {key === "email" && !pf.email.trim() && (
-                    <p className="text-[11px] text-amber-700 dark:text-amber-400">No email yet — add it to send the estimate.</p>
-                  )}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Total Price (manual override — shown above line items) */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Total Price</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <FormField control={form.control} name="manual_total_price" render={({ field }) => (
-              <FormItem>
-                <div className="flex items-center gap-3">
-                  <div className="relative flex-1 max-w-xs">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm pointer-events-none">$</span>
-                    <FormControl>
-                      <NumericInput
-                        className="pl-7"
-                        min="0"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={field.value ?? ""}
-                        onChange={(e) => {
-                          const v = parseFloat(e.target.value)
-                          field.onChange(isNaN(v) || v === 0 ? undefined : v)
-                        }}
-                        onBlur={field.onBlur}
-                        name={field.name}
-                      />
-                    </FormControl>
-                  </div>
-                  {useManualTotal && (
-                    <span className="text-sm text-muted-foreground">Manual total · {formatCurrency(manualTotalPrice!)}</span>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Enter the all-in job price. Leave blank to use the line item total below.
-                </p>
-                <FormMessage />
-              </FormItem>
-            )} />
-          </CardContent>
-        </Card>
-
-        {/* Line Items (optional) */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center justify-between">
-              Line Items <span className="text-xs font-normal text-muted-foreground">Optional · Tab through fields · Enter on price to add row</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1 pb-4">
-            {fields.length > 0 && (
-              <div className="hidden sm:grid grid-cols-[1fr_96px_56px_96px_36px_32px] gap-x-2 px-2 pb-1">
-                <span className="text-xs font-medium text-muted-foreground">Description</span>
-                <span className="text-xs font-medium text-muted-foreground">Category</span>
-                <span className="text-xs font-medium text-muted-foreground">Qty</span>
-                <span className="text-xs font-medium text-muted-foreground">Unit Price</span>
-                <span className="text-xs font-medium text-muted-foreground text-center">Tax</span>
-                <span />
-              </div>
-            )}
-
-            <div ref={lineItemsRef} className="space-y-0.5">
-              {fields.map((field, index) => (
-                <div
-                  key={field.id}
-                  className="grid grid-cols-1 sm:grid-cols-[1fr_96px_56px_96px_36px_32px] gap-x-2 gap-y-2 items-center p-3 sm:px-2 sm:py-1.5 border sm:border-0 sm:hover:bg-muted/40 rounded-md transition-colors"
-                >
-                  <FormField control={form.control} name={`line_items.${index}.description`} render={({ field }) => (
-                    <FormItem className="sm:mb-0">
-                      <FormControl>
-                        <Input placeholder="Description of work or material" {...field} data-line-desc="" className="h-9" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <FormField control={form.control} name={`line_items.${index}.category`} render={({ field }) => (
-                    <FormItem>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger></FormControl>
-                        <SelectContent>
-                          <SelectItem value="labor">Labor</SelectItem>
-                          <SelectItem value="materials">Materials</SelectItem>
-                          <SelectItem value="subcontractor">Sub</SelectItem>
-                          <SelectItem value="other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <FormField control={form.control} name={`line_items.${index}.quantity`} render={({ field }) => (
-                    <FormItem>
-                      <FormControl>
-                        <NumericInput className="h-9" min="0" value={field.value}
-                          onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                          onBlur={field.onBlur} name={field.name} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <FormField control={form.control} name={`line_items.${index}.unit_price`} render={({ field }) => (
-                    <FormItem>
-                      <FormControl>
-                        <NumericInput className="h-9" min="0" placeholder="0.00" value={field.value}
-                          onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                          onBlur={field.onBlur} name={field.name}
-                          onKeyDown={(e) => {
-                            if (e.key !== "Enter") return
-                            e.preventDefault()
-                            if (index === fields.length - 1) appendRow()
-                            else focusDescAt(index + 1)
-                          }} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <FormField control={form.control} name={`line_items.${index}.taxable`} render={({ field }) => (
-                    <FormItem>
-                      <FormControl>
-                        <button type="button"
-                          title={field.value !== false ? "Taxable — click to mark exempt" : "Non-taxable — click to mark taxable"}
-                          className={cn("h-9 w-full rounded-md border text-[11px] font-semibold transition-colors",
-                            field.value !== false
-                              ? "border-primary/40 bg-primary/10 text-primary"
-                              : "border-muted-foreground/30 text-muted-foreground"
-                          )}
-                          onClick={() => field.onChange(field.value === false ? true : false)}
-                        >
-                          {field.value !== false ? "T" : "NT"}
-                        </button>
-                      </FormControl>
-                    </FormItem>
-                  )} />
-
-                  <Button type="button" variant="ghost" size="icon" tabIndex={-1}
-                    className="text-muted-foreground hover:text-destructive w-8 h-8 shrink-0"
-                    onClick={() => remove(index)}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
+                  {key === "email" && !pf.email.trim() && <p className="text-[11px] text-amber-700 dark:text-amber-400">No email yet — add it to send the estimate.</p>}
                 </div>
               ))}
             </div>
+          )}
+        </CardContent>
+      </Card>
 
-            <div className="pt-2 px-2">
-              <Button type="button" variant="outline" size="sm" onClick={appendRow} className="gap-1.5">
-                <Plus className="w-3.5 h-3.5" />Add Line Item
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Totals */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardContent className="pt-6 grid grid-cols-2 gap-4">
-              <FormField control={form.control} name="markup_percent" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Markup %</FormLabel>
-                  <FormControl>
-                    <NumericInput min="0" max="100" value={field.value}
-                      onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                      onBlur={field.onBlur} name={field.name} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              <FormField control={form.control} name="tax_percent" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Tax % <span className="font-normal text-muted-foreground text-xs">(T items only)</span></FormLabel>
-                  <FormControl>
-                    <NumericInput min="0" max="100" value={field.value}
-                      onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                      onBlur={field.onBlur} name={field.name} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              <FormField control={form.control} name="notes" render={({ field }) => (
-                <FormItem className="col-span-2">
-                  <FormLabel>Project notes <span className="font-normal text-muted-foreground text-xs">(one per line)</span></FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="Project notes — one per line" className="min-h-[110px]" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Estimate Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {!useManualTotal && fields.length > 0 && (
-                <>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Subtotal</span>
-                    <span>{formatCurrency(subtotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Markup ({markupPct ?? 0}%)</span>
-                    <span>{formatCurrency(markupAmount)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Tax ({taxPct ?? 0}%)</span>
-                    <span>{formatCurrency(taxAmount)}</span>
-                  </div>
-                  <Separator />
-                </>
-              )}
-              <div className="flex justify-between font-bold text-lg">
-                <span>Total</span>
-                <span>{formatCurrency(displayTotal)}</span>
-              </div>
-              {useManualTotal && (
-                <p className="text-xs text-muted-foreground">Using manual total price</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Payment Schedule */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center justify-between">
-              Payment Schedule
-              <span className="text-xs font-normal text-muted-foreground">Optional</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {paymentsMatch && (
-              <div className="flex items-center gap-2 text-sm text-success"><CheckCircle2 className="w-4 h-4" /> Payments add up to the total ({formatCurrency(displayTotal)}).</div>
-            )}
-            {!paymentsMatch && !paymentStepsOverage && (paymentSteps ?? []).length > 0 && displayTotal > 0 && (
-              <div className="flex items-center gap-2 p-3 rounded-lg border border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-sm">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                Payments add up to {formatCurrency(paymentStepsTotal)} — {formatCurrency(displayTotal - paymentStepsTotal)} short of the total.
-              </div>
-            )}
-            {paymentStepsOverage && (
-              <div className="flex items-center gap-2 p-3 rounded-lg border border-destructive/40 bg-destructive/5 text-destructive text-sm">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                Payment steps total ({formatCurrency(paymentStepsTotal)}) exceeds estimate total ({formatCurrency(displayTotal)}).
-              </div>
-            )}
-
-            {paymentStepFields.length > 0 && (
-              <div className="hidden sm:grid grid-cols-[1fr_140px_1fr_32px] gap-x-2 px-1 pb-1">
-                <span className="text-xs font-medium text-muted-foreground">Step Name</span>
-                <span className="text-xs font-medium text-muted-foreground">Amount</span>
-                <span className="text-xs font-medium text-muted-foreground">Description (optional)</span>
-                <span />
-              </div>
-            )}
-
-            <div className="space-y-2">
-              {paymentStepFields.map((field, index) => (
-                <div key={field.id} className="grid grid-cols-1 sm:grid-cols-[1fr_140px_1fr_32px] gap-2 items-center">
-                  <FormField control={form.control} name={`payment_steps.${index}.name`} render={({ field }) => (
-                    <FormItem>
-                      <FormControl><Input placeholder="Deposit, Phase 1, Completion…" {...field} className="h-9" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name={`payment_steps.${index}.amount`} render={({ field }) => (
-                    <FormItem>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm pointer-events-none">$</span>
-                        <FormControl>
-                          <NumericInput className="h-9 pl-7" min="0" step="0.01" placeholder="0.00"
-                            value={field.value}
-                            onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                            onBlur={field.onBlur} name={field.name} />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name={`payment_steps.${index}.description`} render={({ field }) => (
-                    <FormItem>
-                      <FormControl><Input placeholder="Optional note…" {...field} className="h-9" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <Button type="button" variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive w-8 h-8 shrink-0"
-                    onClick={() => removeStep(index)}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-
-            {paymentStepFields.length > 0 && displayTotal > 0 && (
-              <div className="flex justify-between text-sm pt-1">
-                <span className="text-muted-foreground">
-                  Assigned: {formatCurrency(paymentStepsTotal)}
-                </span>
-                <span className={paymentStepsOverage ? "text-destructive font-medium" : "text-muted-foreground"}>
-                  Remaining: {formatCurrency(Math.max(0, displayTotal - paymentStepsTotal))}
-                </span>
-              </div>
-            )}
-
-            <Button type="button" variant="outline" size="sm" className="gap-1.5"
-              onClick={() => appendStep({ id: uuidv4(), name: "", amount: 0, description: "" })}>
-              <Plus className="w-3.5 h-3.5" />Add Payment Step
+      {/* ── 2. Short description → AI writes the estimate ─────────────── */}
+      <Card className="border-primary/30">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2"><Sparkles className="w-4 h-4 text-primary" /> 2 · Describe the job</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Textarea
+            value={brief}
+            onChange={(e) => setBrief(e.target.value)}
+            className="min-h-[150px] text-sm"
+            placeholder={"A short note is enough — what you're doing, the total, and the payments. For example:\n\nkitchen remodel, demo old kitchen and drywall, new drywall, new plumbing line, 10 shaker cabinets, island with sink and dishwasher, granite countertop, recessed lights, vent, flooring in missing places. total 48777, 5 payments: 10000 demo, 20000 material arrival, 5000 cabinets and plumbing done, 5000 flooring done, 8777 completion"}
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="button" onClick={() => runAI("write")} disabled={busy || brief.trim().length < 8} className="gap-1.5">
+              {writing === "write" ? <Loader2 className="w-4 h-4 animate-spin" /> : written ? <RotateCcw className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+              {writing === "write" ? "Writing the estimate… (about 20 seconds)" : written ? "Write it again from scratch" : "Write the estimate"}
             </Button>
+            {!written && !writing && <p className="text-xs text-muted-foreground">Writes the title, the full detailed scope of work, the payment schedule and the notes.</p>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── 3. The estimate, as it will look ───────────────────────────── */}
+      {written && (
+        <Card className={cn(writing && "opacity-60 pointer-events-none")}>
+          <CardContent className="pt-6 space-y-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className={label}>Project</p>
+                <h2 className="text-xl font-bold mt-1">{written.title}</h2>
+              </div>
+              <div className="text-right">
+                <p className={label}>Total</p>
+                <p className="text-2xl font-bold tabular-nums mt-0.5">{written.total ? formatMoney(written.total) : "—"}</p>
+              </div>
+            </div>
+
+            <section>
+              <p className={label}>Scope of work</p>
+              <div className="mt-3 space-y-4">
+                {written.sections.map((sec, i) => (
+                  <div key={i}>
+                    <h3 className="flex items-center gap-2.5 font-semibold text-[15px]">
+                      <span className="grid place-items-center w-6 h-6 rounded-full bg-foreground text-background text-[11px] shrink-0">{i + 1}</span>
+                      {sec.heading}
+                    </h3>
+                    <ul className="mt-1.5 ml-9 space-y-1">
+                      {sec.bullets.map((b, k) => (
+                        <li key={k} className="text-sm leading-relaxed text-muted-foreground flex gap-2.5"><span className="mt-[7px] w-1.5 h-1.5 bg-[#C9A246] shrink-0" />{b}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <p className={label}>Payment schedule</p>
+              <div className={cn("mt-3 rounded-lg border overflow-hidden", (noPayments || paymentsOff) && "border-destructive/60")}>
+                {steps.map((p, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 px-4 py-3 border-b">
+                    <div className="flex gap-3 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-sm w-4 shrink-0">{i + 1}</span>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm">{p.name}</p>
+                        {p.description && <p className="text-xs text-muted-foreground mt-0.5">{p.description}</p>}
+                      </div>
+                    </div>
+                    <span className="font-semibold text-sm tabular-nums shrink-0">{formatMoney(p.amount)}</span>
+                  </div>
+                ))}
+                {noPayments && <p className="px-4 py-3 text-sm text-destructive border-b">No payment steps yet.</p>}
+                <div className="flex items-center justify-between bg-[#1E2320] px-4 py-3">
+                  <span className="text-white text-xs font-bold tracking-[0.14em]">TOTAL CONTRACT PRICE</span>
+                  <span className="text-[#C9A246] text-lg font-bold tabular-nums">{written.total ? formatMoney(written.total) : "—"}</span>
+                </div>
+              </div>
+              {!problem && <p className="mt-2 flex items-center gap-1.5 text-sm text-success"><CheckCircle2 className="w-4 h-4" /> {steps.length} payments add up to the total.</p>}
+            </section>
+
+            {written.notes.length > 0 && (
+              <section className="rounded-lg bg-muted/60 p-4">
+                <p className={label}>Project notes</p>
+                <ul className="mt-2 space-y-1">
+                  {written.notes.map((n, i) => <li key={i} className="text-sm flex gap-2.5"><span className="mt-[7px] w-1.5 h-1.5 bg-[#C9A246] shrink-0" />{n}</li>)}
+                </ul>
+              </section>
+            )}
+
+            {problem && (
+              <div className="flex items-start gap-2 p-3 rounded-lg border border-destructive/40 bg-destructive/5 text-destructive text-sm">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{problem}
+              </div>
+            )}
+
+            {/* Changes in plain words */}
+            <div className="rounded-lg border border-dashed p-3 space-y-2">
+              <label className="text-sm font-medium flex items-center gap-1.5"><Wand2 className="w-4 h-4 text-primary" /> Want something changed?</label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  value={change}
+                  onChange={(e) => setChange(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void runAI("change") } }}
+                  placeholder="e.g. add a section for removing the old concrete · make the deposit 5000 and the last payment 13777"
+                  className="h-10"
+                />
+                <Button type="button" variant="outline" onClick={() => runAI("change")} disabled={busy || !change.trim()} className="gap-1.5 shrink-0">
+                  {writing === "change" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  {writing === "change" ? "Changing…" : "Change it"}
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
+      )}
 
-        <div className="flex items-center gap-3">
-          <Button type="submit" disabled={form.formState.isSubmitting || savingForSend}>
-            {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {estimate ? "Save Changes" : "Create Estimate"}
-          </Button>
-          <Button type="button" variant="outline" className="gap-1.5"
-            disabled={form.formState.isSubmitting || savingForSend}
-            onClick={handleSaveAndSend}>
-            {savingForSend ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            Save &amp; Send
-          </Button>
-          <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
-        </div>
-      </form>
+      {/* ── 4. Save / send ─────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" onClick={handleSaveAndSend} disabled={busy || !written || !!problem || !customerId} className="gap-1.5">
+          {saving === "send" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          Save &amp; Send
+        </Button>
+        <Button type="button" variant="outline" onClick={handleSave} disabled={busy || !written || !!problem || !customerId} className="gap-1.5">
+          {saving === "save" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          {est ? "Save changes" : "Save draft"}
+        </Button>
+        <Button type="button" variant="ghost" onClick={() => router.back()}>Cancel</Button>
+      </div>
 
-      {/* Send modal */}
+      {/* Send */}
       <Dialog open={sendOpen} onOpenChange={setSendOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>Send Estimate</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-1">
             {followUpTemplates.length > 0 && (
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Template</label>
-                <Select value={selectedTplId} onValueChange={(id) => {
-                  setSelectedTplId(id)
-                  applyTemplate(id, buildTplData(form.getValues()))
-                }}>
-                  <SelectTrigger><SelectValue placeholder="Select a template" /></SelectTrigger>
-                  <SelectContent>
-                    {followUpTemplates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                  </SelectContent>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Template (optional)</label>
+                <Select value={tplId} onValueChange={applyTemplate}>
+                  <SelectTrigger><SelectValue placeholder="Standard estimate email" /></SelectTrigger>
+                  <SelectContent>{followUpTemplates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}
-
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">To</label>
               <Input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="customer@example.com" />
             </div>
-
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Subject</label>
-              <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Estimate for…" />
+              <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
             </div>
-
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Message <span className="normal-case font-normal">(edit before sending)</span>
-              </label>
-              <Textarea value={body} onChange={(e) => setBody(e.target.value)} className="min-h-[160px] text-sm"
-                placeholder="Hi, please find your estimate attached…" />
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Message <span className="normal-case font-normal">(edit before sending)</span></label>
+              <Textarea value={body} onChange={(e) => setBody(e.target.value)} className="min-h-[160px] text-sm" />
             </div>
-
-            <p className="text-xs text-muted-foreground">Sent as a branded email with a <b>Review &amp; Sign Estimate</b> button and the PDF attached. Valid for 15 days from today.</p>
+            <p className="text-xs text-muted-foreground">Sent as a branded email with a <b>Review &amp; Sign Estimate</b> button and the PDF attached. Valid for {ESTIMATE_VALID_DAYS} days from today.</p>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setSendOpen(false)} disabled={sending}>Cancel</Button>
@@ -936,6 +472,6 @@ export function EstimateForm({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Form>
+    </div>
   )
 }

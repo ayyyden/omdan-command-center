@@ -70,14 +70,19 @@ notes: "All work will be performed in accordance with applicable building codes 
 
 The note may be messy, misspelled, or in Spanglish — understand it, write clean English.`
 
-async function ask(brief: string, feedback?: string): Promise<WrittenEstimate> {
+async function ask(brief: string, feedback?: string, revise?: { current: WrittenEstimate; change: string }): Promise<WrittenEstimate> {
   const response = await createAiClient().messages.stream({
     model: AI_MODEL,
     max_tokens: 16000,
     thinking: { type: "adaptive" },
     output_config: { format: { type: "json_schema", schema: SCHEMA } },
     system: SYSTEM,
-    messages: [{ role: "user", content: `Note:\n${brief}${feedback ? `\n\nFix this in your answer: ${feedback}` : ""}` }],
+    messages: [{
+      role: "user",
+      content: revise
+        ? `Note:\n${brief}\n\nThis is the estimate written so far (JSON):\n${JSON.stringify(revise.current)}\n\nThe owner wants this change: ${revise.change}\nApply exactly that change and keep everything else the same. Return the whole estimate.${feedback ? `\n\nAlso fix: ${feedback}` : ""}`
+        : `Note:\n${brief}${feedback ? `\n\nFix this in your answer: ${feedback}` : ""}`,
+    }],
   }).finalMessage()
   if (response.stop_reason === "refusal") throw new Error("The AI couldn't write this one — try rewording the note")
   const text = response.content.find((b) => b.type === "text")
@@ -87,11 +92,11 @@ async function ask(brief: string, feedback?: string): Promise<WrittenEstimate> {
 
 const cents = (n: number) => Math.round(n * 100)
 
-export async function writeEstimate(brief: string): Promise<WrittenEstimate> {
-  let out = await ask(brief)
+export async function writeEstimate(brief: string, revise?: { current: WrittenEstimate; change: string }): Promise<WrittenEstimate> {
+  let out = await ask(brief, undefined, revise)
   const sum = () => out.payment_steps.reduce((t, p) => t + cents(p.amount), 0)
   if (out.total != null && out.payment_steps.length && sum() !== cents(out.total)) {
-    out = await ask(brief, `the payment amounts add up to ${(sum() / 100).toFixed(2)} but the total is ${out.total}. Use exactly the amounts and total from the note.`)
+    out = await ask(brief, `the payment amounts add up to ${(sum() / 100).toFixed(2)} but the total is ${out.total}. Use exactly the amounts and total from the note.`, revise)
     if (out.total != null && out.payment_steps.length && sum() !== cents(out.total)) {
       out.warning = `The payments add up to $${(sum() / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })} but the total is $${out.total.toLocaleString("en-US", { minimumFractionDigits: 2 })} — please check them.`
     }
