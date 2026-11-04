@@ -19,7 +19,7 @@ export default async function NewEstimatePage({ searchParams }: PageProps) {
   const isScopedPM = role === "project_manager"
 
   // For PM: scope customers to those linked to their assigned jobs
-  let customersQuery = supabase.from("customers").select("id, name, email").order("name")
+  let customersQuery = supabase.from("customers").select("id, name, email, phone, address").order("name")
   if (isScopedPM) {
     const { data: pmJobs } = await supabase
       .from("jobs")

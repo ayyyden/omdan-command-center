@@ -1,5 +1,6 @@
 "use client"
 
+import { defaultEstimateEmail } from "@/lib/estimate-format"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -44,15 +45,11 @@ export function PdfActions({
   const [sendOpen, setSendOpen]     = useState(false)
   const [sending, setSending]       = useState(false)
 
-  // Derive pre-filled send fields from first estimate_follow_up template
-  const followUpTpl = templates.find((t) => t.type === "estimate_follow_up")
+  // Pre-filled with the standard estimate email (estimate-format.ts)
   const [to,      setTo]      = useState(customerEmail ?? "")
-  const [subject, setSubject] = useState(
-    followUpTpl?.subject ? render(followUpTpl.subject, tplData) : `Estimate for ${customerName}: ${estimateTitle}`
-  )
-  const [body, setBody] = useState(
-    followUpTpl ? render(followUpTpl.body, tplData) : ""
-  )
+  const std = defaultEstimateEmail(customerName, estimateTitle)
+  const [subject, setSubject] = useState(std.subject)
+  const [body, setBody] = useState(std.body)
 
   async function generateAndGet(): Promise<string | null> {
     setGenerating(true)

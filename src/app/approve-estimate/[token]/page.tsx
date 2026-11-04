@@ -2,261 +2,212 @@ import { notFound } from "next/navigation"
 import { headers } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/service"
 import { logAudit, hashToken, getIp, getUa } from "@/lib/approval-audit"
+import { OmdanMark } from "@/components/brand/omdan-mark"
+import {
+  ESTIMATE_COMPANY, ESTIMATE_TERMS, parseScope, parseNotes, formatMoney, formatLongDate, estimateNumberLabel,
+} from "@/lib/estimate-format"
 import { ApproveClient } from "./approve-client"
 import type { EstimateLineItem } from "@/types"
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n)
-}
-
-export default async function ApproveEstimatePage({
-  params,
-}: {
-  params: Promise<{ token: string }>
-}) {
+// The client's estimate link: the same estimate as the PDF, laid out for a
+// phone, with "Approve & Sign" at the bottom.
+export default async function ApproveEstimatePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
   const supabase = createServiceClient()
 
   const { data: estimate } = await supabase
     .from("estimates")
-    .select(`
-      id, title, status, scope_of_work, notes, total, subtotal,
-      markup_percent, markup_amount, tax_percent, tax_amount,
-      line_items, approved_at, created_at, user_id, approval_token,
-      customer:customers(name, email, phone, address)
-    `)
+    .select("*, customer:customers(name, email, phone, address)")
     .eq("approval_token", token)
     .single()
-
   if (!estimate) notFound()
 
+  const customer = estimate.customer as unknown as { name: string; email: string | null; phone: string | null; address: string | null } | null
   const hdrs = await headers()
-  const customer0 = estimate.customer as unknown as { name: string; email: string | null } | null
-  void logAudit({
-    documentType:  "estimate",
-    documentId:    estimate.id,
-    tokenHash:     hashToken(token),
-    action:        "viewed",
-    customerName:  customer0?.name  ?? null,
-    customerEmail: customer0?.email ?? null,
-    ipAddress:     getIp(hdrs),
-    userAgent:     getUa(hdrs),
-    metadata:      (estimate.status === "approved" || estimate.status === "rejected")
-                     ? { alreadyResponded: true, status: estimate.status }
-                     : undefined,
+  await logAudit({
+    documentType: "estimate", documentId: estimate.id, tokenHash: hashToken(token), action: "viewed",
+    customerName: customer?.name ?? null, customerEmail: customer?.email ?? null,
+    ipAddress: getIp(hdrs), userAgent: getUa(hdrs),
+    metadata: (estimate.status === "approved" || estimate.status === "rejected") ? { alreadyResponded: true, status: estimate.status } : undefined,
   })
 
-  const [{ data: company }, { data: paymentSteps }] = await Promise.all([
-    supabase
-      .from("company_settings")
-      .select("company_name, phone, email, address, logo_url, license_number")
-      .eq("user_id", estimate.user_id)
-      .single(),
-    supabase
-      .from("estimate_payment_steps")
-      .select("id, name, amount, description, sort_order")
-      .eq("estimate_id", estimate.id)
-      .order("sort_order"),
-  ])
+  const { data: steps } = await supabase
+    .from("estimate_payment_steps").select("id, name, amount, description, sort_order").eq("estimate_id", estimate.id).order("sort_order")
 
-  const customer = estimate.customer as unknown as {
-    name: string
-    email: string | null
-    phone: string | null
-    address: string | null
-  } | null
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })
+  const expired = !!estimate.valid_until && estimate.valid_until < today && estimate.status !== "approved" && estimate.status !== "rejected"
+  const scope = parseScope(estimate.scope_of_work)
+  const notes = parseNotes(estimate.notes)
+  const items = (estimate.line_items ?? []) as EstimateLineItem[]
+  const number = estimateNumberLabel(estimate.estimate_number)
 
-  const lineItems = (estimate.line_items ?? []) as EstimateLineItem[]
-  const hasMarkup = Number(estimate.markup_amount) > 0
-  const hasTax = Number(estimate.tax_amount) > 0
-  const hasNotes = !!estimate.notes?.trim()
-  const hasScopeOfWork = !!estimate.scope_of_work?.trim()
+  const label = "text-[11px] font-semibold uppercase tracking-[0.16em] text-[#A88532]"
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-2xl mx-auto space-y-4">
-
-        {/* Company header */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-          <div className="flex items-start gap-4">
-            {company?.logo_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={company.logo_url}
-                alt={company.company_name ?? "Company logo"}
-                className="w-14 h-14 rounded-xl object-contain shrink-0 border border-gray-100"
-              />
-            )}
-            <div className="flex-1 min-w-0">
-              <h1 className="text-lg font-bold text-gray-900 leading-tight">
-                {company?.company_name ?? "Estimate"}
-              </h1>
-              {company?.address && (
-                <p className="text-sm text-gray-500 mt-0.5">{company.address}</p>
-              )}
-              <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
-                {company?.phone && (
-                  <a href={`tel:${company.phone}`} className="text-sm text-gray-500 hover:text-gray-700">
-                    {company.phone}
-                  </a>
-                )}
-                {company?.email && (
-                  <a href={`mailto:${company.email}`} className="text-sm text-gray-500 hover:text-gray-700">
-                    {company.email}
-                  </a>
-                )}
+    <div className="min-h-screen bg-[#F5F1E7] py-6 sm:py-10 px-3 sm:px-4 text-[#22262A]">
+      <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-[#E4DED0] overflow-hidden">
+        {/* Letterhead */}
+        <div className="px-5 sm:px-8 pt-6 sm:pt-8">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <OmdanMark className="w-10 h-10" color="#B8913A" id="approve" />
+                <div>
+                  <p className="font-serif font-bold text-xl tracking-[0.2em] leading-none text-[#1E2320]">OMDAN</p>
+                  <p className="text-[10px] tracking-[0.3em] text-[#A88532] mt-1">DEVELOPMENT INC.</p>
+                </div>
               </div>
-              {company?.license_number && (
-                <p className="text-xs text-gray-400 mt-1">Lic. {company.license_number}</p>
-              )}
+              <p className="text-xs text-[#6B6F73] mt-3 leading-relaxed">
+                <a href={`tel:${ESTIMATE_COMPANY.phone.replace(/\D/g, "")}`} className="hover:underline">{ESTIMATE_COMPANY.phone}</a>
+                {" · "}
+                <a href={`mailto:${ESTIMATE_COMPANY.email}`} className="hover:underline">{ESTIMATE_COMPANY.email}</a>
+                <br />CA Contractor License #{ESTIMATE_COMPANY.license}
+              </p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="font-serif font-bold text-2xl tracking-wider text-[#1E2320]">ESTIMATE</p>
+              <dl className="text-xs mt-2 space-y-0.5">
+                {number && <div><dt className="inline text-[#6B6F73]">No. </dt><dd className="inline font-semibold">{number}</dd></div>}
+                <div><dt className="inline text-[#6B6F73]">Date </dt><dd className="inline font-semibold">{formatLongDate(estimate.created_at)}</dd></div>
+                {estimate.valid_until && (
+                  <div><dt className="inline text-[#6B6F73]">Valid until </dt><dd className={`inline font-semibold ${expired ? "text-red-600" : ""}`}>{formatLongDate(estimate.valid_until)}</dd></div>
+                )}
+              </dl>
             </div>
           </div>
+          <div className="h-[2px] bg-[#C9A246] mt-5" /><div className="h-px bg-[#C9A246] mt-0.5" />
         </div>
 
-        {/* Estimate summary card */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-          {/* Title bar */}
-          <div className="px-6 py-5 border-b border-gray-100">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-1">
-                  Estimate
-                </p>
-                <h2 className="text-xl font-bold text-gray-900 leading-tight">{estimate.title}</h2>
-                {customer?.name && (
-                  <p className="text-sm text-gray-500 mt-1">Prepared for {customer.name}</p>
-                )}
+        <div className="px-5 sm:px-8 py-6 space-y-7">
+          {/* Prepared for + project */}
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div className="rounded-lg border border-[#E4DED0] p-4">
+              <p className={label}>Prepared for</p>
+              <p className="font-bold mt-1.5">{customer?.name}</p>
+              <div className="text-sm text-[#44484C] leading-relaxed">
+                {customer?.phone && <p>{customer.phone}</p>}
+                {customer?.email && <p className="break-all">{customer.email}</p>}
+                {customer?.address && <p>{customer.address}</p>}
               </div>
-              <div className="text-right shrink-0">
-                <p className="text-2xl font-bold text-gray-900">{fmt(Number(estimate.total))}</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {new Date(estimate.created_at).toLocaleDateString("en-US", {
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                </p>
-              </div>
+            </div>
+            <div className="rounded-lg border border-[#E4DED0] p-4">
+              <p className={label}>Project</p>
+              <p className="font-bold mt-1.5">{estimate.title}</p>
+              <p className="text-2xl font-bold text-[#1E2320] mt-2">{formatMoney(Number(estimate.total))}</p>
+              <p className="text-xs text-[#6B6F73]">Total contract price{steps?.length ? ` · ${steps.length} payments` : ""}</p>
             </div>
           </div>
 
-          {/* Scope of work */}
-          {hasScopeOfWork && (
-            <div className="px-6 py-4 border-b border-gray-100">
-              <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2">
-                Scope of Work
-              </p>
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {estimate.scope_of_work}
-              </p>
-            </div>
-          )}
-
-          {/* Line items */}
-          {lineItems.length > 0 && (
-            <div className="px-6 py-4 border-b border-gray-100">
-              <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">
-                Line Items
-              </p>
-              <div className="space-y-2">
-                {lineItems.map((item, i) => (
-                  <div key={item.id ?? i} className="flex items-start justify-between gap-4 text-sm">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-gray-800 font-medium leading-snug">{item.description}</p>
-                      <p className="text-gray-400 text-xs mt-0.5 capitalize">
-                        {item.category} · {item.quantity} × {fmt(item.unit_price)}
-                      </p>
-                    </div>
-                    <p className="text-gray-900 font-semibold shrink-0 tabular-nums">
-                      {fmt(item.quantity * item.unit_price)}
-                    </p>
+          {/* Scope */}
+          {(scope.sections.length > 0 || scope.intro.length > 0) && (
+            <section>
+              <p className={label}>Scope of work</p>
+              {scope.intro.map((p, i) => <p key={i} className="text-sm mt-3">{p}</p>)}
+              <div className="mt-3 space-y-5">
+                {scope.sections.map((sec, i) => (
+                  <div key={i}>
+                    <h3 className="flex items-center gap-2.5 font-bold text-[15px] text-[#1E2320]">
+                      <span className="grid place-items-center w-6 h-6 rounded-full bg-[#1E2320] text-white text-[11px] shrink-0">{i + 1}</span>
+                      {sec.heading}
+                    </h3>
+                    <ul className="mt-2 ml-9 space-y-1.5">
+                      {sec.bullets.map((b, k) => (
+                        <li key={k} className="text-sm leading-relaxed text-[#33373B] flex gap-2.5">
+                          <span className="mt-[7px] w-1.5 h-1.5 bg-[#C9A246] shrink-0" />{b}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           )}
 
-          {/* Totals */}
-          <div className="px-6 py-4 border-b border-gray-100 space-y-2">
-            <div className="flex justify-between text-sm text-gray-600">
-              <span>Subtotal</span>
-              <span className="tabular-nums">{fmt(Number(estimate.subtotal))}</span>
-            </div>
-            {hasMarkup && (
-              <div className="flex justify-between text-sm text-gray-600">
-                <span>Markup ({estimate.markup_percent}%)</span>
-                <span className="tabular-nums">{fmt(Number(estimate.markup_amount))}</span>
+          {/* Line items (only when there are any) */}
+          {items.length > 0 && (
+            <section>
+              <p className={label}>Line items</p>
+              <div className="mt-3 rounded-lg border border-[#E4DED0] divide-y divide-[#E4DED0]">
+                {items.map((it, i) => (
+                  <div key={it.id ?? i} className="flex justify-between gap-3 px-4 py-2.5 text-sm">
+                    <span>{it.description} <span className="text-[#6B6F73]">· {it.quantity} × {formatMoney(it.unit_price)}</span></span>
+                    <span className="font-semibold tabular-nums">{formatMoney(it.quantity * it.unit_price)}</span>
+                  </div>
+                ))}
               </div>
-            )}
-            {hasTax && (
-              <div className="flex justify-between text-sm text-gray-600">
-                <span>Tax ({estimate.tax_percent}%)</span>
-                <span className="tabular-nums">{fmt(Number(estimate.tax_amount))}</span>
+            </section>
+          )}
+
+          {/* Payment schedule + total */}
+          <section>
+            <p className={label}>{steps?.length ? "Payment schedule" : "Total"}</p>
+            <div className="mt-3 rounded-lg border border-[#E4DED0] overflow-hidden">
+              {(steps ?? []).map((p, i) => (
+                <div key={p.id} className="flex items-start justify-between gap-3 px-4 py-3 border-b border-[#E4DED0]">
+                  <div className="flex gap-3 min-w-0">
+                    <span className="text-[#6B6F73] font-semibold text-sm w-4 shrink-0">{i + 1}</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm">{p.name}</p>
+                      {p.description && <p className="text-xs text-[#6B6F73] mt-0.5">{p.description}</p>}
+                    </div>
+                  </div>
+                  <span className="font-semibold text-sm tabular-nums shrink-0">{formatMoney(Number(p.amount))}</span>
+                </div>
+              ))}
+              {Number(estimate.tax_amount) > 0 && (
+                <div className="flex justify-between px-4 py-2 text-sm text-[#6B6F73] border-b border-[#E4DED0]">
+                  <span>Tax ({estimate.tax_percent}%)</span><span>{formatMoney(Number(estimate.tax_amount))}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between bg-[#1E2320] px-4 py-3.5">
+                <span className="text-white text-xs font-bold tracking-[0.14em]">TOTAL CONTRACT PRICE</span>
+                <span className="text-[#C9A246] text-lg font-bold tabular-nums">{formatMoney(Number(estimate.total))}</span>
               </div>
-            )}
-            <div className="flex justify-between text-base font-bold text-gray-900 pt-2 border-t border-gray-100">
-              <span>Total</span>
-              <span className="tabular-nums">{fmt(Number(estimate.total))}</span>
             </div>
-          </div>
+          </section>
 
           {/* Notes */}
-          {hasNotes && (
-            <div className="px-6 py-4 border-b border-gray-100">
-              <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2">
-                Notes
-              </p>
-              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">
-                {estimate.notes}
-              </p>
-            </div>
-          )}
-
-          {/* Payment Schedule */}
-          {paymentSteps && paymentSteps.length > 0 && (
-            <div className="px-6 py-4 border-b border-gray-100">
-              <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">
-                Payment Schedule
-              </p>
-              <div className="space-y-2">
-                {paymentSteps.map((step, i) => (
-                  <div key={step.id ?? i} className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800">{step.name}</p>
-                      {step.description && (
-                        <p className="text-xs text-gray-500 mt-0.5">{step.description}</p>
-                      )}
-                    </div>
-                    <p className="text-sm font-bold text-gray-900 tabular-nums shrink-0">
-                      {fmt(Number(step.amount))}
-                    </p>
-                  </div>
+          {notes.length > 0 && (
+            <section className="rounded-lg bg-[#F5F1E7] p-4">
+              <p className={label}>Project notes</p>
+              <ul className="mt-2.5 space-y-1.5">
+                {notes.map((n, i) => (
+                  <li key={i} className="text-sm leading-relaxed flex gap-2.5"><span className="mt-[7px] w-1.5 h-1.5 bg-[#C9A246] shrink-0" />{n}</li>
                 ))}
-              </div>
-            </div>
+              </ul>
+            </section>
           )}
 
-          {/* Action area */}
-          <div className="px-6 py-6">
-            <ApproveClient
-              token={token}
-              initialStatus={estimate.status}
-              approvedAt={estimate.approved_at}
-            />
-          </div>
+          {/* Terms */}
+          <section>
+            <p className={label}>Terms</p>
+            <ol className="mt-2.5 space-y-1 text-xs text-[#6B6F73] list-decimal ml-4">
+              {ESTIMATE_TERMS.map((t, i) => <li key={i}>{t}</li>)}
+            </ol>
+            <a href={`/api/estimates/public-pdf/${token}`} target="_blank" rel="noopener noreferrer"
+              className="inline-block mt-4 text-sm font-medium text-[#A88532] underline underline-offset-2">
+              Download the PDF
+            </a>
+          </section>
         </div>
 
-        <p className="text-center text-xs text-gray-400 pb-4">
-          Questions? Contact us at{" "}
-          {company?.email ? (
-            <a href={`mailto:${company.email}`} className="underline hover:text-gray-600">
-              {company.email}
-            </a>
-          ) : (
-            company?.company_name ?? "us"
-          )}
-        </p>
+        {/* Approve & sign */}
+        <div className="px-5 sm:px-8 py-6 border-t border-[#E4DED0] bg-[#FBFAF6]">
+          <ApproveClient
+            token={token}
+            initialStatus={estimate.status}
+            approvedAt={estimate.approved_at}
+            customerName={customer?.name ?? ""}
+            signerName={estimate.signer_name ?? null}
+            expired={expired}
+            validUntil={estimate.valid_until ? formatLongDate(estimate.valid_until) : null}
+          />
+        </div>
       </div>
+      <p className="text-center text-xs text-[#8A8E92] mt-5">
+        Questions? Call <a href={`tel:${ESTIMATE_COMPANY.phone.replace(/\D/g, "")}`} className="underline">{ESTIMATE_COMPANY.phone}</a> or email{" "}
+        <a href={`mailto:${ESTIMATE_COMPANY.email}`} className="underline">{ESTIMATE_COMPANY.email}</a>
+      </p>
     </div>
   )
 }

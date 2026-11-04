@@ -16,10 +16,10 @@ export default async function EditEstimatePage({ params }: PageProps) {
   if (!can(session.role, "estimates:edit")) redirect("/access-denied")
   const { userId, role, pmId, supabase } = session
 
-  const [{ data: estimate }, { data: linkedJob }, { data: customers }, { data: companySettings }, { data: templates }] = await Promise.all([
+  const [{ data: estimate }, { data: linkedJob }, { data: customers }, { data: companySettings }, { data: templates }, { data: paymentSteps }] = await Promise.all([
     supabase.from("estimates").select("*").eq("id", id).single(),
     supabase.from("jobs").select("id, project_manager_id").eq("estimate_id", id).maybeSingle(),
-    supabase.from("customers").select("id, name, email").order("name"),
+    supabase.from("customers").select("id, name, email, phone, address").order("name"),
     supabase.from("company_settings")
       .select("company_name, phone, email, license_number, logo_url, address, google_review_link, default_estimate_notes")
       .order("updated_at", { ascending: false })
@@ -30,6 +30,8 @@ export default async function EditEstimatePage({ params }: PageProps) {
       .eq("is_active", true)
       .eq("type", "estimate_follow_up")
       .order("name"),
+    // Without these the form starts with no payment steps and saving wipes them
+    supabase.from("estimate_payment_steps").select("id, name, amount, description, sort_order").eq("estimate_id", id).order("sort_order"),
   ])
 
   if (!estimate) notFound()
@@ -48,7 +50,7 @@ export default async function EditEstimatePage({ params }: PageProps) {
       <Topbar title="Edit Estimate" subtitle={estimate.title} />
       <div className="p-4 sm:p-6">
         <EstimateForm
-          estimate={estimate as any}
+          estimate={{ ...estimate, payment_steps: (paymentSteps ?? []).map((p) => ({ id: p.id, name: p.name, amount: Number(p.amount), description: p.description ?? "" })) } as any}
           customers={(customers ?? []) as any}
           userId={userId}
           templates={templates ?? []}
