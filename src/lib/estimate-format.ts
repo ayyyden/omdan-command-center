@@ -10,7 +10,7 @@ export const ESTIMATE_VALID_DAYS = 15
 /** Company details printed on every estimate (PDF, email, approval page). */
 export const ESTIMATE_COMPANY = {
   name:    "Omdan Development Inc.",
-  phone:   "(951) 929-0703",
+  phone:   "(951) 292-0703",
   email:   "info@omdandevelopment.com",
   license: "1148568",
 }
