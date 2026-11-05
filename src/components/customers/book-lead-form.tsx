@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
 import { Card, CardContent } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CalendarDays, Loader2, UserCircle } from "lucide-react"
+import { CalendarDays, Loader2, MapPin, Star, UserCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const JOB_TYPES = [
@@ -25,7 +25,8 @@ const JOB_TYPES = [
 const OTHER = "__other"
 
 interface PmOption { id: string; name: string; color: string }
-interface Day { date: string; times: string[] }
+interface Nearby { name: string; city: string | null; time: string; miles: number }
+interface Day { date: string; times: string[]; nearby?: Nearby[] }
 
 function dayLabel(date: string) {
   const d = new Date(`${date}T12:00:00`)
@@ -110,6 +111,8 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
 
   const jobType = jobChoice === OTHER ? jobCustom.trim() : jobChoice
   const dayTimes = useMemo(() => days?.find((d) => d.date === day)?.times ?? [], [days, day])
+  const dayNearby = useMemo(() => days?.find((d) => d.date === day)?.nearby ?? [], [days, day])
+  const starredDays = days?.filter((d) => d.nearby?.length).length ?? 0
   const ready = name.trim() && phone.replace(/\D/g, "").length >= 10 && address.trim().length >= 5 && jobType && day && time
 
   async function submit(e: React.FormEvent) {
@@ -202,14 +205,42 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
           {days && !days.length && <p className="text-sm text-muted-foreground">No open times in the next few weeks.</p>}
           {days && days.length > 0 && (
             <>
+              {starredDays > 0 && (
+                <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                  <Star className="w-4 h-4 fill-amber-400 text-amber-500 shrink-0" />
+                  David already has an estimate near this address on starred days. Try to book one of those.
+                </p>
+              )}
               <div className="flex gap-2 overflow-x-auto pb-1">
-                {days.map((d) => (
-                  <Button key={d.date} type="button" size="sm" variant={day === d.date ? "default" : "outline"} className="shrink-0"
-                    onClick={() => { setDay(d.date); setTime(null) }}>
-                    {dayLabel(d.date)}
-                  </Button>
-                ))}
+                {days.map((d) => {
+                  const near = d.nearby?.length ?? 0
+                  return (
+                    <Button key={d.date} type="button" size="sm" variant={day === d.date ? "default" : "outline"}
+                      className={cn("shrink-0 gap-1", near > 0 && day !== d.date && "border-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40")}
+                      title={near ? `${near} estimate${near > 1 ? "s" : ""} nearby: ${d.nearby!.map((n) => `${n.name} (${n.city ?? "?"}, ${n.miles} mi)`).join(", ")}` : undefined}
+                      onClick={() => { setDay(d.date); setTime(null) }}>
+                      {near > 0 && <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />}
+                      {dayLabel(d.date)}
+                      {near > 1 && <span className="text-xs font-semibold">×{near}</span>}
+                    </Button>
+                  )
+                })}
               </div>
+              {dayNearby.length > 0 && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-1">
+                  <p className="text-sm font-medium flex items-center gap-1.5">
+                    <Star className="w-4 h-4 fill-amber-400 text-amber-500" />
+                    Already nearby on {dayLabel(day!)}
+                  </p>
+                  {dayNearby.map((n, i) => (
+                    <p key={i} className="text-sm text-muted-foreground flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 shrink-0" />
+                      {timeLabel(n.time)}: {n.name}{n.city ? `, ${n.city}` : ""} ({n.miles <= 1 ? "same area" : `${n.miles} mi away`})
+                    </p>
+                  ))}
+                  <p className="text-xs text-muted-foreground">Pick a time right before or after these to keep David's driving short.</p>
+                </div>
+              )}
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                 {dayTimes.map((t) => (
                   <Button key={t} type="button" size="sm" variant={time === t ? "default" : "outline"} onClick={() => setTime(t)}>
