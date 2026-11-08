@@ -3,17 +3,19 @@ import { verifyRetellSecret, phoneDigits, speakDateTime } from "@/lib/retell"
 import { createServiceClient } from "@/lib/supabase/service"
 import { handleFollowupReply } from "@/lib/followups"
 import {
-  LEAD_COLUMNS, getConfirmation, markConfirmed, startConfirmationCall, notifyOwner, ptParts,
+  LEAD_COLUMNS, getConfirmation, markConfirmed, notifyOwner,
   leadLanguage, leadBrand, BRANDS, textCustomer, type ScheduledLead,
 } from "@/lib/appointments"
 
-const YES = /^\s*(1|y|yes|yeah|yep|yup|si|sí|confirm(ed|o|ado)?|ok(ay)?|👍)\b/i
-const CHANGE = /^\s*(2|reschedule|change|cambiar|cambio|otra|another)\b/i
+// Any normal way of saying yes, from "Y" or "Confirmed" to "Yes we'll be there"
+// (any capitals, any punctuation). A reply that asks for a change wins over yes.
+const YES = /^\W*(1|y|yes|yea|yeah|yep|yup|ya|si|sí|confirm(s|ed|o|ado)?|ok(ay)?|k|sure|correct|absolutely|of course|claro|👍|✅)(\W|$)|\b(confirm(ed)?|(we|i)('ll| will) be (there|home)|see you)\b/i
+const CHANGE = /^\W*(2|reschedule|change|cambiar|cambio|otra|another)\b|\b(reschedule|different (time|day)|another (time|day)|can'?t make it|cancel)\b/i
 
 // POST /api/quo/inbound?secret=… — Quo webhook (message.received).
-// Replies to the confirmation text: YES/1 confirms the appointment,
-// 2 gets a call from Sofia to pick a new time. Any other message is left
-// for the team in Quo as usual.
+// Replies to the confirmation text: YES (or any yes) confirms the appointment,
+// 2 tells the customer we'll call and alerts the owner — no automated calls.
+// Any other message is left for the team in Quo as usual.
 export async function POST(req: NextRequest) {
   const authErr = verifyRetellSecret(req)
   if (authErr) return authErr
@@ -29,7 +31,7 @@ export async function POST(req: NextRequest) {
   if (await handleFollowupReply(createServiceClient(), msg.from, text).catch(() => false)) {
     return NextResponse.json({ ok: true, action: "follow-up reply sent to the team" })
   }
-  const yes = YES.test(text), change = !yes && CHANGE.test(text)
+  const change = CHANGE.test(text), yes = !change && YES.test(text)
   if (!yes && !change) return NextResponse.json({ ok: true, skipped: true })
 
   const digits = phoneDigits(msg.from)
@@ -58,15 +60,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, action: "confirmed" })
   }
 
-  const mins = Number(ptParts(now.toISOString()).time.slice(0, 2)) * 60 + Number(ptParts(now.toISOString()).time.slice(3))
-  const canCall = mins >= 8 * 60 && mins <= 20 * 60
   await textCustomer(lead, lead.phone!, lang === "es"
-    ? `${company}: ¡Sin problema! ${canCall ? "Le llamamos en un momento" : "Le llamamos en la mañana"} para buscar otra hora.`
-    : `${company}: No problem! ${canCall ? "We'll call you in a moment" : "We'll call you in the morning"} to find a new time.`)
-  if (canCall) {
-    const call = await startConfirmationCall(lead, row, "reschedule_request")
-    if (call.ok) return NextResponse.json({ ok: true, action: "reschedule call" })
-  }
-  await notifyOwner(`${lead.full_name} (${company}) replied that they need a different time for ${speakDateTime(lead.scheduled_at!)}. Please call ${lead.phone}.`)
+    ? `${company}: ¡Sin problema! Le llamaremos pronto para buscar otra hora.`
+    : `${company}: No problem! We will call you soon to find a new time.`)
+  await notifyOwner(`${lead.full_name} (${company}) replied "${text.trim().slice(0, 120)}" to the confirmation text for ${speakDateTime(lead.scheduled_at!)}. They need a different time. Please call ${lead.phone}.`)
   return NextResponse.json({ ok: true, action: "owner notified" })
 }
