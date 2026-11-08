@@ -240,14 +240,19 @@ export async function cancelLead(service: SupabaseClient, lead: ScheduledLead, r
   await notifyOwner(`Sofia CANCELLED (${BRANDS[leadBrand(lead)].name}): ${lead.full_name} ${lead.phone ?? ""}\n${speakDateTime(lead.scheduled_at!)}${reason ? `\nReason: ${reason}` : ""}\nMoved back to the call list.`)
 }
 
+// The appointment confirmation text. Plain and polite, the same for everyone
+// (no Sir/Ma'am, no slang, no emojis), one clear instruction, so it reads well
+// for any customer of any age.
 export function confirmationText(lead: ScheduledLead): string {
   const brand = BRANDS[leadBrand(lead)]
   const lang = leadLanguage(lead)
   const when = speakDateTime(lead.scheduled_at!, lang)
   const today = ptParts(new Date().toISOString()).date === ptParts(lead.scheduled_at!).date
+  const first = firstName(lead.full_name)
+  const hi = !first || /^(lead|new|\[test\]|\+?\d)/i.test(first) ? "" : ` ${first.charAt(0).toUpperCase()}${first.slice(1)}`
   return lang === "es"
-    ? `${brand.name}: Hola ${firstName(lead.full_name)}, le llamamos para confirmar su estimado gratis ${today ? "de hoy" : "de mañana"}, ${when}${lead.address ? ` en ${lead.address}` : ""}. Responda SI para confirmar o 2 si necesita cambiar la hora.`
-    : `${brand.name}: Hi ${firstName(lead.full_name)}, we called to confirm your free estimate ${today ? "today" : "tomorrow"}, ${when}${lead.address ? ` at ${lead.address}` : ""}. Please reply YES to confirm, or 2 if you need a different time.`
+    ? `${brand.name}: Hola${hi}, le recordamos su cita para el estimado gratis ${today ? "hoy" : "mañana"}, ${when}${lead.address ? `, en ${lead.address}` : ""}.\n\nPor favor responda SI para confirmar, o 2 si necesita otra hora.\n\nGracias, ${brand.name} ${brand.phone}`
+    : `${brand.name}: Hello${hi}, this is a reminder of your free estimate appointment ${today ? "today" : "tomorrow"}, ${when}${lead.address ? `, at ${lead.address}` : ""}.\n\nPlease reply YES to confirm, or 2 if you need a different time.\n\nThank you, ${brand.name} ${brand.phone}`
 }
 
 export type CallKind = "first" | "final" | "reschedule_request"
