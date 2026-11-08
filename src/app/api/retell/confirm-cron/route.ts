@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/service"
 import {
-  getConfirmation, ptParts, ptInstant, leadBrand, confirmationText, textCustomer, notifyOwner, BRANDS,
+  getConfirmation, ptParts, leadBrand, confirmationText, textCustomer, notifyOwner, BRANDS,
 } from "@/lib/appointments"
 import { calendarAppointments } from "@/lib/calendar-appointments"
 import { speakDateTime } from "@/lib/retell"
@@ -14,7 +14,7 @@ import { retryMissingAppointmentEvents } from "@/lib/lead-appointment-calendar-s
 // Appointment confirmations are by TEXT ONLY — no calls. For every estimate on
 // the Google Calendar in the next ~36 hours (jobs, all-day events and events
 // without a phone are skipped):
-//   the day before at 10 AM  -> confirmation text from the company's number:
+//   24 hours before          -> confirmation text from the company's number:
 //                               reply YES to confirm, 2 for a different time
 //                               (replies are handled in /api/quo/inbound)
 //   no reply 2 hours before  -> the owner gets a heads-up to call them
@@ -69,9 +69,7 @@ export async function POST(req: NextRequest) {
     if (new Date(lead.scheduled_at!).getTime() > horizon) continue
     if (!lead.phone || !lead.scheduled_at) continue
     const start = new Date(lead.scheduled_at)
-    const { date } = ptParts(lead.scheduled_at)
-    const dayBefore = ptParts(new Date(ptInstant(date, "12:00").getTime() - 24 * 60 * MIN).toISOString()).date
-    const textDue = ptInstant(dayBefore, "10:00")
+    const textDue = new Date(start.getTime() - 24 * 60 * MIN)
     const headsUpDue = new Date(start.getTime() - 120 * MIN)
     const entry: Record<string, unknown> = { lead: lead.full_name, brand: leadBrand(lead), at: lead.scheduled_at, textDue: textDue.toISOString() }
     report.push(entry)
