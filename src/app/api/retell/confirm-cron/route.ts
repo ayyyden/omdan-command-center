@@ -5,6 +5,7 @@ import {
 } from "@/lib/appointments"
 import { calendarAppointments } from "@/lib/calendar-appointments"
 import { speakDateTime } from "@/lib/retell"
+import { isRealUsPhone } from "@/lib/quo-client"
 import { sendDailyCheckin } from "@/lib/lead-checkins"
 import { runFollowups } from "@/lib/followups"
 import { retryMissingAppointmentEvents } from "@/lib/lead-appointment-calendar-sync"
@@ -98,10 +99,13 @@ export async function POST(req: NextRequest) {
     if (!row?.text_sent_at && now >= textDue && now < headsUpDue) {
       if (!textHours) { entry.action = "text waiting for 8 AM"; continue }
       entry.action = "confirmation text"
+      if (!isRealUsPhone(lead.phone)) { entry.action = "skip (not a real phone number)"; continue }
       if (row) {
         const sms = await textCustomer(lead, lead.phone, confirmationText(lead))
+        // A failed text is tried once only (text_sent_at is set either way), so
+        // the owner gets one message about it, not one every 5 minutes.
         await service.from("appointment_confirmations")
-          .update(sms.ok ? { text_sent_at: now.toISOString() } : { notes: `Confirmation text failed: ${sms.error}`.slice(0, 500) }).eq("id", row.id)
+          .update(sms.ok ? { text_sent_at: now.toISOString() } : { text_sent_at: now.toISOString(), notes: `Confirmation text failed: ${sms.error}`.slice(0, 500) }).eq("id", row.id)
         if (!sms.ok) await notifyOwner(`Couldn't text ${lead.full_name} (${lead.phone}) the confirmation request: ${sms.error.slice(0, 160)}`)
         entry.result = sms.ok ? "sent" : sms.error
       }

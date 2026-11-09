@@ -19,6 +19,18 @@ export function toE164(phone: string): string | null {
   return null
 }
 
+/**
+ * A dialable US/Canada number: +1, then an area code and exchange that start
+ * with 2-9 (real numbers never start with 0 or 1, so an account ID like
+ * 101-340-5686 is rejected), and not an N11 service code (411, 911…).
+ */
+export function isRealUsPhone(phone: string | null | undefined): boolean {
+  const e164 = toE164(phone ?? "")
+  const m = e164?.match(/^\+1([2-9]\d{2})([2-9]\d{2})(\d{4})$/)
+  if (!m) return false
+  return !/^[2-9]11$/.test(m[1]) && !/^[2-9]11$/.test(m[2])
+}
+
 // `from` defaults to QUO_FROM_NUMBER (Omdan); pass another workspace number to send from it.
 export async function sendQuoSms(toPhone: string, content: string, from?: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const check = assertQuoConfig()

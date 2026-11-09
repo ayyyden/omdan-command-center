@@ -14,7 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { listUpcomingEvents, type CalendarEventSummary } from "@/lib/google-calendar"
 import { parseAppointment } from "@/lib/lead-from-appointment"
-import { toE164 } from "@/lib/quo-client"
+import { toE164, isRealUsPhone } from "@/lib/quo-client"
 import { phoneDigits } from "@/lib/retell"
 import { LEAD_COLUMNS, type ScheduledLead } from "@/lib/appointments"
 
@@ -42,9 +42,18 @@ export async function calendarAppointments(
   const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
   if (!calendarId) throw new Error("Calendar not configured (META_LEADS_MAIN_CALENDAR_ID)")
 
-  const events = await listUpcomingEvents(calendarId, { daysAhead: hoursAhead / 24, maxResults: 250 })
-  const ids = events.map((e) => e.id).filter(Boolean)
+  const all = await listUpcomingEvents(calendarId, { daysAhead: hoursAhead / 24, maxResults: 250 })
   const skipped: SkippedEvent[] = []
+  // Meetings someone else invited us to (a Google Ads consultation, a supplier
+  // call…) are not customer appointments: never link, text or call them.
+  const own = new Set([calendarId.toLowerCase(), (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "").toLowerCase()].filter(Boolean))
+  const events = all.filter((e) => {
+    const organizer = e.organizerEmail?.toLowerCase()
+    if (!organizer || own.has(organizer)) return true
+    skipped.push({ title: e.title, start: e.start, reason: `invitation from ${organizer}, not a customer appointment` })
+    return false
+  })
+  const ids = events.map((e) => e.id).filter(Boolean)
   if (!dry) await unlinkDeletedEvents(service, ids, hoursAhead)
   if (!ids.length) return { appointments: [], skipped }
 
@@ -74,6 +83,7 @@ export async function calendarAppointments(
     let lead: ScheduledLead | null = linked.get(ev.id) ?? null
     if (!lead) lead = await linkEventToLead(service, calendarId, ev, startIso, partnerContacts.get(ev.id) ?? null, ids, dry)
     if (!lead) { skip("no phone number on the event"); continue }
+    if (!isRealUsPhone(lead.phone)) { skip(`"${lead.phone}" is not a real phone number`); continue }
 
     // The calendar is the schedule: its time and details win.
     const changes = changesFromEvent(lead, ev, startIso, partnerContacts.get(ev.id) ?? null)
@@ -164,7 +174,8 @@ async function linkEventToLead(
 ): Promise<ScheduledLead | null> {
   const parsed = parseAppointment(ev)
   const phone = toE164(partner?.phone || parsed.phone || "")
-  if (!phone) return null
+  // An account number or ID in the event text is not a phone number.
+  if (!phone || !isRealUsPhone(phone)) return null
   const digits = phoneDigits(phone)
 
   const { data: samePhone } = await service.from("meta_leads").select(LEAD_COLUMNS)
