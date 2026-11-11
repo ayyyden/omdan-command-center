@@ -46,10 +46,14 @@ export async function calendarAppointments(
   const skipped: SkippedEvent[] = []
   // Meetings someone else invited us to (a Google Ads consultation, a supplier
   // call…) are not customer appointments: never link, text or call them.
+  // Ours: the calendar itself, the CRM's service account, and every
+  // @omdandevelopment.com address (the real appointments are organised by
+  // info@omdandevelopment.com on the omdandevelopment@gmail.com calendar).
   const own = new Set([calendarId.toLowerCase(), (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "").toLowerCase()].filter(Boolean))
+  const isOurs = (email: string) => own.has(email) || /@omdandevelopment\.com$/.test(email) || /@desertgreenbuilders\.com$/.test(email)
   const events = all.filter((e) => {
     const organizer = e.organizerEmail?.toLowerCase()
-    if (!organizer || own.has(organizer)) return true
+    if (!organizer || isOurs(organizer)) return true
     skipped.push({ title: e.title, start: e.start, reason: `invitation from ${organizer}, not a customer appointment` })
     return false
   })
