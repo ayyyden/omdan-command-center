@@ -40,6 +40,8 @@ export async function middleware(request: NextRequest) {
   const isPublicPath =
     pathname === "/login" ||
     pathname === "/access-denied" ||
+    pathname === "/reset-password" ||
+    pathname === "/api/auth/forgot-password" ||
     pathname.startsWith("/sign-contract/") ||
     pathname.startsWith("/approve-estimate/") ||
     pathname.startsWith("/approve-change-order/") ||
