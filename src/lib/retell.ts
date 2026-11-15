@@ -8,6 +8,7 @@
 
 import { NextResponse } from "next/server"
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
+import { arrivalWindow } from "@/lib/arrival-window"
 
 export const TZ = "America/Los_Angeles"
 
@@ -107,4 +108,22 @@ export function sayWhenIso(iso: string, lang: "en" | "es" = "en"): string {
 export function speakDateTime(iso: string, lang: "en" | "es" = "en"): string {
   const d = new Date(iso)
   return speakSlot(formatInTimeZone(d, TZ, "yyyy-MM-dd"), formatInTimeZone(d, TZ, "HH:mm"), lang)
+}
+
+/**
+ * For texts to customers: the date plus an arrival window instead of an exact
+ * time, e.g. "Monday, November 17, between 9 and 11 AM" (see arrival-window.ts).
+ * Owner notes and alerts keep the exact time (speakSlot / speakDateTime).
+ */
+export function speakSlotWindow(date: string, time: string, lang: "en" | "es" = "en"): string {
+  const when = fromZonedTime(`${date}T${time}:00`, TZ)
+  const day = lang === "es"
+    ? new Intl.DateTimeFormat("es-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric" }).format(when)
+    : formatInTimeZone(when, TZ, "EEEE, MMMM d")
+  return `${day}, ${arrivalWindow(time, lang)}`
+}
+
+export function speakWindowIso(iso: string, lang: "en" | "es" = "en"): string {
+  const d = new Date(iso)
+  return speakSlotWindow(formatInTimeZone(d, TZ, "yyyy-MM-dd"), formatInTimeZone(d, TZ, "HH:mm"), lang)
 }

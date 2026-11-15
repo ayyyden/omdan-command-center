@@ -6,7 +6,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
-import { TZ, bookingScriptUrl, speakDateTime, speakSlot, sayWhen, sayWhenIso, phoneDigits, type RetellCall } from "@/lib/retell"
+import { TZ, bookingScriptUrl, speakDateTime, speakSlot, speakSlotWindow, speakWindowIso, sayWhen, sayWhenIso, phoneDigits, type RetellCall } from "@/lib/retell"
 import { sendQuoSms } from "@/lib/quo-client"
 import { setEventConfirmed, moveCalendarEvent, deleteCalendarEvent, createAppointmentEvent } from "@/lib/google-calendar"
 
@@ -213,7 +213,7 @@ export async function rescheduleLead(service: SupabaseClient, lead: ScheduledLea
   await addLeadNote(service, lead, `Rescheduled by ${by === "owner" ? "David" : "phone"} from ${speakDateTime(lead.scheduled_at!)} to ${speakSlot(newDate, newTime)}`,
     { scheduled_at: newStart.toISOString(), ...link })
 
-  const when = speakSlot(newDate, newTime, lang)
+  const when = speakSlotWindow(newDate, newTime, lang)
   const company = BRANDS[brand]
   if (lead.phone) {
     await textCustomer(lead, lead.phone, lang === "es"
@@ -246,7 +246,7 @@ export async function cancelLead(service: SupabaseClient, lead: ScheduledLead, r
 export function confirmationText(lead: ScheduledLead): string {
   const brand = BRANDS[leadBrand(lead)]
   const lang = leadLanguage(lead)
-  const when = speakDateTime(lead.scheduled_at!, lang)
+  const when = speakWindowIso(lead.scheduled_at!, lang)
   const today = ptParts(new Date().toISOString()).date === ptParts(lead.scheduled_at!).date
   const first = firstName(lead.full_name)
   const hi = !first || /^(lead|new|\[test\]|\+?\d)/i.test(first) ? "" : ` ${first.charAt(0).toUpperCase()}${first.slice(1)}`

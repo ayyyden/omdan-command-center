@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Copy, Check } from "lucide-react"
+import { arrivalWindow } from "@/lib/arrival-window"
 
 interface Appointment {
   scheduled_date: string
@@ -57,7 +58,7 @@ function buildCustomerText(
   const companyName = company?.company_name ?? "Omdan Development"
   const companyPhone = company?.phone ?? "(951) 292-0703"
   const dateStr = formatApptDate(appt.scheduled_date)
-  const timeStr = appt.start_time ? ` at ${formatTime12(appt.start_time)}` : ""
+  const timeStr = appt.start_time ? `, ${arrivalWindow(appt.start_time.slice(0, 5))}` : ""
   return `Hi ${firstName}! This is ${companyName} confirming your free on-site estimate for ${dateStr}${timeStr}. We'll be heading your way — please reply YES to confirm or call/text us at ${companyPhone}. See you soon! 🏡`
 }
 

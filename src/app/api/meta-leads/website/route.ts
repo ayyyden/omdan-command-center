@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/service"
 import { attributeMetaLead, cleanUtm } from "@/lib/meta-attribution"
 import { bookingConfirmationText, sendBookingConfirmation } from "@/lib/booking-texts"
-import { speakDateTime } from "@/lib/retell"
+import { speakDateTime, speakWindowIso } from "@/lib/retell"
 import { notifyLiaAction } from "@/lib/lia-notifications"
 import { notifyOwner } from "@/lib/appointments"
 import { leadSource } from "@/lib/lead-source"
@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     const brand = /^Omdan Development:/.test(body.interests ?? "") ? "omdan" : "desert_green"
     const lang = /spanish/i.test(body.language ?? "") ? "es" : "en"
     text = await sendBookingConfirmation(body.phone, brand, bookingConfirmationText({
-      brand, fullName: full_name, when: speakDateTime(when.toISOString(), lang), address: body.address, lang,
+      brand, fullName: full_name, when: speakWindowIso(when.toISOString(), lang), address: body.address, lang,
     }))
     if (!text.ok) console.error("[meta-leads/website] confirmation text failed:", text.error)
 

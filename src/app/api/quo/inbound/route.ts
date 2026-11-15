@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { verifyRetellSecret, phoneDigits, speakDateTime } from "@/lib/retell"
+import { verifyRetellSecret, phoneDigits, speakDateTime, speakWindowIso } from "@/lib/retell"
 import { createServiceClient } from "@/lib/supabase/service"
 import { handleFollowupReply } from "@/lib/followups"
 import {
@@ -55,8 +55,8 @@ export async function POST(req: NextRequest) {
   if (yes) {
     await markConfirmed(service, lead, "text reply")
     await textCustomer(lead, lead.phone!, lang === "es"
-      ? `${company}: ¡Gracias! Su estimado del ${speakDateTime(lead.scheduled_at!, "es")} está confirmado. ¡Nos vemos!`
-      : `${company}: Thank you! Your estimate on ${speakDateTime(lead.scheduled_at!)} is confirmed. See you then!`)
+      ? `${company}: ¡Gracias! Su estimado del ${speakWindowIso(lead.scheduled_at!, "es")} está confirmado. ¡Nos vemos!`
+      : `${company}: Thank you! Your estimate on ${speakWindowIso(lead.scheduled_at!)} is confirmed. See you then!`)
     return NextResponse.json({ ok: true, action: "confirmed" })
   }
 

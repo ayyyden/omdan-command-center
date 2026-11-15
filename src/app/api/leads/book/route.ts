@@ -4,7 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service"
 import { syncLeadAppointmentCalendarEvent } from "@/lib/lead-appointment-calendar-sync"
 import { BRANDS, type Brand } from "@/lib/appointments"
 import { toE164 } from "@/lib/quo-client"
-import { phoneDigits, speakSlot } from "@/lib/retell"
+import { phoneDigits, speakSlot, speakSlotWindow } from "@/lib/retell"
 import { bookingConfirmationText, sendBookingConfirmation } from "@/lib/booking-texts"
 
 // POST /api/leads/book — the CRM "Add lead" form.
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
       const { data: pm } = await service.from("project_managers").select("name").eq("id", b.pm_id).maybeSingle()
       visitor = (pm?.name as string) ?? null
     }
-    const content = bookingConfirmationText({ brand, fullName: name, when: speakSlot(b.date!, b.time!, lang), address, lang, visitor })
+    const content = bookingConfirmationText({ brand, fullName: name, when: speakSlotWindow(b.date!, b.time!, lang), address, lang, visitor })
     text = await sendBookingConfirmation(phone!, brand, content)
   }
 

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
-import { verifyRetellSecret, readToolCall, toolReply, bookingScriptUrl, speakSlot, sayWhen, customerNumber } from "@/lib/retell"
+import { verifyRetellSecret, readToolCall, toolReply, bookingScriptUrl, speakSlotWindow, sayWhen, customerNumber } from "@/lib/retell"
+import { arrivalWindow } from "@/lib/arrival-window"
 import { toE164, sendQuoSms } from "@/lib/quo-client"
 import { BRANDS } from "@/lib/appointments"
 
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest) {
     return toolReply({ ok: false, error: data.error, message: msg[data.error ?? ""] ?? "Booking failed. Tell them David will call shortly to confirm." })
   }
 
-  const when = speakSlot(args.date!, args.time!, lang)
+  const when = speakSlotWindow(args.date!, args.time!, lang)
   const site = "https://omdandevelopment.com"
   const text = lang === "es"
     ? `Omdan Development: ¡Listo, ${args.full_name!.split(" ")[0]}! Su estimado gratis en sitio es el ${when} en ${args.street}, ${args.city}. David le avisará cuando vaya en camino. ¿Preguntas? Llame o escriba al (951) 292-0703. ${site}`
@@ -89,6 +90,6 @@ export async function POST(req: NextRequest) {
   return toolReply({
     ok: true,
     confirmation_text_sent: sms.ok,
-    message: `Booked for ${sayWhen(args.date!, args.time!, lang)}. ${sms.ok ? "A confirmation text was sent." : "The confirmation text could not be sent; tell them they'll get a reminder the day before."}`,
+    message: `Booked for ${sayWhen(args.date!, args.time!, lang)}. Tell them David will arrive ${arrivalWindow(args.time!, lang)}. ${sms.ok ? "A confirmation text was sent." : "The confirmation text could not be sent; tell them they'll get a reminder the day before."}`,
   })
 }
