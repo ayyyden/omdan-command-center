@@ -188,6 +188,21 @@ export async function deleteCalendarEvent(calendarId: string, eventId: string): 
   }
 }
 
+/** An event's current start, or null when it was deleted (gone or cancelled).
+ *  Used to tell "moved out of the sync window" apart from "deleted". */
+export async function getEventStart(calendarId: string, eventId: string): Promise<{ start: string; end: string | null } | null> {
+  const calendar = getCalendarClient()
+  try {
+    const { data } = await calendar.events.get({ calendarId, eventId })
+    if (data.status === "cancelled" || !data.start?.dateTime) return null
+    return { start: data.start.dateTime, end: data.end?.dateTime ?? null }
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status ?? (err as { code?: number })?.code
+    if (status === 404 || status === 410) return null
+    throw err
+  }
+}
+
 export interface CalendarEventSummary {
   id:          string
   title:       string

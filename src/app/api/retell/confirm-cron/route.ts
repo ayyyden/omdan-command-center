@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/service"
 import {
   getConfirmation, ptParts, leadBrand, confirmationText, textCustomer, notifyOwner, BRANDS,
+  handleMovedAppointment, sendMovedTexts,
 } from "@/lib/appointments"
 import { calendarAppointments } from "@/lib/calendar-appointments"
 import { speakDateTime } from "@/lib/retell"
@@ -64,6 +65,18 @@ export async function POST(req: NextRequest) {
   const minutesPt = Number(nowPt.time.slice(0, 2)) * 60 + Number(nowPt.time.slice(3))
   const textHours = minutesPt >= 8 * 60 && minutesPt <= 20 * 60
 
+  // Appointments moved on the calendar since the last run (before the reminder
+  // checks below, so the new time counts as confirmed and gets no reminder).
+  const movedReport: Record<string, unknown>[] = []
+  for (const m of calendar.moved) {
+    const entry: Record<string, unknown> = { lead: m.lead.full_name, from: m.oldIso, to: m.lead.scheduled_at }
+    movedReport.push(entry)
+    if (dry) continue
+    try { Object.assign(entry, await handleMovedAppointment(service, m.lead, m.oldIso)) }
+    catch (err) { entry.error = String(err); console.error("[confirm-cron] moved appointment failed:", err) }
+  }
+  const movedTexts = await sendMovedTexts(service, now, textHours, dry).catch((err) => [{ error: String(err) }])
+
   const report: Record<string, unknown>[] = []
   const horizon = now.getTime() + 36 * 60 * MIN
   for (const { lead, bookedAt, calendarConfirmed } of calendar.appointments) {
@@ -123,5 +136,5 @@ export async function POST(req: NextRequest) {
     entry.action = "waiting"
   }
 
-  return NextResponse.json({ ok: true, now: now.toISOString(), textHours, dry, appointments: report, skipped: calendar.skipped, checkin: extras?.[0], followups: extras?.[1], calendarRetries: extras?.[2] })
+  return NextResponse.json({ ok: true, now: now.toISOString(), textHours, dry, moved: movedReport, movedTexts, appointments: report, skipped: calendar.skipped, checkin: extras?.[0], followups: extras?.[1], calendarRetries: extras?.[2] })
 }

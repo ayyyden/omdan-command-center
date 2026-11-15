@@ -7,7 +7,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
 import { TZ, bookingScriptUrl, speakDateTime, speakSlot, speakSlotWindow, speakWindowIso, sayWhen, sayWhenIso, phoneDigits, type RetellCall } from "@/lib/retell"
-import { sendQuoSms } from "@/lib/quo-client"
+import { sendQuoSms, isRealUsPhone } from "@/lib/quo-client"
 import { setEventConfirmed, moveCalendarEvent, deleteCalendarEvent, createAppointmentEvent } from "@/lib/google-calendar"
 
 export type Brand = "omdan" | "desert_green"
@@ -253,6 +253,85 @@ export function confirmationText(lead: ScheduledLead): string {
   return lang === "es"
     ? `${brand.name}: Hola${hi}, le recordamos su cita para el estimado gratis ${today ? "hoy" : "mañana"}, ${when}${lead.address ? `, en ${lead.address}` : ""}.\n\nPor favor responda SI para confirmar, o 2 si necesita otra hora.\n\nGracias, ${brand.name} ${brand.phone}`
     : `${brand.name}: Hello${hi}, this is a reminder of your free estimate appointment ${today ? "today" : "tomorrow"}, ${when}${lead.address ? `, at ${lead.address}` : ""}.\n\nPlease reply YES to confirm, or 2 if you need a different time.\n\nThank you, ${brand.name} ${brand.phone}`
+}
+
+// ─── Moved on the calendar ───────────────────────────────────────────────────
+// David moves the estimate in Google Calendar (or edits its date in the CRM),
+// and the confirm cron sees the new time on its next run. Then:
+//   - the old time's tracking row becomes "rescheduled"; the new time's row is
+//     "confirmed" (David set it with the customer), so no 24-hour reminder
+//   - the booking backend's Leads sheet gets the new date and time
+//   - a note goes on the lead
+//   - the customer gets a text with the new date and arrival window. It goes out
+//     on the next run between 8 AM and 8 PM (sendMovedTexts); a row still
+//     waiting for its text has confirmed_via MOVED and no text_sent_at.
+// Moves the CRM makes itself (Sofia, Lia's check-in) already update the lead's
+// time, so they never show up here and nobody gets two texts.
+
+const MOVED = "moved on the calendar"
+
+export async function handleMovedAppointment(service: SupabaseClient, lead: ScheduledLead, oldIso: string) {
+  const now = new Date()
+  const newIso = new Date(lead.scheduled_at!).toISOString()
+  await service.from("appointment_confirmations").update({ status: "rescheduled" })
+    .eq("meta_lead_id", lead.id).eq("scheduled_at", new Date(oldIso).toISOString())
+  const past = new Date(newIso) <= now
+  await service.from("appointment_confirmations").upsert({
+    meta_lead_id: lead.id, scheduled_at: newIso, brand: leadBrand(lead), status: "confirmed",
+    confirmed_at: now.toISOString(), confirmed_via: MOVED,
+    // Nothing to tell them about a time that's already passed.
+    text_sent_at: past ? now.toISOString() : null, notes: past ? "Moved to a time that already passed; no text" : null,
+  }, { onConflict: "meta_lead_id,scheduled_at" })
+
+  const old = ptParts(oldIso)
+  const next = ptParts(newIso)
+  const sheet = lead.phone
+    ? await updateBookingSheet({ phone: lead.phone, date: old.date, time: old.time, newDate: next.date, newTime: next.time })
+    : { ok: false, found: false }
+  await addLeadNote(service, lead, `Moved on the calendar from ${speakDateTime(oldIso)} to ${speakDateTime(newIso)}${sheet.found ? " (booking sheet updated)" : ""}`)
+  return { sheet: sheet.found ? "updated" : "not on the sheet" }
+}
+
+/** The "your estimate was moved" text. Plain and polite, like confirmationText. */
+export function movedText(lead: ScheduledLead): string {
+  const brand = BRANDS[leadBrand(lead)]
+  const lang = leadLanguage(lead)
+  const when = speakWindowIso(lead.scheduled_at!, lang)
+  const first = firstName(lead.full_name)
+  const hi = !first || /^(lead|new|\[test\]|\+?\d)/i.test(first) ? "" : ` ${first.charAt(0).toUpperCase()}${first.slice(1)}`
+  return lang === "es"
+    ? `${brand.name}: Hola${hi}, su cita para el estimado gratis quedó para el ${when}${lead.address ? `, en ${lead.address}` : ""}.\n\nSi tiene alguna pregunta, llame o escriba al ${brand.phone}. ¡Gracias!`
+    : `${brand.name}: Hello${hi}, your free estimate appointment is now ${when}${lead.address ? `, at ${lead.address}` : ""}.\n\nIf you have any questions, call or text ${brand.phone}. Thank you!`
+}
+
+/** Sends the waiting "moved" texts (8 AM to 8 PM only), once each. */
+export async function sendMovedTexts(service: SupabaseClient, now: Date, textHours: boolean, dry = false) {
+  const { data: rows } = await service.from("appointment_confirmations").select("id, meta_lead_id, scheduled_at")
+    .eq("status", "confirmed").eq("confirmed_via", MOVED).is("text_sent_at", null).gt("scheduled_at", now.toISOString())
+  const out: Record<string, unknown>[] = []
+  for (const row of rows ?? []) {
+    const { data } = await service.from("meta_leads").select(LEAD_COLUMNS).eq("id", row.meta_lead_id).maybeSingle()
+    const lead = data as ScheduledLead | null
+    // The lead has moved again since (that time has its own row), or lost its phone.
+    if (!lead?.phone || !lead.scheduled_at || new Date(lead.scheduled_at).getTime() !== new Date(row.scheduled_at).getTime()) {
+      if (!dry) await service.from("appointment_confirmations").update({ text_sent_at: now.toISOString(), notes: "Moved again before the text went out" }).eq("id", row.id)
+      continue
+    }
+    if (!isRealUsPhone(lead.phone)) {
+      if (!dry) await service.from("appointment_confirmations").update({ text_sent_at: now.toISOString(), notes: "Not a real phone number; no text" }).eq("id", row.id)
+      continue
+    }
+    const entry: Record<string, unknown> = { lead: lead.full_name, at: lead.scheduled_at }
+    out.push(entry)
+    if (!textHours) { entry.action = "moved text waiting for 8 AM"; continue }
+    if (dry) { entry.action = "would send moved text"; continue }
+    const sms = await textCustomer(lead, lead.phone, movedText(lead))
+    await service.from("appointment_confirmations")
+      .update({ text_sent_at: now.toISOString(), notes: sms.ok ? null : `Moved text failed: ${sms.error}`.slice(0, 500) }).eq("id", row.id)
+    if (!sms.ok) await notifyOwner(`Couldn't text ${lead.full_name} (${lead.phone}) their new appointment time: ${sms.error.slice(0, 160)}`)
+    entry.action = sms.ok ? "moved text sent" : `moved text failed: ${sms.error}`
+  }
+  return out
 }
 
 export type CallKind = "first" | "final" | "reschedule_request"

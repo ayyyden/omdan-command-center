@@ -12,10 +12,11 @@
 // appointments linked to the calendar.
 
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { listUpcomingEvents, type CalendarEventSummary } from "@/lib/google-calendar"
+import { formatInTimeZone } from "date-fns-tz"
+import { listUpcomingEvents, getEventStart, type CalendarEventSummary } from "@/lib/google-calendar"
 import { parseAppointment } from "@/lib/lead-from-appointment"
 import { toE164, isRealUsPhone } from "@/lib/quo-client"
-import { phoneDigits } from "@/lib/retell"
+import { phoneDigits, TZ } from "@/lib/retell"
 import { LEAD_COLUMNS, type ScheduledLead } from "@/lib/appointments"
 
 export interface CalendarAppointment {
@@ -28,6 +29,10 @@ export interface CalendarAppointment {
 
 export interface SkippedEvent { title: string; start: string | null; reason: string }
 
+/** An appointment whose time was changed on the calendar (by hand in Google
+ *  Calendar, or by editing the appointment in the CRM). lead has the new time. */
+export interface MovedAppointment { lead: ScheduledLead; oldIso: string }
+
 type Contact = { name: string | null; phone: string | null; address: string | null }
 
 function one<T>(v: T | T[] | null | undefined): T | null {
@@ -38,7 +43,7 @@ export async function calendarAppointments(
   service: SupabaseClient,
   hoursAhead: number,
   { dry = false }: { dry?: boolean } = {},
-): Promise<{ appointments: CalendarAppointment[]; skipped: SkippedEvent[] }> {
+): Promise<{ appointments: CalendarAppointment[]; skipped: SkippedEvent[]; moved: MovedAppointment[] }> {
   const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
   if (!calendarId) throw new Error("Calendar not configured (META_LEADS_MAIN_CALENDAR_ID)")
 
@@ -58,19 +63,22 @@ export async function calendarAppointments(
     return false
   })
   const ids = events.map((e) => e.id).filter(Boolean)
-  if (!dry) await unlinkDeletedEvents(service, ids, hoursAhead)
-  if (!ids.length) return { appointments: [], skipped }
+  const moved: MovedAppointment[] = []
+  if (!dry) await unlinkDeletedEvents(service, calendarId, ids, hoursAhead, moved)
+  if (!ids.length) return { appointments: [], skipped, moved }
 
   const [jobs, appts, metas] = await Promise.all([
     service.from("jobs").select("calendar_event_id").in("calendar_event_id", ids),
-    service.from("lead_appointments").select("calendar_event_id, customer:customers(name, phone, address)").in("calendar_event_id", ids),
+    service.from("lead_appointments").select("id, calendar_event_id, scheduled_date, start_time, end_time, customer:customers(name, phone, address)").in("calendar_event_id", ids),
     service.from("meta_leads").select(LEAD_COLUMNS).in("calendar_event_id", ids),
   ])
   const jobEvents = new Set((jobs.data ?? []).map((j) => j.calendar_event_id))
   const partnerContacts = new Map<string, Contact>()
+  const crmAppointments = new Map<string, CrmAppointment>()
   for (const row of appts.data ?? []) {
     const c = one(row.customer as Contact | Contact[] | null)
     if (row.calendar_event_id && c) partnerContacts.set(row.calendar_event_id, c)
+    if (row.calendar_event_id) crmAppointments.set(row.calendar_event_id, row as CrmAppointment)
   }
   const linked = new Map<string, ScheduledLead>()
   for (const lead of (metas.data ?? []) as ScheduledLead[]) {
@@ -84,6 +92,11 @@ export async function calendarAppointments(
     if (jobEvents.has(ev.id)) { skip("job, not an estimate"); continue }
 
     const startIso = new Date(ev.start).toISOString()
+    // Booked in the CRM: keep its appointment record on the calendar's date and time.
+    const crm = crmAppointments.get(ev.id)
+    if (crm && !dry) await syncCrmAppointment(service, crm, startIso, ev.end)
+
+    const wasLinked = linked.has(ev.id)
     let lead: ScheduledLead | null = linked.get(ev.id) ?? null
     if (!lead) lead = await linkEventToLead(service, calendarId, ev, startIso, partnerContacts.get(ev.id) ?? null, ids, dry)
     if (!lead) { skip("no phone number on the event"); continue }
@@ -93,11 +106,26 @@ export async function calendarAppointments(
     const changes = changesFromEvent(lead, ev, startIso, partnerContacts.get(ev.id) ?? null)
     if (Object.keys(changes).length) {
       if (!dry) await service.from("meta_leads").update(changes).eq("id", lead.id)
+      // Same appointment, new time: the customer gets told (see handleMovedAppointment).
+      if (wasLinked && changes.scheduled_at && lead.scheduled_at) moved.push({ lead: { ...lead, ...changes }, oldIso: lead.scheduled_at })
       lead = { ...lead, ...changes }
     }
     appointments.push({ lead, bookedAt: ev.created ?? lead.created_at, calendarConfirmed: ev.confirmed })
   }
-  return { appointments, skipped }
+  return { appointments, skipped, moved }
+}
+
+type CrmAppointment = { id: string; scheduled_date: string | null; start_time: string | null; end_time: string | null }
+
+/** Puts the calendar's date and time on the CRM appointment (lead card, Calendar page). */
+async function syncCrmAppointment(service: SupabaseClient, appt: CrmAppointment, startIso: string, endIso: string | null) {
+  const start = new Date(startIso)
+  const date = formatInTimeZone(start, TZ, "yyyy-MM-dd")
+  const time = formatInTimeZone(start, TZ, "HH:mm")
+  if (appt.scheduled_date === date && (appt.start_time ?? "").slice(0, 5) === time) return
+  const end = endIso && endIso.includes("T") ? formatInTimeZone(new Date(endIso), TZ, "HH:mm") : null
+  await service.from("lead_appointments")
+    .update({ scheduled_date: date, start_time: time, ...(end ? { end_time: end } : {}) }).eq("id", appt.id)
 }
 
 /** Which company the event says it's with: a "Company:" line, else the
@@ -150,16 +178,30 @@ function changesFromEvent(lead: ScheduledLead, ev: CalendarEventSummary, startIs
   return changes
 }
 
-/** Leads still linked to an event that's no longer on the calendar (deleted, or
- *  moved past the window): unlink them so Sofia stops treating them as booked.
- *  An event moved further out is linked again by phone when it comes in range. */
-async function unlinkDeletedEvents(service: SupabaseClient, eventIds: string[], hoursAhead: number) {
+/** Leads still linked to an event that's no longer in the window. Moved further
+ *  out (still on the calendar): keep the link, take the new time and report it
+ *  as moved. Deleted: unlink so Sofia stops treating them as booked. */
+async function unlinkDeletedEvents(service: SupabaseClient, calendarId: string, eventIds: string[], hoursAhead: number, moved: MovedAppointment[]) {
   const now = new Date()
-  const { data } = await service.from("meta_leads").select("id, calendar_event_id")
+  const { data } = await service.from("meta_leads").select(LEAD_COLUMNS)
     .eq("list", "scheduled").not("calendar_event_id", "is", null)
     .gt("scheduled_at", now.toISOString())
     .lt("scheduled_at", new Date(now.getTime() + hoursAhead * 3600_000).toISOString())
-  const gone = (data ?? []).filter((l) => !eventIds.includes(l.calendar_event_id as string)).map((l) => l.id)
+  const gone: string[] = []
+  for (const lead of ((data ?? []) as ScheduledLead[]).filter((l) => !eventIds.includes(l.calendar_event_id as string))) {
+    let current: Awaited<ReturnType<typeof getEventStart>> = null
+    try { current = await getEventStart(lead.calendar_id || calendarId, lead.calendar_event_id!) }
+    catch (err) { console.error("[calendar-appointments] event lookup failed:", err); continue }  // unsure: leave it alone
+    if (current && new Date(current.start) > now) {
+      const startIso = new Date(current.start).toISOString()
+      await service.from("meta_leads").update({ scheduled_at: startIso }).eq("id", lead.id)
+      const { data: crm } = await service.from("lead_appointments").select("id, scheduled_date, start_time, end_time").eq("calendar_event_id", lead.calendar_event_id!).maybeSingle()
+      if (crm) await syncCrmAppointment(service, crm as CrmAppointment, startIso, current.end)
+      moved.push({ lead: { ...lead, scheduled_at: startIso }, oldIso: lead.scheduled_at! })
+    } else {
+      gone.push(lead.id)
+    }
+  }
   if (gone.length) await service.from("meta_leads").update({ calendar_event_id: null, calendar_id: null }).in("id", gone)
 }
 
