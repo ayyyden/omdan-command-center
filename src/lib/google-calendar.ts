@@ -203,6 +203,31 @@ export async function getEventStart(calendarId: string, eventId: string): Promis
   }
 }
 
+/** One event, in the same shape listUpcomingEvents gives; null when deleted. */
+export async function getEvent(calendarId: string, eventId: string): Promise<CalendarEventSummary | null> {
+  const calendar = getCalendarClient()
+  try {
+    const { data: e } = await calendar.events.get({ calendarId, eventId })
+    if (e.status === "cancelled") return null
+    return {
+      id:          e.id ?? eventId,
+      title:       e.summary ?? "(no title)",
+      start:       e.start?.dateTime ?? e.start?.date ?? null,
+      end:         e.end?.dateTime ?? e.end?.date ?? null,
+      location:    e.location ?? null,
+      description: e.description ?? null,
+      htmlLink:    e.htmlLink ?? null,
+      confirmed:   e.extendedProperties?.private?.omdan_confirmed === "1",
+      created:     e.created ?? null,
+      organizerEmail: e.organizer?.email ?? null,
+    }
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status ?? (err as { code?: number })?.code
+    if (status === 404 || status === 410) return null
+    throw err
+  }
+}
+
 export interface CalendarEventSummary {
   id:          string
   title:       string

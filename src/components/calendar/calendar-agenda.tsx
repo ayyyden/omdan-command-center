@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Loader2, MapPin, ExternalLink, RefreshCw, CalendarDays, CircleCheck, Circle } from "lucide-react"
+import { Loader2, MapPin, ExternalLink, RefreshCw, CalendarDays, CircleCheck, Circle, PauseCircle } from "lucide-react"
+import { ParkAppointmentDialog } from "@/components/calendar/park-appointment-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -62,6 +63,17 @@ export function CalendarAgenda() {
   const [error, setError]     = useState<string | null>(null)
   const [configured, setConfigured] = useState<{ main: boolean; callback: boolean }>({ main: true, callback: true })
   const [daysAhead, setDaysAhead] = useState(30)
+  const [parking, setParking] = useState<{ id: string; title: string; when: string } | null>(null)
+
+  function parked(eventId: string, list: "follow_up" | "on_hold") {
+    const name = parking?.title ?? "Customer"
+    setParking(null)
+    setEvents((all) => all.filter((x) => x.id !== eventId))
+    toast({
+      title: list === "follow_up" ? "Moved to Follow-up" : "Put on hold",
+      description: `${name}: off the calendar and the booking sheet, the time is open again. No text was sent. Find them on Leads → ${list === "follow_up" ? "Follow-up" : "On Hold"}.`,
+    })
+  }
 
   const load = useCallback(async (days: number) => {
     setLoading(true)
@@ -189,13 +201,24 @@ export function CalendarAgenda() {
                     )}
                     {e.phone && <PhoneCopyButton phone={e.phone} className="mt-1.5" />}
                     {e.calendar === "main" && (
-                      <div>
+                      <div className="flex flex-wrap items-center gap-2">
                         <ConfirmToggle
                           confirmed={e.confirmed}
                           disabled={!canConfirm || saving === e.id}
                           readOnly={!canConfirm}
                           onToggle={() => toggleConfirmed(e)}
                         />
+                        {canConfirm && e.start?.includes("T") && (
+                          <button
+                            type="button"
+                            onClick={() => setParking({ id: e.id, title: e.title, when: `${dayLabel(e.start!.slice(0, 10))}, ${timeLabel(e.start, null)}` })}
+                            className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            title="Not ready: take it off the calendar and follow up later (no text to the customer)"
+                          >
+                            <PauseCircle className="w-4 h-4" />
+                            Follow up / Hold
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -216,6 +239,7 @@ export function CalendarAgenda() {
           </div>
         ))}
       </div>
+      <ParkAppointmentDialog event={parking} onClose={() => setParking(null)} onDone={parked} />
     </div>
   )
 }

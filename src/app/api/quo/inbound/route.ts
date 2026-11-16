@@ -63,6 +63,6 @@ export async function POST(req: NextRequest) {
   await textCustomer(lead, lead.phone!, lang === "es"
     ? `${company}: ¡Sin problema! Le llamaremos pronto para buscar otra hora.`
     : `${company}: No problem! We will call you soon to find a new time.`)
-  await notifyOwner(`${lead.full_name} (${company}) replied "${text.trim().slice(0, 120)}" to the confirmation text for ${speakDateTime(lead.scheduled_at!)}. They need a different time. Please call ${lead.phone}.`)
+  await notifyOwner(`${lead.full_name} (${company}) replied "${text.trim().slice(0, 120)}" to the confirmation text for ${speakDateTime(lead.scheduled_at!)}. They need a different time. Please call ${lead.phone}. New time: move it on the Google Calendar. Not sure yet: Scheduler, Follow up / Hold (frees the spot, no text).`)
   return NextResponse.json({ ok: true, action: "owner notified" })
 }

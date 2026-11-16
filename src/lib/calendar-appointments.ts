@@ -209,6 +209,15 @@ async function unlinkDeletedEvents(service: SupabaseClient, calendarId: string, 
  *  same phone (when that lead isn't already tied to another upcoming event), or
  *  create one. Returns null when the event has no phone number to call.
  *  dry: writes nothing (a new lead comes back with id "(new)"). */
+/** The meta lead for one calendar appointment: the one linked to it, else
+ *  linked now by phone (or created). Null when the event has no phone. */
+export async function leadForEvent(service: SupabaseClient, calendarId: string, ev: CalendarEventSummary): Promise<ScheduledLead | null> {
+  const { data } = await service.from("meta_leads").select(LEAD_COLUMNS).eq("calendar_event_id", ev.id).maybeSingle()
+  if (data) return data as ScheduledLead
+  if (!ev.start?.includes("T")) return null
+  return linkEventToLead(service, calendarId, ev, new Date(ev.start).toISOString(), null, [ev.id], false)
+}
+
 async function linkEventToLead(
   service: SupabaseClient,
   calendarId: string,
