@@ -142,7 +142,7 @@ export async function markConfirmed(service: SupabaseClient, lead: ScheduledLead
 
 /** Updates the booking backend's Leads sheet (website / phone bookings live there;
  *  appointments booked another way simply aren't found, which is fine). */
-async function updateBookingSheet(body: { phone: string; date: string; time: string; newDate?: string; newTime?: string; cancel?: boolean }) {
+export async function updateBookingSheet(body: { phone: string; date: string; time: string; newDate?: string; newTime?: string; cancel?: boolean }) {
   const base = bookingScriptUrl()
   const secret = process.env.BOOKING_PHONE_SECRET
   if (!base || !secret) return { ok: false, found: false }

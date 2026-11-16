@@ -35,6 +35,11 @@ export function MetaLeadCard({ lead, onUpdated, onDeleted }: MetaLeadCardProps) 
   const [error, setError] = useState<string | null>(null)
 
   const isArchived = lead.list === "archive"
+  const isParked = lead.list === "on_hold" || lead.list === "follow_up"
+  const followUp = lead.list === "follow_up" && lead.follow_up_at ? new Date(lead.follow_up_at) : null
+  // Due = the follow-up day has come (Pacific date), not just the 9 AM mark.
+  const todayPt = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })
+  const followUpDue = !!followUp && followUp.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }) <= todayPt
 
   async function moveToList(list: "archive" | "call_list") {
     setMovingList(true)
@@ -89,8 +94,16 @@ export function MetaLeadCard({ lead, onUpdated, onDeleted }: MetaLeadCardProps) 
             {source.label}
           </Badge>
           {(isArchived || lead.missed_call_count >= 1) && (
-            <Badge variant="warning" className="mt-1 text-[10px]">
+            <Badge variant="warning" className="mt-1 mr-1 text-[10px]">
               Missed {lead.missed_call_count}x
+            </Badge>
+          )}
+          {lead.list === "on_hold" && (
+            <Badge variant="secondary" className="mt-1 text-[10px]">On hold</Badge>
+          )}
+          {followUp && (
+            <Badge variant={followUpDue ? "destructive" : "secondary"} className="mt-1 text-[10px]">
+              {followUpDue ? "Follow up now" : "Follow up"} · {followUp.toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric" })}
             </Badge>
           )}
         </div>
@@ -139,6 +152,9 @@ export function MetaLeadCard({ lead, onUpdated, onDeleted }: MetaLeadCardProps) 
             <span>{when}</span>
           </div>
         )}
+        {isParked && lead.list_note && (
+          <p className="text-sm text-foreground/80 bg-muted rounded-md px-2 py-1.5 whitespace-pre-wrap">{lead.list_note}</p>
+        )}
       </div>
 
       <Button variant="outline" size="sm" className="w-full" onClick={() => setAddressOpen(true)}>
@@ -155,7 +171,19 @@ export function MetaLeadCard({ lead, onUpdated, onDeleted }: MetaLeadCardProps) 
           Restore to Call List
         </Button>
       ) : (
-        <OutcomeMenu lead={lead} onUpdated={onUpdated} onDeleted={onDeleted} />
+        <>
+          <OutcomeMenu lead={lead} onUpdated={onUpdated} onDeleted={onDeleted} />
+          {isParked && (
+            <Button
+              variant="outline" size="sm" className="w-full gap-1.5"
+              disabled={movingList}
+              onClick={() => moveToList("call_list")}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Back to Call List
+            </Button>
+          )}
+        </>
       )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}

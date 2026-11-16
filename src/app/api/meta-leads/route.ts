@@ -15,20 +15,26 @@ export async function GET(_req: NextRequest) {
   if (session instanceof Response) return session
   const { supabase } = session
 
-  const { data, error } = await supabase
-    .from("meta_leads")
-    .select(SELECT_FIELDS)
-    .order("created_at", { ascending: false })
+  // follow_up_at / list_note come with migration 067; until it's run the page
+  // still loads (On Hold and Follow-up are just empty).
+  const load = (fields: string) => supabase.from("meta_leads").select(fields).order("created_at", { ascending: false })
+  let res = await load(`${SELECT_FIELDS}, follow_up_at, list_note`)
+  if (res.error && /follow_up_at|list_note/.test(res.error.message)) res = await load(SELECT_FIELDS)
+  const { data, error } = res
 
   if (error) return Response.json({ error: error.message }, { status: 500 })
 
-  const leads = data ?? []
+  const leads = (data ?? []) as unknown as Array<{ list: string; follow_up_at?: string | null }>
   const grouped = {
     call_list:          leads.filter((l) => l.list === "call_list"),
     second_call_list:   leads.filter((l) => l.list === "second_call_list"),
     schedule_call_list: leads.filter((l) => l.list === "schedule_call_list"),
     scheduled:          leads.filter((l) => l.list === "scheduled"),
     archive:            leads.filter((l) => l.list === "archive"),
+    // Soonest follow-up first; no date goes last.
+    follow_up:          leads.filter((l) => l.list === "follow_up")
+      .sort((a, b) => (a.follow_up_at ? Date.parse(a.follow_up_at) : Infinity) - (b.follow_up_at ? Date.parse(b.follow_up_at) : Infinity)),
+    on_hold:            leads.filter((l) => l.list === "on_hold"),
   }
 
   return Response.json(grouped)

@@ -3,8 +3,9 @@
 import { useState } from "react"
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-  DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuPortal,
+  DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuPortal, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
+import { ParkLeadDialog } from "@/components/meta-leads/park-lead-dialog"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ScheduleDateTimeDialog } from "@/components/meta-leads/schedule-datetime-dialog"
@@ -24,6 +25,7 @@ export function OutcomeMenu({ lead, onUpdated, onDeleted }: OutcomeMenuProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [smsNotice, setSmsNotice] = useState<string | null>(null)
+  const [park, setPark] = useState<"on_hold" | "follow_up" | null>(null)
 
   async function postOutcome(outcome: MetaLeadOutcome, scheduled_at?: string) {
     setLoading(true)
@@ -148,6 +150,15 @@ export function OutcomeMenu({ lead, onUpdated, onDeleted }: OutcomeMenuProps) {
           >
             Answered &amp; Not Interested
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem disabled={loading} onClick={() => setPark("follow_up")}>
+            {lead.list === "follow_up" ? "Change follow-up date…" : "Move to Follow-up…"}
+          </DropdownMenuItem>
+          {lead.list !== "on_hold" && (
+            <DropdownMenuItem disabled={loading} onClick={() => setPark("on_hold")}>
+              Put on Hold…
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -178,6 +189,8 @@ export function OutcomeMenu({ lead, onUpdated, onDeleted }: OutcomeMenuProps) {
         loading={loading}
         onConfirm={(whenISO) => postOutcome("callback_later", whenISO)}
       />
+
+      <ParkLeadDialog lead={lead} list={park} onOpenChange={(o) => !o && setPark(null)} onUpdated={onUpdated} />
 
       <ConfirmDialog
         open={confirmDelete}

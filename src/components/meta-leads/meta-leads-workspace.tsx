@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import type { MetaLead, MetaLeadsGrouped } from "@/types"
 
 const EMPTY: MetaLeadsGrouped = {
-  call_list: [], second_call_list: [], schedule_call_list: [], scheduled: [], archive: [],
+  call_list: [], second_call_list: [], schedule_call_list: [], scheduled: [], archive: [], follow_up: [], on_hold: [],
 }
 
 type ActiveListKey = "schedule_call_list" | "call_list" | "second_call_list"
@@ -35,7 +35,7 @@ export function MetaLeadsWorkspace() {
         return
       }
       const body = await res.json() as MetaLeadsGrouped
-      setData(body)
+      setData({ ...EMPTY, ...body })
     } catch {
       setError("Network error — please try again")
     } finally {
@@ -58,8 +58,12 @@ export function MetaLeadsWorkspace() {
         schedule_call_list: prev.schedule_call_list.filter((l) => l.id !== updated.id),
         scheduled: prev.scheduled.filter((l) => l.id !== updated.id),
         archive: prev.archive.filter((l) => l.id !== updated.id),
+        follow_up: prev.follow_up.filter((l) => l.id !== updated.id),
+        on_hold: prev.on_hold.filter((l) => l.id !== updated.id),
       }
       next[updated.list].unshift(updated)
+      // Follow-up stays soonest-first.
+      next.follow_up.sort((a, b) => (a.follow_up_at ? Date.parse(a.follow_up_at) : Infinity) - (b.follow_up_at ? Date.parse(b.follow_up_at) : Infinity))
       return next
     })
   }
@@ -71,8 +75,14 @@ export function MetaLeadsWorkspace() {
       schedule_call_list: prev.schedule_call_list.filter((l) => l.id !== id),
       scheduled: prev.scheduled.filter((l) => l.id !== id),
       archive: prev.archive.filter((l) => l.id !== id),
+      follow_up: prev.follow_up.filter((l) => l.id !== id),
+      on_hold: prev.on_hold.filter((l) => l.id !== id),
     }))
   }
+
+  const todayPt = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })
+  const followUpsDue = data.follow_up.filter((l) =>
+    l.follow_up_at && new Date(l.follow_up_at).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }) <= todayPt).length
 
   if (loading) {
     return (
@@ -89,9 +99,14 @@ export function MetaLeadsWorkspace() {
 
   return (
     <Tabs defaultValue="active" className="flex flex-col md:h-full">
-      <TabsList className="shrink-0 w-fit">
+      <TabsList className="shrink-0 w-fit max-w-full overflow-x-auto justify-start">
         <TabsTrigger value="active">Active</TabsTrigger>
         <TabsTrigger value="scheduled">Scheduled ({data.scheduled.length})</TabsTrigger>
+        <TabsTrigger value="follow_up">
+          Follow-up ({data.follow_up.length})
+          {followUpsDue > 0 && <span className="ml-1.5 rounded-full bg-destructive text-destructive-foreground text-[10px] px-1.5">{followUpsDue} due</span>}
+        </TabsTrigger>
+        <TabsTrigger value="on_hold">On Hold ({data.on_hold.length})</TabsTrigger>
         <TabsTrigger value="archive">Archive ({data.archive.length})</TabsTrigger>
       </TabsList>
 
@@ -161,6 +176,28 @@ export function MetaLeadsWorkspace() {
           title="Scheduled"
           leads={data.scheduled}
           emptyLabel="No scheduled appointments yet."
+          onUpdated={handleUpdated}
+          onDeleted={handleDeleted}
+          noMobileCap
+        />
+      </TabsContent>
+
+      <TabsContent value="follow_up" className="flex-1 min-h-0 mt-3">
+        <MetaLeadColumn
+          title="Follow-up — no texts go out, check back on the date"
+          leads={data.follow_up}
+          emptyLabel="No follow-ups. Use Log outcome → Move to Follow-up on any lead."
+          onUpdated={handleUpdated}
+          onDeleted={handleDeleted}
+          noMobileCap
+        />
+      </TabsContent>
+
+      <TabsContent value="on_hold" className="flex-1 min-h-0 mt-3">
+        <MetaLeadColumn
+          title="On Hold — no texts go out"
+          leads={data.on_hold}
+          emptyLabel="Nobody on hold. Use Log outcome → Put on Hold on any lead."
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
           noMobileCap
