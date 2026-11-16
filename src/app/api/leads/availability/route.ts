@@ -29,6 +29,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       inArea: data.inArea ?? null,
       days:   (data.days ?? []).map((d) => ({ date: d.date, times: d.slots.map((s) => s.time), nearby: nearby[d.date] ?? [] })).filter((d) => d.times.length),
+      // Every date with an estimate nearby, open or not (for "Any day & time").
+      nearbyByDate: nearby,
     })
   } catch (err) {
     console.error("[leads/availability] backend failed:", err)

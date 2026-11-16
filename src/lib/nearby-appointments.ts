@@ -7,8 +7,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { CA_ZIP_CENTERS } from "@/lib/ca-zip-centers"
-import { listUpcomingEvents } from "@/lib/google-calendar"
-import { ptParts } from "@/lib/appointments"
+import { listUpcomingEvents, listEventsBetween } from "@/lib/google-calendar"
+import { ptParts, ptInstant } from "@/lib/appointments"
 
 /** Appointments within this many miles (straight line) count as "nearby". */
 export const NEARBY_MILES = 15
@@ -92,4 +92,87 @@ export async function nearbyAppointmentsByDay(
   }
   for (const list of Object.values(byDay)) list.sort((a, b) => a.miles - b.miles || a.time.localeCompare(b.time))
   return byDay
+}
+
+// ─── Can David make it? ──────────────────────────────────────────────────────
+// Before booking a time (especially "Any day & time", which skips the booking
+// system's own rules): the other estimates that day, and whether the new one
+// overlaps one of them or leaves too little time to drive between them.
+// Drive time is a rough guess from straight-line distance between ZIP centres
+// (roads ~1.2x longer, freeway speed, plus ~10 min getting in and out), so it
+// warns, it doesn't block.
+
+/** How long an estimate visit takes (the calendar event length). */
+export const VISIT_MINUTES = 60
+
+export function driveMinutes(miles: number): number {
+  if (miles < 1) return 5
+  return Math.round(10 + miles * 1.2)
+}
+
+export interface DayAppointment {
+  name:   string
+  city:   string | null
+  start:  string        // "HH:mm" Pacific
+  end:    string
+  miles:  number | null // from the new address; null when either ZIP is unknown
+}
+
+export interface DayProblem {
+  kind:    "double" | "tight"
+  with:    string       // the other appointment's name
+  message: string
+}
+
+const hm = (iso: string) => ptParts(iso).time
+const minutesOf = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
+function clock(t: string) {
+  const [h, m] = t.split(":").map(Number)
+  return `${((h + 11) % 12) + 1}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`
+}
+
+export async function checkDay(
+  service: SupabaseClient,
+  date: string,          // yyyy-MM-dd Pacific
+  time: string | null,   // HH:mm Pacific (null: just list the day)
+  zip: string | null,
+): Promise<{ appointments: DayAppointment[]; problems: DayProblem[] }> {
+  const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
+  if (!calendarId) return { appointments: [], problems: [] }
+  const from = ptInstant(date, "00:00"), to = ptInstant(date, "23:59")
+  const events = (await listEventsBetween(calendarId, from.toISOString(), to.toISOString()))
+    .filter((e) => e.id && e.start?.includes("T"))
+  const { data: jobs } = events.length
+    ? await service.from("jobs").select("calendar_event_id").in("calendar_event_id", events.map((e) => e.id))
+    : { data: [] }
+  const jobEvents = new Set((jobs ?? []).map((j) => j.calendar_event_id))
+
+  const appointments: DayAppointment[] = events.filter((e) => !jobEvents.has(e.id)).map((ev) => {
+    const evZip = lastZip(ev.location) ?? lastZip(ev.description)
+    const miles = zip && evZip ? zipMiles(zip, evZip) : null
+    const start = hm(ev.start!)
+    const end = ev.end?.includes("T") ? hm(ev.end) : `${String(Math.floor((minutesOf(start) + VISIT_MINUTES) / 60)).padStart(2, "0")}:${String((minutesOf(start) + VISIT_MINUTES) % 60).padStart(2, "0")}`
+    return { name: nameOf(ev.title), city: ev.location ? cityOf(ev.location) : null, start, end, miles: miles == null ? null : Math.round(miles) }
+  })
+
+  const problems: DayProblem[] = []
+  if (time) {
+    const s = minutesOf(time), e = s + VISIT_MINUTES
+    for (const a of appointments) {
+      const as = minutesOf(a.start), ae = Math.max(minutesOf(a.end), as + 1)
+      const where = a.city ? ` in ${a.city}` : ""
+      if (s < ae && as < e) {
+        problems.push({ kind: "double", with: a.name, message: `Double booking: ${a.name}${where} is ${clock(a.start)}–${clock(a.end)}.` })
+        continue
+      }
+      if (a.miles == null) continue
+      const need = driveMinutes(a.miles)
+      const gap = ae <= s ? s - ae : as - e     // free minutes between the two visits
+      if (gap < need) {
+        const order = ae <= s ? `after ${a.name}${where} (ends ${clock(a.end)})` : `before ${a.name}${where} (starts ${clock(a.start)})`
+        problems.push({ kind: "tight", with: a.name, message: `Too tight ${order}: about ${a.miles} mi, ~${need} min drive, only ${gap} min between them.` })
+      }
+    }
+  }
+  return { appointments, problems }
 }

@@ -203,6 +203,26 @@ export async function getEventStart(calendarId: string, eventId: string): Promis
   }
 }
 
+/** Events between two instants (e.g. one whole day), same shape as listUpcomingEvents. */
+export async function listEventsBetween(calendarId: string, fromIso: string, toIso: string): Promise<CalendarEventSummary[]> {
+  const calendar = getCalendarClient()
+  const { data } = await calendar.events.list({
+    calendarId, timeMin: fromIso, timeMax: toIso, maxResults: 100, singleEvents: true, orderBy: "startTime",
+  })
+  return (data.items ?? []).map((e) => ({
+    id:          e.id ?? "",
+    title:       e.summary ?? "(no title)",
+    start:       e.start?.dateTime ?? e.start?.date ?? null,
+    end:         e.end?.dateTime ?? e.end?.date ?? null,
+    location:    e.location ?? null,
+    description: e.description ?? null,
+    htmlLink:    e.htmlLink ?? null,
+    confirmed:   e.extendedProperties?.private?.omdan_confirmed === "1",
+    created:     e.created ?? null,
+    organizerEmail: e.organizer?.email ?? null,
+  }))
+}
+
 /** One event, in the same shape listUpcomingEvents gives; null when deleted. */
 export async function getEvent(calendarId: string, eventId: string): Promise<CalendarEventSummary | null> {
   const calendar = getCalendarClient()

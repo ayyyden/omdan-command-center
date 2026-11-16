@@ -14,8 +14,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete"
 import { Card, CardContent } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CalendarDays, Loader2, MapPin, Star, UserCircle } from "lucide-react"
+import { AlertTriangle, CalendarDays, Check, Loader2, MapPin, Star, UserCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { DatePicker } from "@/components/ui/date-picker"
+import { arrivalWindow } from "@/lib/arrival-window"
 
 const JOB_TYPES = [
   "Artificial turf", "Pavers", "Concrete", "Gravel / DG / xeriscape", "Full backyard remodel",
@@ -27,6 +29,10 @@ const OTHER = "__other"
 interface PmOption { id: string; name: string; color: string }
 interface Nearby { name: string; city: string | null; time: string; miles: number }
 interface Day { date: string; times: string[]; nearby?: Nearby[] }
+interface DayCheck {
+  appointments: { name: string; city: string | null; start: string; end: string; miles: number | null }[]
+  problems:     { kind: "double" | "tight"; with: string; message: string }[]
+}
 
 function dayLabel(date: string) {
   const d = new Date(`${date}T12:00:00`)
@@ -35,6 +41,24 @@ function dayLabel(date: string) {
 function timeLabel(t: string) {
   const [h, m] = t.split(":").map(Number)
   return `${((h + 11) % 12) + 1}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`
+}
+
+function NearbyBox({ day, nearby }: { day: string; nearby: Nearby[] }) {
+  return (
+    <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-1">
+      <p className="text-sm font-medium flex items-center gap-1.5">
+        <Star className="w-4 h-4 fill-amber-400 text-amber-500" />
+        Already nearby on {dayLabel(day)}
+      </p>
+      {nearby.map((n, i) => (
+        <p key={i} className="text-sm text-muted-foreground flex items-center gap-1.5">
+          <MapPin className="w-3.5 h-3.5 shrink-0" />
+          {timeLabel(n.time)}: {n.name}{n.city ? `, ${n.city}` : ""} ({n.miles <= 1 ? "same area" : `${n.miles} mi away`})
+        </p>
+      ))}
+      <p className="text-xs text-muted-foreground">Pick a time right before or after these to keep David&apos;s driving short.</p>
+    </div>
+  )
 }
 
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
@@ -80,9 +104,18 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
   const [loadingTimes, setLoadingTimes] = useState(false)
   const [timesError, setTimesError] = useState<string | null>(null)
   const [outOfArea, setOutOfArea] = useState(false)
-  const [day, setDay] = useState<string | null>(null)
-  const [time, setTime] = useState<string | null>(null)
+  const [pickedDay, setDay] = useState<string | null>(null)
+  const [pickedTime, setTime] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // "any": book any date and time, not just the booking system's open times.
+  const [mode, setMode] = useState<"open" | "any">("open")
+  const [anyDate, setAnyDate] = useState("")
+  const [anyTime, setAnyTime] = useState("09:00")
+  const [nearbyByDate, setNearbyByDate] = useState<Record<string, Nearby[]>>({})
+  const day = mode === "any" ? (anyDate || null) : pickedDay
+  const time = mode === "any" ? (/^\d{2}:\d{2}$/.test(anyTime) ? anyTime : null) : pickedTime
+  const todayPt = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })
+  const anyInPast = mode === "any" && !!anyDate && anyDate < todayPt
 
   // The ZIP comes from the address when it has one; it can be typed too.
   useEffect(() => {
@@ -101,6 +134,7 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
         if (!r.ok) { setTimesError(data.error ?? "Couldn't load times"); setDays(null); return }
         setOutOfArea(data.inArea === false)
         setDays(data.days)
+        setNearbyByDate(data.nearbyByDate ?? {})
         setDay((d) => (d && data.days.some((x: Day) => x.date === d) ? d : data.days[0]?.date ?? null))
         setTime(null)
       })
@@ -109,11 +143,30 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
     return () => { cancelled = true }
   }, [zip, brand])
 
+  // That day's other estimates + double-booking / drive-time warnings.
+  const [dayCheck, setDayCheck] = useState<DayCheck | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [bookAnyway, setBookAnyway] = useState(false)
+  useEffect(() => {
+    setBookAnyway(false)
+    if (!day || !time) { setDayCheck(null); return }
+    let cancelled = false
+    setChecking(true)
+    const t = setTimeout(() => {
+      fetch(`/api/leads/day-check?date=${day}&time=${time}${zip.length === 5 ? `&zip=${zip}` : ""}`)
+        .then(async (r) => { const d = await r.json(); if (!cancelled) setDayCheck(r.ok ? d : null) })
+        .catch(() => !cancelled && setDayCheck(null))
+        .finally(() => !cancelled && setChecking(false))
+    }, 300)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [day, time, zip])
+  const problems = dayCheck?.problems ?? []
+
   const jobType = jobChoice === OTHER ? jobCustom.trim() : jobChoice
   const dayTimes = useMemo(() => days?.find((d) => d.date === day)?.times ?? [], [days, day])
-  const dayNearby = useMemo(() => days?.find((d) => d.date === day)?.nearby ?? [], [days, day])
+  const dayNearby = useMemo(() => (day ? nearbyByDate[day] ?? days?.find((d) => d.date === day)?.nearby ?? [] : []), [days, day, nearbyByDate])
   const starredDays = days?.filter((d) => d.nearby?.length).length ?? 0
-  const ready = name.trim() && phone.replace(/\D/g, "").length >= 10 && address.trim().length >= 5 && jobType && day && time
+  const ready = name.trim() && phone.replace(/\D/g, "").length >= 10 && address.trim().length >= 5 && jobType && day && time && !anyInPast && (problems.length === 0 || bookAnyway)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -199,10 +252,34 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
             <span className="text-sm font-semibold">Estimate time *</span>
             {loadingTimes && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
           </div>
+          <Toggle value={mode} onChange={setMode} options={[{ value: "open", label: "Open times" }, { value: "any", label: "Any day & time" }]} />
+          {mode === "any" && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Book any day and time, even if the booking system shows it as full or closed. It goes on the Google Calendar like any booking, so the website won't offer that time to anyone else.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <Field label="Date" className="w-full sm:w-56">
+                  <DatePicker value={anyDate} onChange={setAnyDate} />
+                </Field>
+                <Field label="Time" className="w-40">
+                  <Input type="time" step={900} value={anyTime} onChange={(e) => setAnyTime(e.target.value)} />
+                </Field>
+              </div>
+              {anyInPast && <p className="text-sm text-destructive">That date has already passed.</p>}
+              {day && time && !anyInPast && (
+                <p className="text-sm text-muted-foreground">
+                  The customer is told: {dayLabel(day)}, {arrivalWindow(time)}.
+                </p>
+              )}
+              {dayNearby.length > 0 && <NearbyBox day={day!} nearby={dayNearby} />}
+            </div>
+          )}
+          {mode === "open" && <>
           {zip.length !== 5 && <p className="text-sm text-muted-foreground">Enter the address (or ZIP) to see open times.</p>}
           {timesError && <p className="text-sm text-destructive">{timesError}</p>}
           {outOfArea && <p className="text-sm text-amber-600">This ZIP is outside the website service area. You can still book it.</p>}
-          {days && !days.length && <p className="text-sm text-muted-foreground">No open times in the next few weeks.</p>}
+          {days && !days.length && <p className="text-sm text-muted-foreground">No open times in the next few weeks. Use &quot;Any day &amp; time&quot; to book anyway.</p>}
           {days && days.length > 0 && (
             <>
               {starredDays > 0 && (
@@ -226,21 +303,7 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
                   )
                 })}
               </div>
-              {dayNearby.length > 0 && (
-                <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-1">
-                  <p className="text-sm font-medium flex items-center gap-1.5">
-                    <Star className="w-4 h-4 fill-amber-400 text-amber-500" />
-                    Already nearby on {dayLabel(day!)}
-                  </p>
-                  {dayNearby.map((n, i) => (
-                    <p key={i} className="text-sm text-muted-foreground flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 shrink-0" />
-                      {timeLabel(n.time)}: {n.name}{n.city ? `, ${n.city}` : ""} ({n.miles <= 1 ? "same area" : `${n.miles} mi away`})
-                    </p>
-                  ))}
-                  <p className="text-xs text-muted-foreground">Pick a time right before or after these to keep David's driving short.</p>
-                </div>
-              )}
+              {dayNearby.length > 0 && <NearbyBox day={day!} nearby={dayNearby} />}
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                 {dayTimes.map((t) => (
                   <Button key={t} type="button" size="sm" variant={time === t ? "default" : "outline"} onClick={() => setTime(t)}>
@@ -249,6 +312,47 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
                 ))}
               </div>
             </>
+          )}
+          </>}
+
+          {day && time && (checking || dayCheck) && (
+            <div className={cn("rounded-md border p-3 space-y-1.5",
+              problems.length ? "border-destructive/50 bg-destructive/5" : "border-border bg-muted/40")}>
+              {checking && !dayCheck ? (
+                <p className="text-sm text-muted-foreground flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking David&apos;s day…</p>
+              ) : dayCheck && (
+                <>
+                  {problems.map((p, i) => (
+                    <p key={i} className="text-sm font-medium text-destructive flex items-start gap-1.5">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {p.message}
+                    </p>
+                  ))}
+                  {problems.length === 0 && (
+                    <p className="text-sm text-green-700 dark:text-green-400 flex items-center gap-1.5">
+                      <Check className="w-4 h-4" />
+                      {dayCheck.appointments.length ? "No clash, and enough time to drive between estimates." : `Nothing else on ${dayLabel(day)}.`}
+                    </p>
+                  )}
+                  {dayCheck.appointments.length > 0 && (
+                    <div className="pt-1 space-y-0.5">
+                      <p className="text-xs font-medium text-muted-foreground">David&apos;s estimates on {dayLabel(day)}:</p>
+                      {dayCheck.appointments.map((a, i) => (
+                        <p key={i} className="text-xs text-muted-foreground">
+                          {timeLabel(a.start)}–{timeLabel(a.end)} · {a.name}{a.city ? `, ${a.city}` : ""}{a.miles != null ? ` (${a.miles <= 1 ? "same area" : `${a.miles} mi away`})` : ""}
+                        </p>
+                      ))}
+                      {zip.length !== 5 && <p className="text-xs text-muted-foreground">Add the ZIP to check drive times.</p>}
+                    </div>
+                  )}
+                  {problems.length > 0 && (
+                    <label className="flex items-center gap-2 text-sm pt-1">
+                      <input type="checkbox" checked={bookAnyway} onChange={(e) => setBookAnyway(e.target.checked)} />
+                      I know. Book it anyway.
+                    </label>
+                  )}
+                </>
+              )}
+            </div>
           )}
 
           {pms.length > 0 && (
