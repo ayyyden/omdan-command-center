@@ -18,6 +18,7 @@ import { parseAppointment } from "@/lib/lead-from-appointment"
 import { toE164, isRealUsPhone } from "@/lib/quo-client"
 import { phoneDigits, TZ } from "@/lib/retell"
 import { LEAD_COLUMNS, type ScheduledLead } from "@/lib/appointments"
+import { estimateCalendars } from "@/lib/pm-calendars"
 
 export interface CalendarAppointment {
   lead:              ScheduledLead
@@ -47,14 +48,21 @@ export async function calendarAppointments(
   const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
   if (!calendarId) throw new Error("Calendar not configured (META_LEADS_MAIN_CALENDAR_ID)")
 
-  const all = await listUpcomingEvents(calendarId, { daysAhead: hoursAhead / 24, maxResults: 250 })
+  // David's (main) calendar plus each other salesman's own (pm-calendars.ts).
+  const calendars = await estimateCalendars(service).catch(() => [{ calendarId, pm: null }])
+  const calendarOf = new Map<string, string>()
+  const all = (await Promise.all(calendars.map(async (c) => {
+    const evs = await listUpcomingEvents(c.calendarId, { daysAhead: hoursAhead / 24, maxResults: 250 })
+    for (const e of evs) calendarOf.set(e.id, c.calendarId)
+    return evs
+  }))).flat()
   const skipped: SkippedEvent[] = []
   // Meetings someone else invited us to (a Google Ads consultation, a supplier
   // call…) are not customer appointments: never link, text or call them.
   // Ours: the calendar itself, the CRM's service account, and every
   // @omdandevelopment.com address (the real appointments are organised by
   // info@omdandevelopment.com on the omdandevelopment@gmail.com calendar).
-  const own = new Set([calendarId.toLowerCase(), (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "").toLowerCase()].filter(Boolean))
+  const own = new Set([...calendars.map((c) => c.calendarId.toLowerCase()), (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "").toLowerCase()].filter(Boolean))
   const isOurs = (email: string) => own.has(email) || /@omdandevelopment\.com$/.test(email) || /@desertgreenbuilders\.com$/.test(email)
   const events = all.filter((e) => {
     const organizer = e.organizerEmail?.toLowerCase()
@@ -98,12 +106,15 @@ export async function calendarAppointments(
 
     const wasLinked = linked.has(ev.id)
     let lead: ScheduledLead | null = linked.get(ev.id) ?? null
-    if (!lead) lead = await linkEventToLead(service, calendarId, ev, startIso, partnerContacts.get(ev.id) ?? null, ids, dry)
+    const evCalendar = calendarOf.get(ev.id) ?? calendarId
+    if (!lead) lead = await linkEventToLead(service, evCalendar, ev, startIso, partnerContacts.get(ev.id) ?? null, ids, dry)
     if (!lead) { skip("no phone number on the event"); continue }
     if (!isRealUsPhone(lead.phone)) { skip(`"${lead.phone}" is not a real phone number`); continue }
 
     // The calendar is the schedule: its time and details win.
     const changes = changesFromEvent(lead, ev, startIso, partnerContacts.get(ev.id) ?? null)
+    // Given to another salesman (event now on his calendar).
+    if (lead.calendar_id !== evCalendar) changes.calendar_id = evCalendar
     if (Object.keys(changes).length) {
       if (!dry) await service.from("meta_leads").update(changes).eq("id", lead.id)
       // Same appointment, new time: the customer gets told (see handleMovedAppointment).

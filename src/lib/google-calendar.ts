@@ -203,6 +203,56 @@ export async function getEventStart(calendarId: string, eventId: string): Promis
   }
 }
 
+/** A new calendar owned by the service account (e.g. one per salesman). */
+export async function createCalendar(summary: string): Promise<string> {
+  const calendar = getCalendarClient()
+  const { data } = await calendar.calendars.insert({ requestBody: { summary, timeZone: "America/Los_Angeles" } })
+  if (!data.id) throw new Error("Google didn't return a calendar id")
+  return data.id
+}
+
+/** The service account's own calendars (id + name), e.g. the salesmen's. */
+export async function listOwnCalendars(): Promise<{ id: string; summary: string }[]> {
+  const { data } = await getCalendarClient().calendarList.list()
+  return (data.items ?? []).map((c) => ({ id: c.id ?? "", summary: c.summary ?? "" }))
+}
+
+/** Deletes a calendar the service account owns. */
+export async function deleteCalendar(calendarId: string): Promise<void> {
+  await getCalendarClient().calendars.delete({ calendarId })
+}
+
+/** Shares a calendar with a person ("owner" / "writer" / "reader"). */
+export async function shareCalendar(calendarId: string, email: string, role: "owner" | "writer" | "reader") {
+  const calendar = getCalendarClient()
+  await calendar.acl.insert({ calendarId, sendNotifications: true, requestBody: { role, scope: { type: "user", value: email } } })
+}
+
+/** Moves an event to another calendar and returns its id there. Uses Google's
+ *  own move (same event, same id); if Google refuses (e.g. not the organizer),
+ *  copies it over and deletes the original. */
+export async function moveEventToCalendar(fromCalendarId: string, eventId: string, toCalendarId: string): Promise<string> {
+  if (fromCalendarId === toCalendarId) return eventId
+  const calendar = getCalendarClient()
+  try {
+    const { data } = await calendar.events.move({ calendarId: fromCalendarId, eventId, destination: toCalendarId })
+    return data.id ?? eventId
+  } catch (err) {
+    console.warn("[google-calendar] move refused, copying instead:", err instanceof Error ? err.message : err)
+  }
+  const { data: e } = await calendar.events.get({ calendarId: fromCalendarId, eventId })
+  const { data: copy } = await calendar.events.insert({
+    calendarId: toCalendarId,
+    requestBody: {
+      summary: e.summary, description: e.description, location: e.location,
+      start: e.start, end: e.end, colorId: e.colorId, extendedProperties: e.extendedProperties,
+    },
+  })
+  if (!copy.id) throw new Error("Couldn't copy the event")
+  await deleteCalendarEvent(fromCalendarId, eventId)
+  return copy.id
+}
+
 /** Events between two instants (e.g. one whole day), same shape as listUpcomingEvents. */
 export async function listEventsBetween(calendarId: string, fromIso: string, toIso: string): Promise<CalendarEventSummary[]> {
   const calendar = getCalendarClient()

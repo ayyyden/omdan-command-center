@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service"
 import { getEvent, deleteCalendarEvent } from "@/lib/google-calendar"
 import { leadForEvent } from "@/lib/calendar-appointments"
 import { parkLead } from "@/lib/park-lead"
+import { calendarOfEvent } from "@/lib/pm-calendars"
 import { parseAppointment } from "@/lib/lead-from-appointment"
 import type { ScheduledLead } from "@/lib/appointments"
 
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
   const session = await requirePermission("scheduler:edit")
   if (session instanceof Response) return session
 
-  const body = await req.json().catch(() => null) as { event_id?: unknown; list?: unknown; note?: unknown; follow_up_at?: unknown } | null
+  const body = await req.json().catch(() => null) as { event_id?: unknown; list?: unknown; note?: unknown; follow_up_at?: unknown; pm_id?: unknown } | null
   const eventId = typeof body?.event_id === "string" ? body.event_id : ""
   const list = body?.list === "on_hold" || body?.list === "follow_up" ? body.list : null
   if (!eventId || !list) return NextResponse.json({ error: "event_id and list are required" }, { status: 400 })
@@ -24,9 +25,10 @@ export async function POST(req: NextRequest) {
   if (followUpAt && Number.isNaN(followUpAt.getTime())) return NextResponse.json({ error: "Invalid follow-up date" }, { status: 400 })
   const note = typeof body?.note === "string" ? body.note : null
 
-  const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
-  if (!calendarId) return NextResponse.json({ error: "Calendar not configured" }, { status: 500 })
   const service = createServiceClient()
+  // David's (main) calendar, or the salesman's whose calendar it's on.
+  const calendarId = await calendarOfEvent(service, "main", typeof body?.pm_id === "string" ? body.pm_id : null)
+  if (!calendarId) return NextResponse.json({ error: "Calendar not configured" }, { status: 500 })
 
   // Lists need migration 067 — check before anything is deleted.
   const probe = await service.from("meta_leads").select("follow_up_at").limit(1)

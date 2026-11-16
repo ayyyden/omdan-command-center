@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils"
 const TZ = "America/Los_Angeles"
 
 interface Props {
-  event: { id: string; title: string; when: string } | null
+  event: { id: string; title: string; when: string; pm_id?: string | null } | null
   onClose: () => void
   onDone: (eventId: string, list: "follow_up" | "on_hold") => void
 }
@@ -42,7 +42,7 @@ export function ParkAppointmentDialog({ event, onClose, onDone }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          event_id: event.id, list, note,
+          event_id: event.id, pm_id: event.pm_id ?? null, list, note,
           follow_up_at: list === "follow_up" && date ? fromZonedTime(`${date}T09:00:00`, TZ).toISOString() : null,
         }),
       })

@@ -68,6 +68,8 @@ interface EditState {
   end_time: string
   assigned_pm_id: string
   status: string
+  original_pm_id: string
+  text_customer: boolean
 }
 
 export function AppointmentCard({ appointments, pms, customerId, projectSummary }: AppointmentCardProps) {
@@ -88,6 +90,8 @@ export function AppointmentCard({ appointments, pms, customerId, projectSummary 
       end_time:       appt.end_time    ?? "",
       assigned_pm_id: appt.assigned_pm_id ?? "none",
       status:         appt.status,
+      original_pm_id: appt.assigned_pm_id ?? "none",
+      text_customer:  true,
     })
   }
 
@@ -104,12 +108,24 @@ export function AppointmentCard({ appointments, pms, customerId, projectSummary 
           end_time:        editState.end_time        || null,
           assigned_pm_id:  editState.assigned_pm_id === "none" ? null : editState.assigned_pm_id || null,
           status:          editState.status,
+          text_customer:   editState.text_customer,
         }),
       })
+      const d = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const d = await res.json()
         toast({ title: "Error saving", description: d.error, variant: "destructive" })
         return
+      }
+      if (editState.assigned_pm_id !== editState.original_pm_id) {
+        const who = pms.find((p) => p.id === editState.assigned_pm_id)?.name ?? "No PM"
+        toast({
+          title: `Given to ${who}`,
+          description: [
+            d.calendarError ? `Calendar not updated: ${d.calendarError}` : "Moved to their calendar; the old time is open again.",
+            d.text ? `Customer text: ${d.text}` : null,
+          ].filter(Boolean).join(" "),
+          variant: d.calendarError ? "destructive" : undefined,
+        })
       }
       setEditingId(null)
       router.refresh()
@@ -280,6 +296,13 @@ export function AppointmentCard({ appointments, pms, customerId, projectSummary 
                     </Select>
                   </div>
                 </div>
+                {editState.assigned_pm_id !== editState.original_pm_id && editState.assigned_pm_id !== "none" && (
+                  <label className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={editState.text_customer}
+                      onChange={(e) => setEditState((s) => s && ({ ...s, text_customer: e.target.checked }))} />
+                    Text the customer that {(pms.find((p) => p.id === editState.assigned_pm_id)?.name ?? "").split(" ")[0]} is coming
+                  </label>
+                )}
                 <div className="flex gap-2">
                   <Button size="sm" className="h-7 text-xs gap-1" disabled={saving || !editState.scheduled_date} onClick={() => saveEdit(appt.id)}>
                     {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save

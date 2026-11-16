@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requirePermission } from "@/lib/auth-helpers"
 import { listUpcomingEvents } from "@/lib/google-calendar"
+import { createServiceClient } from "@/lib/supabase/service"
+import { loadPms, mainPm } from "@/lib/pm-calendars"
 
 export interface CalendarEventWithSource {
   id:          string
@@ -11,6 +13,9 @@ export interface CalendarEventWithSource {
   description: string | null
   htmlLink:    string | null
   calendar:    "main" | "callback"
+  /** Who goes (estimates only): the salesman whose calendar it's on; the main
+   *  calendar is David's. null when no salesman is set up yet. */
+  pm_id:       string | null
   confirmed:   boolean
   /** Customer phone — from the linked CRM record, else parsed from the description */
   phone:       string | null
@@ -45,14 +50,21 @@ export async function GET(req: NextRequest) {
   const mainId     = process.env.META_LEADS_MAIN_CALENDAR_ID
   const callbackId = process.env.META_LEADS_CALLBACK_CALENDAR_ID
 
-  const [mainEvents, callbackEvents] = await Promise.all([
+  // Estimates: the main calendar (David) and each other salesman's own calendar.
+  const pms = await loadPms(createServiceClient()).catch(() => [])
+  const davidId = mainPm(pms)?.id ?? null
+  const salesmen = pms.filter((p) => !p.main && p.calendarId && p.calendarId !== mainId)
+
+  const [mainEvents, callbackEvents, ...pmEvents] = await Promise.all([
     mainId     ? listUpcomingEvents(mainId,     { daysAhead, maxResults: 100 }).catch(() => []) : Promise.resolve([]),
     callbackId ? listUpcomingEvents(callbackId, { daysAhead, maxResults: 100 }).catch(() => []) : Promise.resolve([]),
+    ...salesmen.map((p) => listUpcomingEvents(p.calendarId!, { daysAhead, maxResults: 100 }).catch(() => [])),
   ])
 
   const raw = [
-    ...mainEvents.map((e) => ({ ...e, calendar: "main" as const })),
-    ...callbackEvents.map((e) => ({ ...e, calendar: "callback" as const })),
+    ...mainEvents.map((e) => ({ ...e, calendar: "main" as const, pm_id: davidId })),
+    ...salesmen.flatMap((p, i) => pmEvents[i].map((e) => ({ ...e, calendar: "main" as const, pm_id: p.id }))),
+    ...callbackEvents.map((e) => ({ ...e, calendar: "callback" as const, pm_id: null })),
   ]
 
   // Match each event back to the CRM record that created it (jobs, lead
@@ -88,6 +100,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     events,
+    pms: pms.map((p) => ({ id: p.id, name: p.name, main: p.main })),
     configured: { main: !!mainId, callback: !!callbackId },
   })
 }

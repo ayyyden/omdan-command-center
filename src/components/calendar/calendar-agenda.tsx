@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react"
 import { Loader2, MapPin, ExternalLink, RefreshCw, CalendarDays, CircleCheck, Circle, PauseCircle } from "lucide-react"
 import { ParkAppointmentDialog } from "@/components/calendar/park-appointment-dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -20,6 +22,7 @@ interface CalendarEvent {
   description: string | null
   htmlLink:    string | null
   calendar:    "main" | "callback"
+  pm_id:       string | null
   phone:       string | null
   confirmed:   boolean
 }
@@ -63,7 +66,37 @@ export function CalendarAgenda() {
   const [error, setError]     = useState<string | null>(null)
   const [configured, setConfigured] = useState<{ main: boolean; callback: boolean }>({ main: true, callback: true })
   const [daysAhead, setDaysAhead] = useState(30)
-  const [parking, setParking] = useState<{ id: string; title: string; when: string } | null>(null)
+  const [parking, setParking] = useState<{ id: string; title: string; when: string; pm_id: string | null } | null>(null)
+  const [pms, setPms] = useState<{ id: string; name: string; main: boolean }[]>([])
+  const [assigning, setAssigning] = useState<{ ev: CalendarEvent; toPm: string; text: boolean } | null>(null)
+  const [assignSaving, setAssignSaving] = useState(false)
+  const firstName = (n: string) => { const f = n.trim().split(/\s+/)[0] ?? ""; return f.charAt(0).toUpperCase() + f.slice(1).toLowerCase() }
+  const pmName = (id: string | null) => (id ? pms.find((p) => p.id === id)?.name : null) ?? "David"
+
+  // "Who goes": the estimate moves to that salesman's calendar, which opens
+  // the old one's time for booking; the customer is texted the new name.
+  async function assign() {
+    if (!assigning) return
+    setAssignSaving(true)
+    try {
+      const res = await fetch("/api/calendar/events/assign", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_id: assigning.ev.id, from_pm_id: assigning.ev.pm_id, to_pm_id: assigning.toPm, text_customer: assigning.text }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? "Couldn't move it")
+      setEvents((all) => all.map((x) => (x.id === assigning.ev.id ? { ...x, id: data.event_id, pm_id: data.pm_id } : x)))
+      toast({
+        title: `Given to ${data.who}`,
+        description: `${assigning.ev.title}: on ${data.who}'s calendar now, the old time is open to book.${data.text ? ` Customer text: ${data.text}.` : ""}`,
+      })
+      setAssigning(null)
+    } catch (err) {
+      toast({ title: "Not moved", description: err instanceof Error ? err.message : "Try again", variant: "destructive" })
+    } finally {
+      setAssignSaving(false)
+    }
+  }
 
   function parked(eventId: string, list: "follow_up" | "on_hold") {
     const name = parking?.title ?? "Customer"
@@ -83,6 +116,7 @@ export function CalendarAgenda() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Failed to load calendar")
       setEvents(data.events ?? [])
+      setPms(data.pms ?? [])
       setConfigured(data.configured ?? { main: true, callback: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load calendar")
@@ -103,7 +137,7 @@ export function CalendarAgenda() {
       const res = await fetch("/api/calendar/events/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event_id: ev.id, calendar: ev.calendar, confirmed: next }),
+        body: JSON.stringify({ event_id: ev.id, calendar: ev.calendar, confirmed: next, pm_id: ev.pm_id }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error ?? "Couldn't update the appointment")
@@ -211,13 +245,23 @@ export function CalendarAgenda() {
                         {canConfirm && e.start?.includes("T") && (
                           <button
                             type="button"
-                            onClick={() => setParking({ id: e.id, title: e.title, when: `${dayLabel(e.start!.slice(0, 10))}, ${timeLabel(e.start, null)}` })}
+                            onClick={() => setParking({ id: e.id, title: e.title, when: `${dayLabel(e.start!.slice(0, 10))}, ${timeLabel(e.start, null)}`, pm_id: e.pm_id })}
                             className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             title="Not ready: take it off the calendar and follow up later (no text to the customer)"
                           >
                             <PauseCircle className="w-4 h-4" />
                             Follow up / Hold
                           </button>
+                        )}
+                        {canConfirm && e.start?.includes("T") && pms.length > 1 && (
+                          <Select value={e.pm_id ?? ""} onValueChange={(v) => { if (v !== e.pm_id) setAssigning({ ev: e, toPm: v, text: true }) }}>
+                            <SelectTrigger className="mt-2.5 h-[34px] w-auto gap-1.5 rounded-full text-sm" title="Who goes to this estimate">
+                              <SelectValue placeholder="Who goes" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {pms.map((p) => <SelectItem key={p.id} value={p.id}>{firstName(p.name)}{p.main ? " (main calendar)" : ""}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
                         )}
                       </div>
                     )}
@@ -240,6 +284,32 @@ export function CalendarAgenda() {
         ))}
       </div>
       <ParkAppointmentDialog event={parking} onClose={() => setParking(null)} onDone={parked} />
+      <Dialog open={!!assigning} onOpenChange={(o) => { if (!o && !assignSaving) setAssigning(null) }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Give to {assigning ? firstName(pmName(assigning.toPm)) : ""}?</DialogTitle>
+          </DialogHeader>
+          {assigning && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                <b className="text-foreground">{assigning.ev.title}</b> · {assigning.ev.start ? `${dayLabel(assigning.ev.start.slice(0, 10))}, ${timeLabel(assigning.ev.start, null)}` : ""}
+              </p>
+              <p className="text-sm">
+                It moves from {firstName(pmName(assigning.ev.pm_id))}&apos;s calendar to {firstName(pmName(assigning.toPm))}&apos;s,
+                so {firstName(pmName(assigning.ev.pm_id))}&apos;s time opens up for booking.
+              </p>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={assigning.text} onChange={(ev) => setAssigning((a) => a && ({ ...a, text: ev.target.checked }))} />
+                Text the customer that {firstName(pmName(assigning.toPm))} is coming
+              </label>
+            </>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setAssigning(null)} disabled={assignSaving}>Cancel</Button>
+            <Button onClick={assign} disabled={assignSaving}>{assignSaving ? "Moving…" : "Give it"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

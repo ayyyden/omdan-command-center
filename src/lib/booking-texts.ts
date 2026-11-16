@@ -14,7 +14,9 @@ export function bookingConfirmationText(opts: {
   visitor?:  string | null   // who comes out; defaults to David
 }): string {
   const b = BRANDS[opts.brand]
-  const who = opts.visitor?.split(" ")[0] || "David"
+  // The salesman going (Add lead's PM), else David. "david celuk" -> "David".
+  const first = opts.visitor?.trim().split(/\s+/)[0] ?? ""
+  const who = first ? first.charAt(0).toUpperCase() + first.slice(1).toLowerCase() : "David"
   const at = opts.address ? (opts.lang === "es" ? ` en ${opts.address}` : ` at ${opts.address}`) : ""
   const name = firstName(opts.fullName)
   return opts.lang === "es"
@@ -24,4 +26,14 @@ export function bookingConfirmationText(opts: {
 
 export function sendBookingConfirmation(to: string, brand: Brand, text: string) {
   return sendQuoSms(to, text, BRANDS[brand].quoFrom)
+}
+
+/** An estimate already booked is given to another salesman: who's coming now. */
+export function salesmanChangedText(opts: { brand: Brand; fullName: string; when: string; who: string; lang?: "en" | "es" }): string {
+  const b = BRANDS[opts.brand]
+  const name = firstName(opts.fullName)
+  const hi = name && !/^(lead|new|\[test\]|\+?\d)/i.test(name) ? ` ${name.charAt(0).toUpperCase()}${name.slice(1)}` : ""
+  return opts.lang === "es"
+    ? `${b.name}: Hola${hi}, su estimado gratis del ${opts.when} será con ${opts.who}. ${opts.who} le avisará cuando vaya en camino. ¿Preguntas? Llame o escriba al ${b.phone}.`
+    : `${b.name}: Hello${hi}, your free estimate on ${opts.when} is with ${opts.who}. ${opts.who} will text you when heading over. Questions? Call or text ${b.phone}.`
 }

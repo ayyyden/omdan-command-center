@@ -127,7 +127,7 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
     if (zip.length !== 5) { setDays(null); return }
     let cancelled = false
     setLoadingTimes(true); setTimesError(null)
-    fetch(`/api/leads/availability?zip=${zip}&brand=${brand}`)
+    fetch(`/api/leads/availability?zip=${zip}&brand=${brand}${pmId !== "none" ? `&pm_id=${pmId}` : ""}`)
       .then(async (r) => {
         const data = await r.json()
         if (cancelled) return
@@ -141,7 +141,7 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
       .catch(() => !cancelled && setTimesError("Couldn't load times"))
       .finally(() => !cancelled && setLoadingTimes(false))
     return () => { cancelled = true }
-  }, [zip, brand])
+  }, [zip, brand, pmId])
 
   // That day's other estimates + double-booking / drive-time warnings.
   const [dayCheck, setDayCheck] = useState<DayCheck | null>(null)
@@ -153,13 +153,13 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
     let cancelled = false
     setChecking(true)
     const t = setTimeout(() => {
-      fetch(`/api/leads/day-check?date=${day}&time=${time}${zip.length === 5 ? `&zip=${zip}` : ""}`)
+      fetch(`/api/leads/day-check?date=${day}&time=${time}${zip.length === 5 ? `&zip=${zip}` : ""}${pmId !== "none" ? `&pm_id=${pmId}` : ""}`)
         .then(async (r) => { const d = await r.json(); if (!cancelled) setDayCheck(r.ok ? d : null) })
         .catch(() => !cancelled && setDayCheck(null))
         .finally(() => !cancelled && setChecking(false))
     }, 300)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [day, time, zip])
+  }, [day, time, zip, pmId])
   const problems = dayCheck?.problems ?? []
 
   const jobType = jobChoice === OTHER ? jobCustom.trim() : jobChoice
@@ -247,9 +247,32 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
 
       <Card>
         <CardContent className="pt-6 space-y-4">
+          {pms.length > 0 && (
+            <Field label="Who goes to the estimate">
+              <Select value={pmId} onValueChange={setPmId}>
+                <SelectTrigger className="w-full sm:w-64">
+                  <UserCircle className="w-4 h-4 mr-2 text-muted-foreground" />
+                  <SelectValue placeholder="David (default)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">David (default)</SelectItem>
+                  {pms.map((pm) => (
+                    <SelectItem key={pm.id} value={pm.id}>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
+                        {pm.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <div className="flex items-center gap-2">
             <CalendarDays className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-semibold">Estimate time *</span>
+            <span className="text-sm font-semibold">
+              Estimate time *{pmId !== "none" && pms.find((p) => p.id === pmId) ? ` (${pms.find((p) => p.id === pmId)!.name.split(" ")[0]}'s open times)` : ""}
+            </span>
             {loadingTimes && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
           </div>
           <Toggle value={mode} onChange={setMode} options={[{ value: "open", label: "Open times" }, { value: "any", label: "Any day & time" }]} />
@@ -355,27 +378,6 @@ export function BookLeadForm({ pms }: { pms: PmOption[] }) {
             </div>
           )}
 
-          {pms.length > 0 && (
-            <Field label="Assign PM">
-              <Select value={pmId} onValueChange={setPmId}>
-                <SelectTrigger className="w-full sm:w-64">
-                  <UserCircle className="w-4 h-4 mr-2 text-muted-foreground" />
-                  <SelectValue placeholder="No PM assigned" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No PM assigned</SelectItem>
-                  {pms.map((pm) => (
-                    <SelectItem key={pm.id} value={pm.id}>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
-                        {pm.name}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
 
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={sendText} onChange={(e) => setSendText(e.target.checked)} />

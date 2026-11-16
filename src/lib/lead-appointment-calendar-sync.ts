@@ -3,17 +3,17 @@
 // "{name} Lead Appointment".
 
 import { createServiceClient } from "@/lib/supabase/service"
-import { createAppointmentEvent, updateCalendarEvent, deleteCalendarEvent } from "@/lib/google-calendar"
+import { createAppointmentEvent, updateCalendarEvent, deleteCalendarEvent, moveEventToCalendar } from "@/lib/google-calendar"
+import { calendarForPm } from "@/lib/pm-calendars"
 import { fromZonedTime } from "date-fns-tz"
 
 export async function syncLeadAppointmentCalendarEvent(appointmentId: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
-  if (!calendarId) return { ok: false, error: "Calendar not configured (META_LEADS_MAIN_CALENDAR_ID)" }
+  if (!process.env.META_LEADS_MAIN_CALENDAR_ID) return { ok: false, error: "Calendar not configured (META_LEADS_MAIN_CALENDAR_ID)" }
 
   const service = createServiceClient()
   const { data: appt, error } = await service
     .from("lead_appointments")
-    .select("id, scheduled_date, start_time, status, calendar_event_id, calendar_id, project_summary, notes, customer:customers(name, address, phone)")
+    .select("id, scheduled_date, start_time, status, calendar_event_id, calendar_id, assigned_pm_id, project_summary, notes, customer:customers(name, address, phone)")
     .eq("id", appointmentId)
     .single()
 
@@ -58,6 +58,17 @@ export async function syncLeadAppointmentCalendarEvent(appointmentId: string): P
   }
 
   try {
+    // Whose calendar: David's (main) or the assigned salesman's (pm-calendars.ts).
+    const calendarId = await calendarForPm(service, appt.assigned_pm_id as string | null)
+    // Given to someone else: the event moves to his calendar (David's time opens up).
+    if (appt.calendar_event_id && appt.calendar_id && appt.calendar_id !== calendarId) {
+      const oldId = appt.calendar_event_id
+      const newId = await moveEventToCalendar(appt.calendar_id, oldId, calendarId)
+      await service.from("lead_appointments").update({ calendar_event_id: newId, calendar_id: calendarId }).eq("id", appointmentId)
+      await service.from("meta_leads").update({ calendar_event_id: newId, calendar_id: calendarId }).eq("calendar_event_id", oldId)
+      appt.calendar_event_id = newId
+      appt.calendar_id = calendarId
+    }
     if (appt.calendar_event_id && appt.calendar_id === calendarId) {
       await updateCalendarEvent(calendarId, appt.calendar_event_id, input)
     } else {

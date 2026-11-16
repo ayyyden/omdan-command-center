@@ -70,8 +70,8 @@ export async function nearbyAppointmentsByDay(
   service: SupabaseClient,
   zip: string,
   daysAhead = 45,
+  calendarId: string | undefined = process.env.META_LEADS_MAIN_CALENDAR_ID,
 ): Promise<Record<string, NearbyAppointment[]>> {
-  const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
   if (!calendarId || !zipCenter(zip)) return {}
 
   const events = await listUpcomingEvents(calendarId, { daysAhead, maxResults: 250 })
@@ -131,48 +131,83 @@ function clock(t: string) {
   return `${((h + 11) % 12) + 1}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`
 }
 
+/** One day's estimates on a calendar, with distance from `zip`. */
+async function dayAppointments(service: SupabaseClient, calendarId: string, fromIso: string, toIso: string, zip: string | null) {
+  const events = (await listEventsBetween(calendarId, fromIso, toIso)).filter((e) => e.id && e.start?.includes("T"))
+  const { data: jobs } = events.length
+    ? await service.from("jobs").select("calendar_event_id").in("calendar_event_id", events.map((e) => e.id))
+    : { data: [] }
+  const jobEvents = new Set((jobs ?? []).map((j) => j.calendar_event_id))
+  return events.filter((e) => !jobEvents.has(e.id)).map((ev) => {
+    const evZip = lastZip(ev.location) ?? lastZip(ev.description)
+    const miles = zip && evZip ? zipMiles(zip, evZip) : null
+    const start = hm(ev.start!)
+    const endMin = ev.end?.includes("T") && ptParts(ev.end).date === ptParts(ev.start!).date ? minutesOf(hm(ev.end)) : minutesOf(start) + VISIT_MINUTES
+    const end = `${String(Math.floor(endMin / 60)).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`
+    return { date: ptParts(ev.start!).date, appt: { name: nameOf(ev.title), city: ev.location ? cityOf(ev.location) : null, start, end, miles: miles == null ? null : Math.round(miles) } as DayAppointment }
+  })
+}
+
+/** Double bookings and too-short drives if a new estimate starts at `time`. */
+export function problemsAt(appointments: DayAppointment[], time: string): DayProblem[] {
+  const problems: DayProblem[] = []
+  const s = minutesOf(time), e = s + VISIT_MINUTES
+  for (const a of appointments) {
+    const as = minutesOf(a.start), ae = Math.max(minutesOf(a.end), as + 1)
+    const where = a.city ? ` in ${a.city}` : ""
+    if (s < ae && as < e) {
+      problems.push({ kind: "double", with: a.name, message: `Double booking: ${a.name}${where} is ${clock(a.start)}–${clock(a.end)}.` })
+      continue
+    }
+    if (a.miles == null) continue
+    const need = driveMinutes(a.miles)
+    const gap = ae <= s ? s - ae : as - e     // free minutes between the two visits
+    if (gap < need) {
+      const order = ae <= s ? `after ${a.name}${where} (ends ${clock(a.end)})` : `before ${a.name}${where} (starts ${clock(a.start)})`
+      problems.push({ kind: "tight", with: a.name, message: `Too tight ${order}: about ${a.miles} mi, ~${need} min drive, only ${gap} min between them.` })
+    }
+  }
+  return problems
+}
+
 export async function checkDay(
   service: SupabaseClient,
   date: string,          // yyyy-MM-dd Pacific
   time: string | null,   // HH:mm Pacific (null: just list the day)
   zip: string | null,
+  calendarId: string | undefined = process.env.META_LEADS_MAIN_CALENDAR_ID,
 ): Promise<{ appointments: DayAppointment[]; problems: DayProblem[] }> {
-  const calendarId = process.env.META_LEADS_MAIN_CALENDAR_ID
   if (!calendarId) return { appointments: [], problems: [] }
-  const from = ptInstant(date, "00:00"), to = ptInstant(date, "23:59")
-  const events = (await listEventsBetween(calendarId, from.toISOString(), to.toISOString()))
-    .filter((e) => e.id && e.start?.includes("T"))
-  const { data: jobs } = events.length
-    ? await service.from("jobs").select("calendar_event_id").in("calendar_event_id", events.map((e) => e.id))
-    : { data: [] }
-  const jobEvents = new Set((jobs ?? []).map((j) => j.calendar_event_id))
+  const appointments = (await dayAppointments(service, calendarId, ptInstant(date, "00:00").toISOString(), ptInstant(date, "23:59").toISOString(), zip)).map((x) => x.appt)
+  return { appointments, problems: time ? problemsAt(appointments, time) : [] }
+}
 
-  const appointments: DayAppointment[] = events.filter((e) => !jobEvents.has(e.id)).map((ev) => {
-    const evZip = lastZip(ev.location) ?? lastZip(ev.description)
-    const miles = zip && evZip ? zipMiles(zip, evZip) : null
-    const start = hm(ev.start!)
-    const end = ev.end?.includes("T") ? hm(ev.end) : `${String(Math.floor((minutesOf(start) + VISIT_MINUTES) / 60)).padStart(2, "0")}:${String((minutesOf(start) + VISIT_MINUTES) % 60).padStart(2, "0")}`
-    return { name: nameOf(ev.title), city: ev.location ? cityOf(ev.location) : null, start, end, miles: miles == null ? null : Math.round(miles) }
-  })
+// ─── Open times for a salesman other than David ──────────────────────────────
+// The website booking system only knows David's schedule (the main calendar).
+// Another salesman works the same days and hours (Sun–Thu, hourly 8 AM–7 PM);
+// a time is open when it doesn't overlap anything on his calendar and leaves
+// enough time to drive to and from his other estimates that day.
 
-  const problems: DayProblem[] = []
-  if (time) {
-    const s = minutesOf(time), e = s + VISIT_MINUTES
-    for (const a of appointments) {
-      const as = minutesOf(a.start), ae = Math.max(minutesOf(a.end), as + 1)
-      const where = a.city ? ` in ${a.city}` : ""
-      if (s < ae && as < e) {
-        problems.push({ kind: "double", with: a.name, message: `Double booking: ${a.name}${where} is ${clock(a.start)}–${clock(a.end)}.` })
-        continue
-      }
-      if (a.miles == null) continue
-      const need = driveMinutes(a.miles)
-      const gap = ae <= s ? s - ae : as - e     // free minutes between the two visits
-      if (gap < need) {
-        const order = ae <= s ? `after ${a.name}${where} (ends ${clock(a.end)})` : `before ${a.name}${where} (starts ${clock(a.start)})`
-        problems.push({ kind: "tight", with: a.name, message: `Too tight ${order}: about ${a.miles} mi, ~${need} min drive, only ${gap} min between them.` })
-      }
-    }
+export const PM_WORK_DAYS = [0, 1, 2, 3, 4]   // Sun..Thu
+export const PM_WORK_TIMES = ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"]
+const NOTICE_MINUTES = 120
+
+export async function pmOpenTimes(service: SupabaseClient, calendarId: string, zip: string | null, daysAhead = 28) {
+  const now = new Date()
+  const today = ptParts(now.toISOString()).date
+  const dates: string[] = []
+  for (let i = 0; i <= daysAhead; i++) {
+    const d = new Date(`${today}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + i)
+    const date = d.toISOString().slice(0, 10)
+    if (PM_WORK_DAYS.includes(d.getUTCDay())) dates.push(date)
   }
-  return { appointments, problems }
+  if (!dates.length) return []
+  // No calendar yet (never given an estimate): his whole schedule is open.
+  const all = !calendarId ? [] : await dayAppointments(service, calendarId, ptInstant(dates[0], "00:00").toISOString(), ptInstant(dates[dates.length - 1], "23:59").toISOString(), zip)
+  const earliest = now.getTime() + NOTICE_MINUTES * 60_000
+  return dates.map((date) => {
+    const appts = all.filter((x) => x.date === date).map((x) => x.appt)
+    const times = PM_WORK_TIMES.filter((t) => ptInstant(date, t).getTime() >= earliest && problemsAt(appts, t).length === 0)
+    return { date, times }
+  }).filter((d) => d.times.length)
 }
